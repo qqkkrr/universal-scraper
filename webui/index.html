@@ -178,7 +178,7 @@ async function testCookie(cid,resid,urlid){
   const box=$('#'+resid);
   if(!cookie){box.innerHTML='<span class="muted">请先粘贴 Cookie</span>';return;}
   box.innerHTML='<span class="muted">测试中...</span>';
-  const d=await api('/api/test-cookie?cookie='+encodeURIComponent(cookie)+'&url='+encodeURIComponent(url));
+  const d=await api('/api/test-cookie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookie,url})});
   box.innerHTML=d.ok?`<span class="ok">${d.message}</span>`:`<span class="err">${d.message}</span>`;
 }
 
