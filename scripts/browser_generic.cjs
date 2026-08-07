@@ -21,7 +21,13 @@ const { parseProxy } = require("./browser_common.cjs");
 let chromium = null;
 try { chromium = require("patchright").chromium; } catch (e) { chromium = require("playwright").chromium; }
 
-const EXE = process.env.PW_EXECUTABLE || "/Users/kairanqin/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell";
+const HOME = process.env.HOME || "/Users/kairanqin";
+const HEADLESS_SHELL = process.env.PW_EXECUTABLE
+  || `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
+const FULL_CHROME = process.env.PW_FULL_CHROME
+  || `${HOME}/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
+// 有头（headless=0，需弹窗让人工验证/登录）必须用完整版 Chromium，headless-shell 不显示窗口！
+const EXE = arg("headless", "1") !== "0" ? HEADLESS_SHELL : FULL_CHROME;
 
 const out = (o) => console.log(JSON.stringify(o));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -232,7 +238,7 @@ async function main() {
         if (successSel) {
           try { await page.waitForSelector(successSel, { timeout: 2000 }); done = true; break; } catch (e) {}
         }
-        if (!hitMarker && !successSel) { done = true; break; }
+        if (!hitMarker) { done = true; break; }  // 已离开验证页 = 验证通过，立即继续（选择器交给解析层）
         await sleep(pollMs);
       }
       if (!done) {
