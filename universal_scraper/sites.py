@@ -32,8 +32,8 @@ HIGH_FREQUENCY_SITES = [
      "desc": "问题/回答/搜索", "difficulty": "中高·需登录"},
     {"name": "微博", "domain": "weibo.com", "module": "weibo", "status": "🔧 浏览器模式·需登录调优",
      "desc": "热搜/用户微博", "difficulty": "高·需登录"},
-    {"name": "GitHub", "domain": "github.com", "module": "github", "status": "🔄 待精配",
-     "desc": "仓库/代码/Issue（REST API）", "difficulty": "低·API 公开"},
+    {"name": "GitHub", "domain": "api.github.com", "module": "github", "status": "✅ 已精配（HTTP/API）",
+     "desc": "仓库搜索 API（api.github.com/search）", "difficulty": "低·API 公开"},
     {"name": "天气", "domain": "wttr.in", "module": "weather", "status": "🔄 待精配",
      "desc": "全球天气（公开 API）", "difficulty": "低·公开 API"},
     {"name": "百度百科", "domain": "baike.baidu.com", "module": "baike", "status": "✅ 已精配",
@@ -313,10 +313,11 @@ def parse_github(html: str, url: str) -> List[Dict[str, Any]]:
 
 
 def match_github(url: str) -> bool:
-    return "github.com" in url and "/search" in url
+    # 精配只服务 REST API（api.github.com/search/*）；HTML 搜索页是 JS 渲染，交给通用/AI 流程
+    return "api.github.com" in url and "/search" in url
 
 
-register("github", match_github, parse_github, desc="GitHub：仓库搜索（公开 API）")
+register("github", match_github, parse_github, desc="GitHub：仓库搜索 API（api.github.com/search，公开）")
 
 
 # ---------- 天气（wttr.in JSON） ----------
