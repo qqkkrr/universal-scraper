@@ -317,6 +317,7 @@ class BrowserFetcher(BaseFetcher):
             "slider": self.source.get("slider"),
             "capture": self.source.get("capture"),
             "login": self.source.get("login"),
+            "verify": self.source.get("verify"),
         }
         max_pages = int(pagination.get("max_pages", 100))
         settle = int(pagination.get("settle_ms", 1500))

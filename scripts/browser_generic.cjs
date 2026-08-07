@@ -210,6 +210,42 @@ async function main() {
       await page.goto(spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
     }
 
+    // 人工验证流程（Level 4：大众点评/美团等整页跳转验证码 —— 弹出浏览器等真人过验证）
+    if (spec.verify && spec.verify.enabled) {
+      const markers = spec.verify.markers || ["verify.", "验证中心", "安全验证", "spiderindefence", "滑动验证"];
+      const successSel = spec.verify.success_selector || null;
+      const maxWait = parseInt(spec.verify.max_wait_ms || "300000", 10);
+      const pollMs = parseInt(spec.verify.poll_ms || "2000", 10);
+      const deadline = Date.now() + maxWait;
+      let done = false;
+      if (successSel) {
+        try { await page.waitForSelector(successSel, { timeout: 3000 }); done = true; } catch (e) {}
+      }
+      if (!done) {
+        out({ type: "verify_required", message: "检测到网站验证码/验证页：请在弹出的浏览器中完成人工验证（滑块/点选/短信），完成后自动继续。最长等待 " + Math.round(maxWait / 1000) + " 秒" });
+      }
+      while (!done && Date.now() < deadline) {
+        const u = page.url() || "";
+        let txt = "";
+        try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 400) : "")); } catch (e) {}
+        const hitMarker = markers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
+        if (successSel) {
+          try { await page.waitForSelector(successSel, { timeout: 2000 }); done = true; break; } catch (e) {}
+        }
+        if (!hitMarker && !successSel) { done = true; break; }
+        await sleep(pollMs);
+      }
+      if (!done) {
+        out({ type: "error", message: "人工验证超时（" + Math.round(maxWait / 1000) + "s），未检测到验证通过" });
+        process.exit(1);
+      }
+      if (storageState) {
+        try { await context.storageState({ path: storageState }); } catch (e) {}
+        out({ type: "verify_ok", storageState });
+      }
+      out({ type: "verify_passed", message: "✅ 验证通过，继续抓取" });
+    }
+
     if (spec.js_pre) await page.evaluate(spec.js_pre);
     if (spec.wait && spec.wait.selector) {
       await page.waitForSelector(spec.wait.selector, { timeout: spec.wait.timeout || 20000 }).catch(() => {});

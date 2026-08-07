@@ -58,7 +58,11 @@ v3 任务包 config.json 结构（字段含义）：
 - 翻页：HTML 用 extract_links，allow 建议写**锚定路径正则**（如 "^/page/\\d+/$"），引擎会按 URL 路径匹配，防止误吃 /tag/xxx/page/1/ 这类同构 URL；JSON 分页用 type=json_paged（records_path/strategy=page_param/page_param/page_size/max_pages/fields）。
 - 选择器要根据网站常见结构推断（.item/.list/table tr 等），宁可宽一点；字段 CSS 可直接写 ".text" 或 ".text::text"，两种都支持。
 - 需要登录的网站（大众点评/小红书/微博/淘宝等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
-- 验证码：anti_bot 加 "captcha":{"strategy":"auto"}（自动识别，失败则人工兜底）。
+- 验证码/整页验证（大众点评/美团等会跳到验证中心）：source.type=browser 并加 "headless": false 与
+  "verify":{"enabled":true,"markers":["verify.meituan.com","验证中心","spiderindefence","安全验证","滑动验证"],
+  "success_selector":"<列表行选择器，如 div[data-shop-id]>","max_wait_ms":300000}；
+  工具会弹出真实浏览器，用户手动过滑块/点选后自动继续并保存会话，之后复用。
+- 图片验证码：anti_bot 加 "captcha":{"strategy":"auto"}（自动识别，失败则人工兜底）。
 - 只输出 JSON 对象本身。"""
 
 
@@ -190,6 +194,7 @@ def _validate_and_fix(cfg: dict) -> dict:
 
 
 _AUTH_HINTS = ("验证码", "滑动验证", "安全验证", "人机验证", "访问过于频繁",
+              "验证中心", "spiderindefence", "verify.meituan.com",
               "请登录", "登录后", "请输入手机号", "微信扫码登录", "app 扫码登录")
 
 
@@ -269,8 +274,8 @@ def _diagnose_failure(urls, result, log) -> str:
         hit = next((k for k in _AUTH_HINTS if k in head), None)
         if hit:
             reasons.append(
-                f"页面出现「{hit}」→ 网站要求登录/验证码。"
-                "解决：重跑时工具会弹出浏览器，你手动登录一次，登录态会自动保存并复用（无需写代码）")
+                f"页面出现「{hit}」→ 网站要求登录/人工验证（滑块/点选）。"
+                "解决：重跑时工具会弹出浏览器，你手动登录/过验证一次，会话会自动保存并复用（无需写代码）")
         if "@font-face" in raw or "woff" in raw.lower():
             reasons.append("页面疑似使用字体反爬（数字/文字被自定义字体混淆，需解码字体映射）")
     if not reasons:
