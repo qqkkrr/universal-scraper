@@ -193,8 +193,55 @@ _AUTH_HINTS = ("验证码", "滑动验证", "安全验证", "人机验证", "访
               "请登录", "登录后", "请输入手机号", "微信扫码登录", "app 扫码登录")
 
 
+def _probe_summary(url: str, max_chars: int = 2500) -> str:
+    """探测入口页结构摘要（8s 短超时 + 磁盘缓存 1 小时，大幅提速重复任务）。"""
+    import os as _os
+    import time as _t
+    import urllib.request
+    now = _t.time()
+    cache_file = ROOT / "outputs" / ".probe_cache.json"
+    try:
+        if cache_file.exists():
+            data = json.loads(cache_file.read_text(encoding="utf-8"))
+            if data.get(url) and now - data[url][1] < 3600:
+                return data[url][0]
+    except Exception:
+        data = {}
+    summary = ""
+    timeout = int(_os.environ.get("US_PROBE_TIMEOUT", "8"))
+    try:
+        from .structure import build_structure_summary
+        summary = build_structure_summary(url) or ""
+    except Exception:
+        summary = ""
+    if not summary:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            raw = urllib.request.urlopen(req, timeout=timeout).read(300000).decode("utf-8", "ignore")
+            from .extractors import html_to_markdown, extract_links_markdown
+            md = html_to_markdown(raw, base_url=url, max_chars=max_chars)
+            links = extract_links_markdown(raw, base_url=url, max_links=30)
+            summary = md
+            if links:
+                summary += "\n\n页面链接：\n" + "\n".join(links)
+        except Exception:
+            summary = ""
+    summary = (summary or "").strip()[:max_chars]
+    if summary:
+        try:
+            data[url] = [summary, now]
+            if len(data) > 200:
+                data = dict(list(data.items())[-100:])
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+    return summary
+
+
 def _diagnose_failure(urls, result, log) -> str:
-    """失败原因诊断（说人话）：404 / 登录验证码 / 字体反爬 / 选择器不匹配。"""
+    """失败原因诊断（说人话、快）：404 / 登录验证码 / 字体反爬 / 选择器不匹配。"""
+    import urllib.request
     reasons = []
     if result.get("errors", 0) > 0:
         reasons.append(f"请求错误 {result['errors']} 次")
@@ -203,57 +250,107 @@ def _diagnose_failure(urls, result, log) -> str:
     for u in (urls or [])[:1]:
         if not str(u).startswith("http"):
             continue
+        st, raw = 0, ""
         try:
-            from .quick import fetch_url
-            r = fetch_url(str(u), browser=False)
-            st = r.get("status")
-            if st == 404:
-                reasons.append("入口网址不存在（HTTP 404，网站可能改版或网址是 AI 猜的）")
-            elif st and st >= 400:
-                reasons.append(f"入口网址被拦截（HTTP {st}，多为反爬拒绝或需要登录）")
-            raw = (r.get("text") or "")
-            head = raw[:3000]
-            hit = next((k for k in _AUTH_HINTS if k in head), None)
-            if hit:
-                reasons.append(
-                    f"页面出现「{hit}」→ 网站要求登录/验证码。"
-                    "解决：重跑时工具会弹出浏览器，你手动登录一次，登录态会自动保存并复用（无需写代码）")
-            if "@font-face" in raw or "woff" in raw.lower() or "font-face" in head:
-                reasons.append("页面疑似使用字体反爬（数字/文字被自定义字体混淆，需解码字体映射）")
+            req = urllib.request.Request(str(u), headers={"User-Agent": "Mozilla/5.0"})
+            try:
+                resp = urllib.request.urlopen(req, timeout=8)
+                st = resp.status or 0
+                raw = resp.read(6000).decode("utf-8", "ignore")
+            except urllib.error.HTTPError as e:
+                st = e.code or 0
         except Exception:
             pass
+        if st == 404:
+            reasons.append("入口网址不存在（HTTP 404，网站可能改版或网址是 AI 猜的）")
+        elif st >= 400:
+            reasons.append(f"入口网址被拦截（HTTP {st}，多为反爬拒绝或需要登录）")
+        head = raw[:3000]
+        hit = next((k for k in _AUTH_HINTS if k in head), None)
+        if hit:
+            reasons.append(
+                f"页面出现「{hit}」→ 网站要求登录/验证码。"
+                "解决：重跑时工具会弹出浏览器，你手动登录一次，登录态会自动保存并复用（无需写代码）")
+        if "@font-face" in raw or "woff" in raw.lower():
+            reasons.append("页面疑似使用字体反爬（数字/文字被自定义字体混淆，需解码字体映射）")
     if not reasons:
         reasons.append("选择器未匹配到内容（可能页面结构变化，或需要浏览器渲染/登录）")
-    return "；".join(dict.fromkeys(reasons))  # 去重保序
+    return "；".join(dict.fromkeys(reasons))
 
 
 def _page_context(url: str, max_chars: int = 2500) -> str:
-    """抓入口页 → 结构摘要/Markdown 摘要（对标 scrape-mcp/cortex-scout：给 LLM 的是省 token 的文本，
-    不是整页 HTML）。失败返回空字符串。"""
+    """抓入口页 → 结构摘要/Markdown 摘要（省 token、带缓存，对标 scrape-mcp/cortex-scout）。"""
+    s = _probe_summary(url, max_chars=max_chars)
+    if s:
+        return f"入口页结构摘要（来自真实抓取）：\n{s}"
+    return ""
+
+
+def _llm_fallback_extract(description: str, cfg: dict, log) -> dict:
+    """CSS/规则解析失败时，用 LLM 直接从页面 Markdown 抽取与任务匹配的条目（ScrapeGraphAI 路线，
+    拓宽能力边界：选择器写不对/页面结构怪也能出数据）。仅当页面有内容且未被拦截时启用。"""
+    import urllib.request
+    import hashlib
+    urls = cfg.get("start_urls") or []
+    if not urls:
+        return {"items": [], "total": 0, "files": {}}
+    url = urls[0]
     try:
-        from .structure import build_structure_summary
-        s = build_structure_summary(url)
-        if s:
-            return s[:max_chars]
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        raw = urllib.request.urlopen(req, timeout=8).read(400000).decode("utf-8", "ignore")
     except Exception:
-        pass
+        return {"items": [], "total": 0, "files": {}}
+    head = raw[:3000]
+    if any(k in head for k in _AUTH_HINTS):
+        log("⛔ 页面被登录/验证码拦截，LLM 兜底跳过（先解决登录）")
+        return {"items": [], "total": 0, "files": {}}
+    from .extractors import html_to_markdown
+    md = html_to_markdown(raw, base_url=url, max_chars=8000)
+    if len(md.strip()) < 80:
+        return {"items": [], "total": 0, "files": {}}
+    log(f"📄 页面有内容（{len(md)} 字符），正在让 LLM 直接抽取...")
+    prompt = (
+        f"任务：{description}\n"
+        f"以下是抓取的页面内容（Markdown）。请提取与任务相关的所有条目，输出 JSON 数组，"
+        f"每个对象用贴合任务的中文字段名（如 标题/链接/价格/作者/时间/正文 等），链接保持原始 URL。"
+        f"如果页面上没有任何与任务相关的条目，输出 []。只输出 JSON 数组。\n\n内容：\n{md}"
+    )
     try:
-        from .quick import fetch_url
-        r = fetch_url(url)
-        if r.get("error"):
-            return ""
-        md = r.get("markdown") or r.get("article") or r.get("text") or ""
-        if not md:
-            return ""
-        if len(md) > max_chars:
-            md = md[:max_chars] + f"\n...(截断，共 {len(md)} 字符)"
-        return f"入口页 Markdown 摘要（来自真实抓取）：\n{md}"
-    except Exception:
-        return ""
+        raw_out = _llm_chat([
+            {"role": "system", "content": "你是数据抽取引擎，只输出合法 JSON 数组。"},
+            {"role": "user", "content": prompt},
+        ])
+        raw_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_out.strip())
+        try:
+            arr = json.loads(raw_out)
+        except json.JSONDecodeError:
+            m = re.search(r"\[.*\]", raw_out, re.S)
+            arr = json.loads(m.group(0)) if m else []
+        if not isinstance(arr, list):
+            arr = []
+    except Exception as e:
+        log(f"❌ LLM 兜底抽取失败: {e}")
+        return {"items": [], "total": 0, "files": {}}
+    items = [it for it in arr if isinstance(it, dict)
+             and any(str(v or "").strip() for v in it.values())]
+    if not items:
+        return {"items": [], "total": 0, "files": {}}
+    for it in items:
+        it.setdefault("_url", url)
+        it.setdefault("_parser", "llm_fallback")
+    name = f"auto_{hashlib.md5(description.encode()).hexdigest()[:10]}"
+    items_dir = ROOT / "outputs" / "items"
+    items_dir.mkdir(parents=True, exist_ok=True)
+    (items_dir / f"{name}.jsonl").write_text(
+        "".join(json.dumps(it, ensure_ascii=False) + "\n" for it in items), encoding="utf-8")
+    fp = ROOT / "outputs" / f"{name}.json"
+    fp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    log(f"✅ LLM 兜底抽取成功：{len(items)} 条")
+    return {"items": items, "total": len(items), "files": {"json": f"outputs/{name}.json"}}
 
 
 def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
-              log_cb=None) -> Dict[str, Any]:
+              log_cb=None, round_timeout: Optional[int] = None) -> Dict[str, Any]:
     """执行一次自动任务。返回 {config, result, log, sample, files}。"""
     if limit is not None:
         limit = int(limit) or None
@@ -311,7 +408,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         # 运行（带超时保护：单轮最多 round_timeout 秒，超时强制终止并停止重试，绝不无限转圈）
         import os as _os
         import threading as _th
-        round_timeout = int(_os.environ.get("US_AUTO_ROUND_TIMEOUT", "240"))
+        if round_timeout is None:
+            round_timeout = int(_os.environ.get("US_AUTO_ROUND_TIMEOUT", "240"))
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
         from .engine_v3 import run_task
         from .log import Logger
@@ -390,10 +488,39 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         if fp.exists():
             files[ext] = str(fp.relative_to(ROOT))
     # 最终总结：说人话，不再让用户以为卡死
+    META = ("_url", "_parser", "_ts", "_id")
     total = (last_result or {}).get("total", 0)
     real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
+
+    # 常规解析未命中但页面有内容 → LLM 直接抽取兜底（扩能力边界）
+    if not (total > 0 and real):
+        log("🧠 常规解析未命中，尝试 LLM 直接抽取（兜底）...")
+        fb = _llm_fallback_extract(description, cfg, log)
+        if fb.get("items"):
+            sample = fb["items"][:5]
+            files = fb["files"]
+            last_result = dict(last_result or {})
+            last_result["total"] = fb["total"]
+            last_result["llm_fallback"] = True
+            total = fb["total"]
+            real = sample
+            log("✅ LLM 兜底成功，任务视为完成")
+
+    # 自动复核（字段完整率/去重/数量，不联网，秒级完成）
+    verify = None
+    try:
+        from .verify import verify_rows
+        verify = verify_rows(sample, cfg, sample_n=0, network=False,
+                             declared=total or len(sample))
+    except Exception:
+        verify = None
+
     if total > 0 and real:
-        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段），导出 {list(files)}"
+        vtxt = ""
+        if verify and verify.get("checks"):
+            bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]
+            vtxt = ("｜复核 ✅ 通过" if not bad else "｜复核 ⚠️ " + "；".join(bad))
+        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段）{vtxt}，导出 {list(files)}"
     else:
         reason = _diagnose_failure(cfg.get("start_urls"), last_result, log)
         summary = f"⚠️ 任务结束：0 条。原因诊断：{reason}"
@@ -406,6 +533,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         "sample": sample,
         "files": files,
         "summary": summary,
+        "verify": verify,
         "done": True,
     }
 

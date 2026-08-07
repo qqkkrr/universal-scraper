@@ -24,7 +24,7 @@ import os
 import sys
 from typing import Any, Dict, List, Optional
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 SERVER_NAME = "universal-scraper"
 
 # --------------------------------------------------------------------------

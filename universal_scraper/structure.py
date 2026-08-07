@@ -18,7 +18,9 @@ from .log import Logger
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
-def _fetch(url: str, timeout: int = 15) -> Optional[Dict[str, Any]]:
+def _fetch(url: str, timeout: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    import os as _os
+    timeout = timeout or int(_os.environ.get("US_PROBE_TIMEOUT", "12"))
     """轻量探测抓取：优先 HTTP，失败/JS 页面时交给调用方决定。"""
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})

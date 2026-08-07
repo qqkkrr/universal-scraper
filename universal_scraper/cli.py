@@ -166,6 +166,11 @@ def main() -> int:
     wp.add_argument("--port", type=int, default=8642, help="端口（默认 8642）")
     wp.add_argument("--host", default="127.0.0.1", help="监听地址（默认本机）")
     wp.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
+    wp.add_argument("--share", action="store_true", help="分享模式：同网络的人可访问（0.0.0.0）")
+
+    vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
+    vp.add_argument("--file", required=True, help="结果 JSON 文件，如 outputs/xxx.json")
+    vp.add_argument("--network", action="store_true", help="联网抽样重抓对比（默认只做本地检查）")
 
     args = ap.parse_args()
 
@@ -299,9 +304,20 @@ def main() -> int:
         from .mcp_server import serve_stdio
         return serve_stdio(once=args.once)
 
+    if args.cmd == "verify":
+        from .verify import verify_file
+        rep = verify_file(args.file, network=args.network)
+        print(f"🧾 复核报告：{rep.get('total', 0)} 条｜{'✅ 全部通过' if rep.get('ok') else '⚠️ 存在问题'}")
+        for c in rep.get("checks", []):
+            mark = "✅" if c.get("pass", True) else "❌"
+            print(f"  {mark} {c['name']}: {c.get('value', '')}")
+            for d in c.get("detail", [])[:5]:
+                print(f"      - {d.get('url','')} reachable={d.get('reachable')} match={d.get('match')}")
+        return 0 if rep.get("ok") else 1
+
     if args.cmd == "webui":
         from .webui import serve
-        return serve(args.port, args.host, auto_open=not args.no_open)
+        return serve(args.port, args.host, auto_open=not args.no_open, share=args.share)
 
     if args.cmd == "crawl":
         from .quick import crawl_url

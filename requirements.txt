@@ -1,0 +1,4 @@
+lxml>=5
+requests>=2.31
+openpyxl>=3.1
+cssselect>=1.2

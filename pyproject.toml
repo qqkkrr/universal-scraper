@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "universal-scraper"
-version = "2.1.0"
+version = "2.2.0"
 description = "配置驱动的万能爬虫引擎：HTTP/浏览器/桥取数，反爬四级方案，断点续跑，增量去重"
 requires-python = ">=3.10"
 dependencies = ["lxml", "requests", "openpyxl", "cssselect"]
