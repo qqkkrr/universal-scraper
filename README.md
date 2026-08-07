@@ -1000,3 +1000,19 @@ AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429
 - **#11 journals 元数据缓存批量写**：25 条一批 flush，不再逐条 open/append。
 
 测试：`run_tests30-38` 共 **138 项全绿**（新增 `run_tests38` 7 项）。
+
+## 第三十七轮：第五轮 review 修复批次（三后端 UA 一致性 / 指纹匹配 / 状态上限）
+
+- **#1 三后端 UA 一致性**：requests 后端不再覆盖调用方/会话 UA（与 urllib、curl_cffi 对齐）；
+  会话 UA 池全部改为 Chrome 系，匹配默认 TLS 指纹 chrome。
+- **#2 TLS 指纹与 UA 匹配**：curl_cffi `impersonate="auto"` 改为 Python 侧随机选合法目标
+  （curl_cffi 并无 "auto" 目标，此前 sites.fetch_html 的 curl_cffi 分支一直在静默回退 urllib——本轮发现并修复），
+  且不传 UA 让 curl_cffi 按目标浏览器生成配套 UA；调用方给了 UA 时按 UA 推导指纹
+  （Firefox→firefox133、Edge→edge101、Safari→safari17_0、其余→chrome 系）。
+- **#3 WebUI job 消息上限**：保留最近 1000 条，/api/job 轮询不再越滚越大。
+- **#4 编码探测采样**：charset_normalizer 只扫前 64KB（大页面 CPU 开销降低）。
+- **#5 probe 缓存加锁**：`_probe_summary` 读写加 `_PROBE_LOCK`，多任务并发不再互相覆盖。
+- **#6 浏览器桥诊断截断提示**：console/pageerror/reqfailed 超 50 条后输出一次 `diag_truncated`。
+- **#7 文档注释修正**：`/api/verify?file=xxx.json -> outputs/xxx.json`（与实现一致）。
+
+测试：`run_tests30-39` 共 **147 项全绿**（新增 `run_tests39` 9 项：UA 一致性/指纹匹配/消息上限/编码采样）。

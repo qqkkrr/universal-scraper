@@ -238,19 +238,28 @@ async function main() {
     // 控制台/页面错误捕获（诊断"页面为什么没加载数据"的关键）
     // 节流：每类最多输出 50 条，防止 JS 重页面刷爆协议流
     const diagBudget = { console: 50, pageerror: 50, reqfailed: 50 };
+    let diagTruncated = false;
+    const noteTruncated = () => {
+      if (!diagTruncated) {
+        diagTruncated = true;
+        out({ type: "diag_truncated", message: "诊断输出超过上限（每类 50 条），已截断" });
+      }
+    };
     page.on("console", (msg) => {
       const t = msg.type();
-      if ((t === "error" || t === "warning") && diagBudget.console-- > 0) {
-        out({ type: "console", level: t, text: String(msg.text()).slice(0, 400) });
+      if (t === "error" || t === "warning") {
+        if (diagBudget.console-- > 0) out({ type: "console", level: t, text: String(msg.text()).slice(0, 400) });
+        else noteTruncated();
       }
     });
     page.on("pageerror", (err) => {
       if (diagBudget.pageerror-- > 0) out({ type: "pageerror", text: String(err).slice(0, 400) });
+      else noteTruncated();
     });
     page.on("requestfailed", (req) => {
       if (diagBudget.reqfailed-- > 0) {
         out({ type: "reqfailed", url: req.url().slice(0, 160), err: String(req.failure() && req.failure().errorText).slice(0, 120) });
-      }
+      } else noteTruncated();
     });
 
     // 网络捕获：拦截 SPA 自己发出的签名 API（不逆向签名）

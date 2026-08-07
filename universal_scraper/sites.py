@@ -131,10 +131,16 @@ def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
                "Accept-Language": "zh-CN,zh-Hans;q=0.9", "Accept-Encoding": "gzip, deflate"}
     if cookie:
         headers["Cookie"] = cookie
-    # 1) curl_cffi：伪装 Chrome TLS/JA3/HTTP2 指纹（反 403），安装 vendor 或 pip 后自动启用
+    # 1) curl_cffi：伪装 TLS/JA3/HTTP2 指纹（反 403）。
+    #    注意：curl_cffi 没有 "auto" 目标（会抛 ImpersonateError），这里 Python 侧随机选合法目标，
+    #    且不传 UA（让 curl_cffi 按目标浏览器生成配套 UA，避免 "Safari UA + Chrome TLS" 错配）。
     try:
+        import random as _random
         import curl_cffi.requests as cffi
-        kw = {"headers": headers, "timeout": timeout, "impersonate": "auto"}
+        _TARGETS = ["chrome", "chrome131", "chrome124", "chrome123", "edge101", "safari17_0", "firefox133"]
+        hdrs2 = dict(headers)
+        hdrs2.pop("User-Agent", None)
+        kw = {"headers": hdrs2, "timeout": timeout, "impersonate": _random.choice(_TARGETS)}
         if proxy:
             kw["proxies"] = {"http": proxy, "https": proxy}
         resp = cffi.get(url, **kw)

@@ -14,7 +14,7 @@ API:
   POST /api/paste/start  {url, mode, browser, depth, max_pages, limit} -> {job}
   GET  /api/job?job=..   -> {status, messages, result, summary, verify}
   GET  /api/jobs         -> 最近任务列表
-  GET  /api/verify?file=.. -> 对 outputs/<file>.json 复核
+  GET  /api/verify?file=xxx.json -> 对 outputs/xxx.json 复核（路径限制在 outputs 内）
 """
 from __future__ import annotations
 
@@ -67,6 +67,9 @@ def _new_job(kind: str, title: str) -> dict:
 def _job_log(job, msg: str):
     with JOBS_LOCK:
         job["messages"].append(msg)
+        # 消息上限：长任务只保留最近 1000 条，防止 /api/job 轮询全量复制越来越慢
+        if len(job["messages"]) > 1000:
+            job["messages"] = job["messages"][-1000:]
 
 
 def _job_done(job, result, summary=None, verify=None):

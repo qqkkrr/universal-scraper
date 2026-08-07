@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -203,6 +204,9 @@ def _validate_and_fix(cfg: dict) -> dict:
     return cfg
 
 
+_PROBE_LOCK = threading.Lock()  # probe 缓存读写锁（多任务并发写同一缓存文件）
+
+
 _AUTH_HINTS = ("验证码", "滑动验证", "安全验证", "人机验证", "访问过于频繁",
               "验证中心", "spiderindefence", "verify.meituan.com",
               "请登录", "登录后", "请输入手机号", "微信扫码登录", "app 扫码登录")
@@ -215,11 +219,13 @@ def _probe_summary(url: str, max_chars: int = 2500) -> str:
     import urllib.request
     now = _t.time()
     cache_file = ROOT / "outputs" / ".probe_cache.json"
+    data = {}
     try:
-        if cache_file.exists():
-            data = json.loads(cache_file.read_text(encoding="utf-8"))
-            if data.get(url) and now - data[url][1] < 3600:
-                return data[url][0]
+        with _PROBE_LOCK:
+            if cache_file.exists():
+                data = json.loads(cache_file.read_text(encoding="utf-8"))
+                if data.get(url) and now - data[url][1] < 3600:
+                    return data[url][0]
     except Exception:
         data = {}
     summary = ""
@@ -246,11 +252,12 @@ def _probe_summary(url: str, max_chars: int = 2500) -> str:
     summary = (summary or "").strip()[:max_chars]
     if summary:
         try:
-            data[url] = [summary, now]
-            if len(data) > 200:
-                data = dict(list(data.items())[-100:])
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-            cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            with _PROBE_LOCK:
+                data[url] = [summary, now]
+                if len(data) > 200:
+                    data = dict(list(data.items())[-100:])
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
     return summary

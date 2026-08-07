@@ -96,7 +96,7 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
     # charset_normalizer 仅作为"额外候选"参与打分（不作为权威，防误判）
     try:
         from charset_normalizer import from_bytes
-        _c = from_bytes(raw).best() if raw else None
+        _c = from_bytes(raw[:65536]).best() if raw else None  # 只采样探测，控制 CPU 开销
         if _c is not None and _c.encoding:
             e, s2 = _score(_c.encoding)
             if s2 is not None and e < best_err:
@@ -625,7 +625,8 @@ class RequestsClient:
         h.update(self.extra_headers)
         if headers:
             h.update(headers)
-        if self.rotate_ua:
+        # 调用方/会话已给 UA 就不随机（三后端一致；登录会话不能被随机 UA 踢掉）
+        if "User-Agent" not in h and self.rotate_ua:
             h["User-Agent"] = random.choice(UA_POOL)
         elif "User-Agent" not in h:
             h["User-Agent"] = DEFAULT_UA
@@ -720,7 +721,18 @@ class CurlCffiClient:
         if not self.rotate_ua and "User-Agent" not in h:
             h["User-Agent"] = DEFAULT_UA
         proxy_use = proxy if proxy is not None else self.proxy
-        imp = random.choice(self.impersonate_pool) if self.impersonate == "auto" else self.impersonate
+        imp = self.impersonate
+        if imp == "auto":
+            # 调用方给了 UA（会话 UA）→ 指纹跟随 UA，避免 "Safari UA + Chrome TLS" 错配
+            _ua = (h.get("User-Agent") or "").lower()
+            if "firefox" in _ua:
+                imp = "firefox133"
+            elif "edg/" in _ua:
+                imp = "edge101"
+            elif "safari" in _ua and "chrome" not in _ua:
+                imp = "safari17_0"
+            else:
+                imp = random.choice(self.impersonate_pool)
         kw = dict(impersonate=imp, timeout=self.timeout, headers=h,
                   allow_redirects=True, verify=True)
         if proxy_use:
