@@ -69,8 +69,17 @@
     <div class="ck"><input id="a_browser" type="checkbox"><span>需要登录/JS 渲染的网站：勾选后优先用浏览器（会弹出窗口，登录一次自动保存复用）</span></div>
     <label>代理（可选）— 大众点评/美团列表页需要住宅代理（风控 isoapi 对普通 IP 403），有代理填这里：<code>http://user:pass@host:port</code></label>
     <input id="a_proxy" placeholder="例如 http://user:pass@127.0.0.1:7890">
-    <label>登录 Cookie（可选）— 在已登录的网站按 F12 → Network → 复制 Cookie 整串，工具会跳过验证/登录直接抓（Cookie 直抓）</label>
-    <input id="a_cookie" placeholder="粘贴 Cookie（形如 dper=...; ua=...）">
+    <label>登录 Cookie（可选）— 填了工具会跳过验证/登录直接抓（Cookie 直抓）</label>
+    <input id="a_cookie" placeholder="粘贴 Cookie 整串（形如 dper=...; ua=...）">
+    <details style="margin-top:6px;font-size:12px;color:var(--muted)"><summary>❓ 如何在 Mac 上获取 Cookie（点开看步骤）</summary>
+      <div style="padding:8px 4px;line-height:1.7">
+      <b>Chrome：</b>① 用 Chrome 登录目标网站 → ② 按 <code>⌥Option + ⌘Command + I</code>（或菜单：显示→开发者→开发者工具）→
+      ③ 点顶部「Network/网络」→ ④ 按 <code>⌘R</code> 刷新页面 → ⑤ 左侧点任意一个请求 → ⑥ 右侧「Headers/标头」里往下找
+      「Request Headers/请求标头」→ ⑦ 找到 <code>Cookie:</code> 那一行 → ⑧ <b>只复制 Cookie: 后面的整串值</b>（很长，全选复制）→ ⑨ 粘贴到这里。<br>
+      <b>Safari：</b>① 菜单 Safari→设置(⌘,)→高级→勾选「显示网页开发者功能」→ ② 登录网站后菜单栏「开发」→「显示网页检查器」(⌥⌘I) →
+      ③ 点「网络」→ <code>⌘R</code> 刷新 → ④ 点任意请求 → 右侧「请求」标签找 Cookie → 复制整串值。<br>
+      <b>注意：</b>必须<b>已登录</b>后复制才有效；只复制值，不要复制 "Cookie:" 这几个字；如果某个请求没有 Cookie，换一个有 Cookie 的请求。
+      </div></details>
     <button class="primary" onclick="startAuto()" id="a_btn">🚀 开始</button>
   </div>
   <div id="a_progress" style="display:none"></div>
@@ -97,8 +106,16 @@
     </div>
     <div class="ck"><input id="p_browser" type="checkbox"><span>浏览器渲染（JS 页面 / 需要登录时勾选）</span></div>
     <label>代理（可选）</label><input id="p_proxy" placeholder="http://user:pass@host:port">
-    <label>登录 Cookie（可选）— 在已登录大众点评的浏览器按 F12 → Network → 复制请求头里的 Cookie 整串粘贴到这里，可绕过验证/登录弹窗直接抓</label>
-    <input id="p_cookie" placeholder="粘贴 Cookie（形如 _lxsdk_cuid=...; dper=...）">
+    <label>登录 Cookie（可选）— 填了可绕过验证/登录直接抓（Cookie 直抓）</label>
+    <input id="p_cookie" placeholder="粘贴 Cookie 整串（形如 dper=...; ua=...）">
+    <details style="margin-top:6px;font-size:12px;color:var(--muted)"><summary>❓ 如何在 Mac 上获取 Cookie（点开看步骤）</summary>
+      <div style="padding:8px 4px;line-height:1.7">
+      <b>Chrome：</b>① 登录网站 → ② 按 <code>⌥⌘I</code> → ③ 「Network」→ <code>⌘R</code> 刷新 → ④ 点任意请求 →
+      ⑤ 「Headers」→ 找 <code>Cookie:</code> 行 → ⑥ 复制 <code>Cookie:</code> 后面的整串值。<br>
+      <b>Safari：</b>① 设置(⌘,)→高级→勾选「显示网页开发者功能」→ ② 「开发」→「显示网页检查器」→
+      ③ 「网络」→ <code>⌘R</code> → ④ 点请求 → 复制 Cookie 整串。<br>
+      <b>大众点评专用提示：</b>搜索页直接粘贴 Cookie 即可秒抓列表（已自动识别 SSR 解析）。Cookie 过期（几天~几周）后重新复制一次。
+      </div></details>
     <button class="primary" onclick="startPaste()" id="p_btn">🚀 开始</button>
   </div>
   <div id="p_progress" style="display:none"></div>
