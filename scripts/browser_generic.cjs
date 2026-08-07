@@ -389,6 +389,13 @@ async function main() {
       if (!done) {
         try { await page.bringToFront(); } catch (e) {}
         out({ type: "verify_required", message: "检测到网站验证码/登录要求：请在弹出的浏览器窗口（标题通常为 Google Chrome for Testing）中完成 ①滑块/点选验证 ②扫码或账号登录，完成后自动继续。最长等待 " + Math.round(gateMaxWait / 1000) + " 秒" });
+        // 诊断：输出当前 URL 与页面文本，便于定位"已登录但识别不了"的情况
+        try {
+          const _g = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 300) : ""));
+          out({ type: "gate_info", url: page.url(), text_len: _g.length, text: _g.replace(/\s+/g, " ").slice(0, 300) });
+        } catch (e) {
+          out({ type: "gate_info", url: page.url(), text_len: 0, text: "(evaluate失败: " + String(e).slice(0,80) + ")" });
+        }
       }
       while (!done && Date.now() < deadline) {
         if (stopRequested()) {
