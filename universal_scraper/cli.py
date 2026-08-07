@@ -168,6 +168,15 @@ def main() -> int:
     wp.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
     wp.add_argument("--share", action="store_true", help="分享模式：同网络的人可访问（0.0.0.0）")
 
+    dp_p = sub.add_parser("dianping", help="🌶️ 大众点评专用：Cookie 直抓搜索页列表（绕开验证码/csec）")
+    dp_p.add_argument("--keyword", required=True, help="关键词，如 美食 / 烤肉")
+    dp_p.add_argument("--city", type=int, default=2, help="城市 ID（默认 2=北京，上海=1）")
+    dp_p.add_argument("--cookie", default="", help="已登录大众点评的浏览器 Cookie 整串")
+    dp_p.add_argument("--cookie-file", default="", help="或从文件读取 Cookie")
+    dp_p.add_argument("--limit", type=int, default=10, help="抓前 N 家（默认 10）")
+    dp_p.add_argument("--proxy", default="", help="可选：住宅代理 http://user:pass@host:port")
+    dp_p.add_argument("--out", default="", help="导出文件名前缀")
+
     ip_p = sub.add_parser("ip", help="🌐 查看当前出口 IP 与运营商（换网络后确认）")
 
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
@@ -305,6 +314,22 @@ def main() -> int:
     if args.cmd == "mcp":
         from .mcp_server import serve_stdio
         return serve_stdio(once=args.once)
+
+    if args.cmd == "dianping":
+        from .dianping import run
+        cookie = args.cookie
+        if args.cookie_file:
+            cookie = Path(args.cookie_file).read_text(encoding="utf-8").strip()
+        r = run(args.keyword, city=args.city, cookie=cookie, limit=args.limit,
+                proxy=args.proxy or None, out_name=args.out or None)
+        if r.get("error"):
+            print(f"❌ {r['error']}")
+            return 1
+        print(f"✅ 大众点评「{args.keyword}」前 {r['total']} 家已抓取：")
+        for row in r["rows"]:
+            print(f"  {row['shopName']} | 人均¥{row['avgPrice']} | {row['reviewCount']}条点评 | {row['address']} | {row['shopId']}")
+        print(f"   导出: {list(r['files'].values())}")
+        return 0
 
     if args.cmd == "ip":
         from .net import detect_ip

@@ -25,6 +25,22 @@ universal-scraper/
 └── examples/legacy/        # 旧脚本版（已废弃，仅参考）
 ```
 
+## 🌶️ 大众点评专用命令（已攻克）
+
+**方案**：Cookie 直抓 SSR（来自 dianping_spider 验证 + 本机实测）——用「真实登录 Cookie + 住宅/移动 IP」
+直接 GET 搜索页 HTML，解析 `.shop-list`，**绕开 csec / 验证码 / 登录弹窗**。
+
+```bash
+python3 -m universal_scraper.cli dianping --keyword 美食 --city 2 --cookie "<浏览器Cookie整串>" --limit 10
+# 或从文件读 Cookie
+python3 -m universal_scraper.cli dianping --keyword 烤肉 --city 2 --cookie-file /tmp/cookie.txt --limit 10
+```
+
+- Cookie 获取：登录大众点评的浏览器按 F12 → Network → 复制请求头 Cookie 整串
+- IP：家庭宽带/手机热点（被风控的 IP 会 302 验证中心，换网络即可）
+- 导出：`outputs/dianping_<关键词>_<城市>.json/csv/xlsx`
+- Cookie 会过期（几天~几周），失效后重新复制一次即可
+
 ## 🆕 v2.2 更新（一句话任务 × 极简 WebUI）
 
 - **实时反馈**：WebUI 改为后台任务 + 轮询，每一步（探测/生成配置/第 N 轮/结果）即时显示，不再"看起来卡死"；结束必有「✅/⚠️ 任务结束」横幅 + 人话原因。

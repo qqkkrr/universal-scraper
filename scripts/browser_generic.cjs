@@ -356,6 +356,12 @@ async function main() {
     }
     await sleep(settle);
 
+    // 真人浏览捕获模式：保持窗口打开，让用户手动操作（验证/登录/滚动），期间持续捕获接口
+    if (spec.hold_ms) {
+      out({ type: "hold", ms: parseInt(spec.hold_ms, 10), message: "⏳ 请在弹出的浏览器中手动完成验证/登录并浏览商家列表（可滚动/点击/搜索），工具会自动捕获数据接口。等待 " + Math.round(parseInt(spec.hold_ms,10)/1000) + " 秒" });
+      await sleep(parseInt(spec.hold_ms, 10));
+    }
+
     // 自动滚动触发懒加载（小红书评论需要滚动才加载）
     if (scrollCount > 0) {
       out({ type: "scroll", count: scrollCount });
