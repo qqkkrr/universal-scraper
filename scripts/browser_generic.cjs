@@ -586,6 +586,8 @@ async function main() {
       if (pg.type !== "none" && !changed) break;
     }
     out({ type: "done", pages: pagesDone });
+    // done 已发出：8s 内必须退出（即使 browser.close 挂住，也不让 Python 等 EOF 卡死）
+    setTimeout(() => { try { process.exit(0); } catch (e) {} }, 8000).unref();
   } catch (e) {
     out({ type: "error", message: String((e && e.message) || e) });
     process.exit(1);
@@ -594,6 +596,4 @@ async function main() {
   }
 }
 
-// 兜底：即使 browser.close() 挂住，也必须在限时内退出（否则 Python 侧一直等 EOF 卡死）
-setTimeout(() => { try { process.exit(0); } catch (e) {} }, 12000).unref();
 main();
