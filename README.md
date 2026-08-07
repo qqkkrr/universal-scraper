@@ -1080,3 +1080,13 @@ sitemap 环、多任务轮询、防抖、workers 上限）。回归中修复了 
 
 **最终状态**：21 个测试套件全绿（run_tests30-48）、挑战 100/100 + challenges2 100/100、
 `us doctor` 17/19（缺 ddddocr/cv2 为可选）、编译/Node 桥全过、git 工作区干净、无 TODO/FIXME/危险模式。
+
+## 审查循环二次终止记录（要求：连续 5 轮零问题）
+
+在 3 轮零问题基础上提高门槛至 **连续 5 轮零问题**，最终清零轮：**第 32/33/34/35/36 轮**。
+本轮循环中继续抓到并修复：
+- Review31 P2：GitHub 精配名不副实（匹配 HTML 搜索页却 JSON 解析）→ 改为 api.github.com/search 真实 REST API，状态表描述同步修正。
+
+**最终状态**：22 个测试套件全绿（run_tests30-49，200 项）、挑战 100/100 + challenges2 100/100、
+`us doctor` 17/19（缺 ddddocr/cv2 为可选）、编译/Node 桥全过、WebUI 认证流/启动/MCP 协议实测通过、
+git 工作区干净、无 .bak/TODO/FIXME/危险模式/库路径 stdout 污染。
