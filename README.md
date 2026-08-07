@@ -1068,3 +1068,15 @@ sitemap 环、多任务轮询、防抖、workers 上限）。回归中修复了 
 - **#4 停止按钮按任务**：`stopJob(jobId)` 停当前任务，不再误停别的任务。
 
 测试：`run_tests30-43` 共 **174 项全绿**（新增 `run_tests43` 6 项：单次 exec、并发 base 隔离、前端兜底）。
+
+## 审查循环终止记录（linus-torvalds-skill × 11 轮）
+
+按“review → 修 → review”循环直到连续 3 轮零问题。最终连续清零轮：**第 27/28/29 轮**。
+循环中后期又抓到并修复的真实问题：
+- Review14 P1：`_notify`/`human_solve` 打 stdout → 污染 MCP stdio JSON-RPC（改 stderr）
+- Review18 P2：百度百科精配接口返回 `{"errno":2}` 时产生空壳成功行 + 空导出（parse 校验 + run_site 空行防线）
+- Review23 P1：webui.py 丢失 `import os` 导致 WebUI 启动即崩（修复 + 启动冒烟回归测试）
+- 仓库卫生：.bak 残留、challenges/learnspider 结果文件移出版本库并 gitignore
+
+**最终状态**：21 个测试套件全绿（run_tests30-48）、挑战 100/100 + challenges2 100/100、
+`us doctor` 17/19（缺 ddddocr/cv2 为可选）、编译/Node 桥全过、git 工作区干净、无 TODO/FIXME/危险模式。
