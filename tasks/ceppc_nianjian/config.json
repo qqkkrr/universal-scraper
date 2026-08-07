@@ -1,0 +1,70 @@
+{
+  "name": "ceppc_nianjian",
+  "vars": {},
+  "start_urls": [
+    "http://www.ceppc.org.cn/dlnj/njdt/"
+  ],
+  "queue": {
+    "max_depth": 2,
+    "max_requests": 60,
+    "max_concurrency": 3
+  },
+  "source": {
+    "type": "http"
+  },
+  "rules": [
+    {
+      "match": "contains",
+      "pattern": "/dlnj/njdt/",
+      "parser": "list"
+    }
+  ],
+  "parsers": {
+    "list": {
+      "type": "html",
+      "row_css": ".news-list ul li",
+      "fields": {
+        "title": {
+          "css": ".p1 a::text"
+        },
+        "url": {
+          "css": ".p1 a",
+          "attr": "href"
+        },
+        "summary": {
+          "css": ".p2::text"
+        },
+        "publish_time": {
+          "css": ".p3::text"
+        }
+      },
+      "extract_links": {
+        "allow": "^/dlnj/njdt/index_\\d+\\.html$",
+        "same_domain": true
+      }
+    }
+  },
+  "pipelines": [
+    {
+      "type": "filter",
+      "field": "title",
+      "op": "non_empty"
+    },
+    {
+      "type": "dedup",
+      "key": "url"
+    }
+  ],
+  "storage": {
+    "type": "jsonl",
+    "name": "ceppc_nianjian"
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "ceppc_nianjian"
+  },
+  "anti_bot": {
+    "min_interval": 0.5,
+    "max_retries": 2
+  }
+}
