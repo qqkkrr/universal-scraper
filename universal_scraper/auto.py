@@ -59,9 +59,12 @@ v3 任务包 config.json 结构（字段含义）：
 - 选择器要根据网站常见结构推断（.item/.list/table tr 等），宁可宽一点；字段 CSS 可直接写 ".text" 或 ".text::text"，两种都支持。
 - 需要登录的网站（大众点评/小红书/微博/淘宝等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
 - 验证码/整页验证（大众点评/美团等会跳到验证中心）：source.type=browser 并加 "headless": false 与
-  "verify":{"enabled":true,"markers":["verify.meituan.com","验证中心","spiderindefence","安全验证","滑动验证"],
-  "success_selector":"<列表行选择器，如 div[data-shop-id]>","max_wait_ms":300000}；
+  "verify":{"enabled":true,"markers":["verify.meituan.com","验证中心","spiderindefence","安全验证","滑动验证","访问过于频繁"],
+  "success_selector":"<列表行选择器，如 div[data-shop-id]>","max_wait_ms":600000}；
   工具会弹出真实浏览器，用户手动过滑块/点选后自动继续并保存会话，之后复用。
+- 大众点评/美团这类：过完滑块**还会强制登录**（扫码/账号）。所以 verify 和 login 两个都要配：
+  "verify":{...上面...} + "login":{"enabled":true,"url":"https://www.dianping.com/","wait_selector":"#J-userinfo a, .user-info a, a[href*='/member/'], .nav-user"}；
+  用户在弹窗里：先过滑块，再扫码/账号登录；工具自动继续并保存会话。
 - 图片验证码：anti_bot 加 "captcha":{"strategy":"auto"}（自动识别，失败则人工兜底）。
 - 只输出 JSON 对象本身。"""
 
@@ -422,6 +425,9 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         import threading as _th
         if round_timeout is None:
             round_timeout = int(_os.environ.get("US_AUTO_ROUND_TIMEOUT", "240"))
+        _src0 = cfg.get("source", {}) or {}
+        if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
+            round_timeout = max(round_timeout, 600)  # 人工验证要等人，放宽到 10 分钟
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
         from .engine_v3 import run_task
         from .log import Logger
