@@ -397,6 +397,8 @@ async function main() {
           out({ type: "gate_info", url: page.url(), text_len: 0, text: "(evaluate失败: " + String(e).slice(0,80) + ")" });
         }
       }
+      let diagSent = 0;
+      const gateStartTs = Date.now();
       while (!done && Date.now() < deadline) {
         if (stopRequested()) {
           out({ type: "stopped", message: "收到停止信号（.stop）" });
@@ -432,12 +434,21 @@ async function main() {
           try { await page.waitForSelector(gateSuccessSel, { timeout: 2000 });
                 if (await hasReqCookie(context)) { done = true; break; } } catch (e) {}
         }
-        // 通过条件：已离开验证页，且 ①出现商家特征（人均/条评价/点评）或 ②页面文本足够长（真实内容页）
-        // 修复：商家列表页顶部常含"扫码登录"字样，不能仅凭登录字样卡住
+        // 通过条件：不在"登录/验证"专用 URL 上，且 ①出现商家特征（人均/条评价/点评）或 ②页面文本足够长（真实内容页）
+        // 修复：marker 仅用于提示，不再阻塞放行——正常页面文本里也可能带"安全验证/滑动验证"字样，
+        //       否则已登录的真实内容页会被误判成验证页永久卡住（Boss直聘实测踩坑）
         // 修复2：需要 require_cookie 的站点（京东），即使页面看起来"通过"也必须出现登录 cookie，防假登录
         const txtLen = txt.length;
         const hasShop = txt.includes("人均") || txt.includes("条评价") || txt.includes("点评");
-        if (!hitMarker && (hasShop || txtLen > 2000) && await hasReqCookie(context)) { done = true; break; }
+        const inLoginUrl = u.includes("/login") || u.includes("passport.") || u.includes("verify.") || u.includes("account.meituan");
+        if (!inLoginUrl && (hasShop || txtLen > 800) && await hasReqCookie(context)) { done = true; break; }
+        // 每 8s 输出一次循环内诊断（定位"已登录但识别不了"）
+        if (diagSent < 3 && Date.now() - gateStartTs > 6000 + diagSent * 8000) {
+          diagSent++;
+          const hitWhich = gateMarkers.filter(m => u.includes(m) || txt.includes(String(m).toLowerCase())).slice(0, 5);
+          out({ type: "gate_info", url: u, text_len: txtLen,
+                hitMarker: hitWhich.join("|"), hitLogin, inLoginUrl });
+        }
         await sleep(pollMs);
       }
       if (!done) {

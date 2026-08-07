@@ -124,6 +124,45 @@ class Pipeline(BasePipeline):
                         **{k: (v if v is not None else "") for k, v in item.items()})
                 except Exception:
                     item[step["field"]] = step.get("default", "")
+            elif t == "parse_date":
+                # 把日期文本（2026-08-06 / 今天 / 昨天 / N天前 / N小时前 / N分钟前）转 Unix 秒（北京时间）
+                import datetime as _dt
+                field = step.get("field", "date")
+                out_f = step.get("out", "timestamp")
+                v = str(item.get(field) or "").strip()
+                ts = 0
+                now = step.get("now")
+                try:
+                    if not now:
+                        import time as _t
+                        now = _t.time()
+                    base = _dt.datetime.fromtimestamp(float(now), tz=_dt.timezone(_dt.timedelta(hours=8)))
+                    vv = v
+                    if vv in ("今天", "今日"):
+                        d = base.replace(hour=0, minute=0, second=0, microsecond=0)
+                    elif vv in ("昨天", "昨日"):
+                        d = (base - _dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                    elif "天前" in vv:
+                        n = int(re.sub(r"\D", "", vv) or 0)
+                        d = (base - _dt.timedelta(days=n)).replace(hour=0, minute=0, second=0, microsecond=0)
+                    elif "小时前" in vv:
+                        n = int(re.sub(r"\D", "", vv) or 0)
+                        d = base - _dt.timedelta(hours=n)
+                    elif "分钟前" in vv:
+                        n = int(re.sub(r"\D", "", vv) or 0)
+                        d = base - _dt.timedelta(minutes=n)
+                    else:
+                        m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", vv)
+                        if m:
+                            d = _dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                                             tzinfo=_dt.timezone(_dt.timedelta(hours=8)))
+                        else:
+                            d = None
+                    if d is not None:
+                        ts = int(d.timestamp())
+                except Exception:
+                    ts = 0
+                item[out_f] = ts
             elif t == "split":
                 sep = step.get("sep", ",")
                 item[step["field"]] = [x.strip() for x in str(item.get(step["field"]) or "").split(sep) if x.strip()]

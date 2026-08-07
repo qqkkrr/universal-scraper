@@ -433,6 +433,8 @@ class BrowserFetcher(BaseFetcher):
                     self._notify(f"✅ 会话已保存: {obj.get('storageState', '')}")
                 elif t == "verify_passed":
                     self._notify(f"✅ {msg}")
+                elif t == "gate_info":
+                    self._notify(f"🔎 门卫诊断: url={obj.get('url','')} text_len={obj.get('text_len')} text={str(obj.get('text',''))[:180]}")
                 elif t == "page":
                     f = obj.get("file")
                     if f and Path(f).exists():
