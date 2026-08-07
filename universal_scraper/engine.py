@@ -194,13 +194,21 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
     return rows
 
 
-def fetch_sitemap_urls(http, url: str, max_urls: int = 500) -> List[str]:
-    """抓 sitemap.xml（或 robots.txt 里指出的 sitemap），返回 <loc> URL 列表。"""
+def fetch_sitemap_urls(http, url: str, max_urls: int = 500,
+                     _visited: Optional[set] = None, _depth: int = 0) -> List[str]:
+    """抓 sitemap.xml（或 robots.txt 里指出的 sitemap），返回 <loc> URL 列表。
+    带 visited 环检测 + 深度上限，防循环 sitemap index 导致 RecursionError。"""
+    if _depth > 5:
+        return []
+    visited = set() if _visited is None else _visited
+    if url in visited:
+        return []
+    visited.add(url)
     urls: List[str] = []
     if url.rstrip("/").endswith("robots.txt"):
         res = http.get(url)
         for m in regex_extract_all(res.get("text", ""), r"Sitemap:\s*(\S+)", 1):
-            urls.extend(fetch_sitemap_urls(http, m, max_urls))
+            urls.extend(fetch_sitemap_urls(http, m, max_urls, visited, _depth + 1))
         return urls[:max_urls]
     res = http.get(url)
     html = res.get("text", "")
@@ -208,7 +216,7 @@ def fetch_sitemap_urls(http, url: str, max_urls: int = 500) -> List[str]:
     for m in regex_extract_all(html, r"<loc>\s*([^<]+?)\s*</loc>", 1):
         u = m.strip()
         if u.endswith(".xml") or "sitemap" in u.lower():
-            urls.extend(fetch_sitemap_urls(http, u, max_urls))
+            urls.extend(fetch_sitemap_urls(http, u, max_urls, visited, _depth + 1))
         else:
             urls.append(u)
         if len(urls) >= max_urls:
@@ -237,7 +245,7 @@ def download_files(rows, dl_cfg, anti, out_dir: Path, logger: Optional[Logger] =
         if not url:
             return 0
         try:
-            resp = http.get(url)
+            resp = http.get(url, max_size=size_limit)
             if not resp.get("ok"):
                 return 0
             body = resp.get("body", b"")

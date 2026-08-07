@@ -97,7 +97,8 @@ class HttpFetcher(BaseFetcher):
             headers.setdefault("Cookie", ck)
         try:
             res = self.client.request(url, method=req.method, data=req.body,
-                                      headers=headers, allow_html_404=True, proxy=sess.proxy)
+                                      headers=headers, allow_html_404=True, proxy=sess.proxy,
+                                      max_size=int(self.config.get("max_size", 20 * 1024 * 1024)))
         except Exception:
             # 客户端抛异常（网络层/自定义客户端）：会话+代理标记失败后继续抛出
             self.sessions.report(sess, ok=False, blocked=True)

@@ -1041,3 +1041,18 @@ AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429
 
 测试：`run_tests30-41` 共 **159 项全绿**（新增 `run_tests41` 6 项：桥非法正则集成、裸 RegExp 扫描、
 空 HTML、字段并集）。
+
+## 第四十轮：第八轮 review 修复批次（流式限读 / 多任务状态机 / 递归安全）
+
+- **#1/#4 max_size 流式限读（事后截断→读满即停）**：三后端（urllib gzip 流式解压限读、
+  curl_cffi `stream=True`+`iter_content`、requests `iter_content`）在**读取阶段**就按 max_size 截断，
+  超大响应不再先占满内存；JSON 解析一律从 raw 字节（stream 模式 resp.json() 不可用，已踩坑修复）。
+  接线：v3/v2 fetcher 传 max_size，v2 download_files 传 size_limit。
+- **#2 WebUI 多任务独立轮询**：`currentJob/timer` 全局单例 → `Map<jobId, interval>`，
+  先开 A 任务再开 B 任务，A 的进度不再被顶掉；stopJob 只停当前任务。
+- **#3 sitemap 环检测**：`fetch_sitemap_urls` 加 visited + 深度上限（5），循环 sitemap index 不再 RecursionError。
+- **#5 confirmAuto 防抖**：确认按钮重复点击只提交一次。
+- **#6 journal --workers 上限 32**：CLI 不再能 1000 线程爆炸。
+
+测试：`run_tests30-42` 共 **168 项全绿**（新增 `run_tests42` 9 项：三后端限读/流式 JSON/gzip 限读、
+sitemap 环、多任务轮询、防抖、workers 上限）。回归中修复了 stream 模式下 JSON 变 0 条的自伤 bug。

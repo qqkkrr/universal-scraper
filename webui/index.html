@@ -214,12 +214,17 @@ async function testCookie(cid,resid,urlid){
   box.innerHTML=d.ok?`<span class="ok">${d.message}</span>`:`<span class="err">${d.message}</span>`;
 }
 
-let currentJob=null, timer=null;
+let currentJob=null;
+const timers=new Map();  // jobId -> interval：多任务各自独立轮询，不再互相顶掉
 async function pollJob(jobId, box){
   const d=await api('/api/job?job='+jobId);
-  if(d.error){ box.innerHTML=`<pre class="err">${esc(d.error)}</pre>`; clearInterval(timer); return; }
+  if(d.error){ box.innerHTML=`<pre class="err">${esc(d.error)}</pre>`; clearJobTimer(jobId); return; }
   renderProgress(box, d);
-  if(d.status!=='running'){ clearInterval(timer); renderResult(box, d); loadRecent(); }
+  if(d.status!=='running'){ clearJobTimer(jobId); renderResult(box, d); loadRecent(); }
+}
+function clearJobTimer(jobId){
+  const t=timers.get(jobId);
+  if(t){ clearInterval(t); timers.delete(jobId); }
 }
 function renderProgress(box,d){
   let html='<div class="card"><h4>⏳ 执行中 <span class="spin"></span> <button class="primary" style="margin:0;background:#dc2626;background-image:none;padding:4px 10px;font-size:12px" onclick="stopJob()">⏹ 停止任务</button></h4>'
@@ -254,11 +259,13 @@ function startJob(path,payload,btn,box){
     .then(d=>{
       if(d.error){ box.innerHTML=`<pre class="err">${esc(d.error)}</pre>`; box.style.display='block'; btn.disabled=false; btn.textContent='🚀 开始'; return; }
       currentJob=d.job;
-      timer=setInterval(()=>pollJob(d.job,box),1000);
+      clearJobTimer(d.job);
+      timers.set(d.job, setInterval(()=>pollJob(d.job,box),1000));
     });
 }
 let lastPlan=null;
 async function planAuto(){
+  if(lastPlan && lastPlan._submitted){ lastPlan._submitted=false; }
   const desc=$('#a_desc').value.trim(); if(!desc){alert('请先描述任务');return;}
   const btn=$('#a_btn'); btn.disabled=true; btn.textContent='🤖 AI 正在生成计划...';
   const payload={description:desc,
@@ -284,7 +291,8 @@ async function planAuto(){
   box.innerHTML=html;
 }
 async function confirmAuto(){
-  if(!lastPlan) return;
+  if(!lastPlan || lastPlan._submitted) return;
+  lastPlan._submitted=true;
   const d=lastPlan;
   const payload={description:d.description,
     config:d.config, name:d.name, task_dir:d.task_dir,

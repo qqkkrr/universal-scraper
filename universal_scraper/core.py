@@ -354,6 +354,7 @@ class HttpClient:
         use_cache: bool = False,
         allow_html_404: bool = False,
         proxy: Optional[str] = None,
+        max_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         """返回 {'ok':bool, 'status':int, 'body':bytes, 'json':dict|None, 'text':str, 'headers':dict}。
         proxy 传入时本请求走该代理（覆盖实例级 proxy，None 表示用实例配置）。"""
@@ -391,13 +392,14 @@ class HttpClient:
         socket.setdefaulttimeout(self.timeout)  # 兜底：TLS 握手也受超时约束
         try:
             result = self._request_once(url, body_bytes, method, headers, use_cache,
-                                        allow_html_404=allow_html_404, proxy=proxy)
+                                        allow_html_404=allow_html_404, proxy=proxy,
+                                        max_size=max_size)
         finally:
             socket.setdefaulttimeout(_old_dt)
         return result
 
     def _request_once(self, url, body_bytes, method, headers, use_cache,
-                      allow_html_404=False, proxy=None):
+                      allow_html_404=False, proxy=None, max_size=None):
         last_err = ""
         last_headers: Dict[str, str] = {}
         last_status = 0
@@ -411,18 +413,27 @@ class HttpClient:
             try:
                 opener = self._opener_for(proxy)
                 with opener.open(req, timeout=self.timeout) as resp:
-                    raw = resp.read()
-                    enc = resp.headers.get("Content-Encoding", "")
-                    if enc.lower() == "gzip":
+                    enc = resp.headers.get("Content-Encoding", "").lower()
+                    limit = (max_size + 1) if max_size else None
+                    if enc == "gzip":
+                        # 流式解压限读：gzip 炸弹也能被 max_size 截住
                         try:
-                            raw = gzip.decompress(raw)
+                            gz = gzip.GzipFile(fileobj=resp)
+                            raw = gz.read(limit) if limit else resp.read()
                         except Exception:
-                            pass
-                    elif enc.lower() == "deflate":
+                            raw = resp.read(limit) if limit else resp.read()
+                    elif enc == "deflate":
+                        raw = resp.read()
                         try:
                             raw = zlib.decompress(raw)
                         except Exception:
                             pass
+                        if limit:
+                            raw = raw[:limit]
+                    else:
+                        raw = resp.read(limit) if limit else resp.read()
+                    if max_size and len(raw) > max_size:
+                        raw = raw[:max_size]
                     status = getattr(resp, "status", 200)
                     ctype = resp.headers.get("Content-Type", "")
                     parsed: Any = None
@@ -443,7 +454,9 @@ class HttpClient:
                     }
                     break
             except urllib.error.HTTPError as e:
-                raw = e.read()
+                raw = e.read((max_size + 1) if max_size else None) if max_size else e.read()
+                if max_size and len(raw) > max_size:
+                    raw = raw[:max_size]
                 status = e.code
                 # WAF/反爬常返回 404 的"假页面"，allow_html_404 表示接受这种 HTML 响应
                 if allow_html_404 and status == 404:
@@ -619,7 +632,8 @@ class RequestsClient:
 
     def request(self, url: str, method: str = "GET", params=None, data=None,
                 json_data=None, headers=None, use_cache: bool = False,
-                allow_html_404: bool = False, proxy: Optional[str] = None) -> Dict[str, Any]:
+                allow_html_404: bool = False, proxy: Optional[str] = None,
+                max_size: Optional[int] = None) -> Dict[str, Any]:
         h = {"Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
              "Accept-Encoding": "gzip, deflate"}
         h.update(self.extra_headers)
@@ -639,7 +653,17 @@ class RequestsClient:
                 if proxy:
                     kw["proxies"] = {"http": proxy, "https": proxy}
                 resp = self.session.request(method.upper(), url, **kw)
-                raw = resp.content
+                if max_size:
+                    chunks = []
+                    total = 0
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        chunks.append(chunk)
+                        total += len(chunk)
+                        if total > max_size:
+                            break
+                    raw = b"".join(chunks)[:max_size]
+                else:
+                    raw = resp.content
                 if resp.status_code in (429, 403, 500, 502, 503, 504):
                     wait = self.backoff_base ** attempt + random.uniform(0, 1)
                     log(f"  请求失败 {resp.status_code}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
@@ -649,12 +673,13 @@ class RequestsClient:
                 ctype = resp.headers.get("Content-Type", "")
                 if "json" in ctype or raw[:1] in (b"{", b"["):
                     try:
-                        parsed = resp.json()
+                        parsed = json.loads(raw.decode("utf-8", "ignore"))
                     except Exception:
                         parsed = None
+                _text = smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()}) if max_size else (
+                    resp.text if resp.text else _decode_body(raw, {k.lower(): v for k, v in resp.headers.items()}))
                 return {"ok": True, "status": resp.status_code, "body": raw,
-                        "text": resp.text if resp.text else _decode_body(raw, {k.lower(): v for k, v in resp.headers.items()}),
-                        "json": parsed, "url": resp.url,
+                        "text": _text, "json": parsed, "url": resp.url,
                         "headers": {k.lower(): v for k, v in resp.headers.items()},
                         "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None)}
             except Exception as e:
@@ -712,7 +737,8 @@ class CurlCffiClient:
 
     def request(self, url: str, method: str = "GET", params=None, data=None,
                 json_data=None, headers=None, use_cache: bool = False,
-                allow_html_404: bool = False, proxy: Optional[str] = None) -> Dict[str, Any]:
+                allow_html_404: bool = False, proxy: Optional[str] = None,
+                max_size: Optional[int] = None) -> Dict[str, Any]:
         import curl_cffi.requests as cffi
         h = {"Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"}
         h.update(self.extra_headers)
@@ -735,6 +761,8 @@ class CurlCffiClient:
                 imp = random.choice(self.impersonate_pool)
         kw = dict(impersonate=imp, timeout=self.timeout, headers=h,
                   allow_redirects=True, verify=True)
+        if max_size:
+            kw["stream"] = True  # iter_content 需要流式模式
         if proxy_use:
             kw["proxies"] = {"http": proxy_use, "https": proxy_use}
         if self.cookies:
@@ -745,20 +773,34 @@ class CurlCffiClient:
             try:
                 resp = cffi.request(method.upper(), url, params=params,
                                     data=data, json=json_data, **kw)
-                raw = resp.content
+                if max_size:
+                    # 流式限读：读满 max_size+1 即停，避免超大响应占满内存
+                    chunks = []
+                    total = 0
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        chunks.append(chunk)
+                        total += len(chunk)
+                        if total > max_size:
+                            break
+                    raw = b"".join(chunks)[:max_size]
+                else:
+                    raw = resp.content
                 if resp.status_code in (429, 403, 500, 502, 503, 504):
                     wait = self.backoff_base ** attempt + random.uniform(0, 1)
                     log(f"  curl_cffi 请求失败 {resp.status_code}，{wait:.1f}s 后重试", "WARN")
                     time.sleep(wait)
                     continue
                 parsed = None
+                # 一律从 raw 解析 JSON：stream 模式下 resp.json() 读不到已消费的流
                 if "json" in resp.headers.get("Content-Type", "") or raw[:1] in (b"{", b"["):
                     try:
-                        parsed = resp.json()
+                        parsed = json.loads(raw.decode("utf-8", "ignore"))
                     except Exception:
                         parsed = None
+                _text = smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()}) if max_size else (
+                    resp.text if resp.text else _decode_body(raw, {k.lower(): v for k, v in resp.headers.items()}))
                 return {"ok": True, "status": resp.status_code, "body": raw,
-                        "text": resp.text if resp.text else _decode_body(raw, {k.lower(): v for k, v in resp.headers.items()}),
+                        "text": _text,
                         "json": parsed,
                         "url": str(resp.url), "headers": {k.lower(): v for k, v in resp.headers.items()},
                         "raw_headers": resp.headers}

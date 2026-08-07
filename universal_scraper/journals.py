@@ -405,6 +405,7 @@ def main() -> int:
     ap.add_argument("--no-meta", action="store_true", help="跳过摘要/关键词拉取（更快）")
     ap.add_argument("--min-interval", type=float, default=MIN_INTERVAL, help="请求间隔秒")
     args = ap.parse_args()
+    args.workers = max(1, min(args.workers, 32))  # 防 1000 线程爆炸
     summary = run(args.site, since_year=args.since, out_dir=args.out,
                   workers=args.workers, with_meta=not args.no_meta,
                   min_interval=args.min_interval)

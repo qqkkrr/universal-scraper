@@ -114,7 +114,8 @@ class HttpFetcher(BaseFetcher):
         ck = jar_cookie_header(sess.jar, url)
         if ck:
             hdrs.setdefault("Cookie", ck)
-        kw = dict(params=query or None, headers=hdrs, proxy=sess.proxy)
+        kw = dict(params=query or None, headers=hdrs, proxy=sess.proxy,
+                  max_size=int(s.get("max_size", 20 * 1024 * 1024)))
         try:
             if method.upper() == "POST":
                 res = self.http.post(url, data=s.get("body"), json_data=s.get("json_body"), **kw)
