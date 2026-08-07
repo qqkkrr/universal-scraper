@@ -317,8 +317,11 @@ async function main() {
         if (gateSuccessSel) {
           try { await page.waitForSelector(gateSuccessSel, { timeout: 2000 }); done = true; break; } catch (e) {}
         }
-        // 通过条件：已离开验证页 且 不在登录页（success_selector 匹配不到也继续，交给解析层/LLM 兜底）
-        if (!hitMarker && !hitLogin) { done = true; break; }
+        // 通过条件：已离开验证页，且 ①出现商家特征（人均/条评价/点评）或 ②页面文本足够长（真实内容页）
+        // 修复：商家列表页顶部常含"扫码登录"字样，不能仅凭登录字样卡住
+        const txtLen = txt.length;
+        const hasShop = txt.includes("人均") || txt.includes("条评价") || txt.includes("点评");
+        if (!hitMarker && (hasShop || txtLen > 2000)) { done = true; break; }
         await sleep(pollMs);
       }
       if (!done) {
