@@ -562,28 +562,23 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             real = sample
             log("✅ LLM 兜底成功，任务视为完成")
 
-    # 大众点评搜索页：用精配解析器覆盖 AI 选择器（字段干净，含 address 区域）
+    # 🏆 精配解析器覆盖（高频网站注册表）：检测到命中即用精配解析器，字段干净
     try:
-        from urllib.parse import unquote as _unq
-        import re as _re2
         su = (cfg.get("start_urls") or [""])[0]
-        if "dianping.com/search" in su:
-            _ch = ((cfg.get("source") or {}).get("headers") or {}).get("Cookie")
-            if _ch:
-                _m = _re2.search(r"/search/keyword/(\d+)/", su)
-                _city = int(_m.group(1)) if _m else 2
-                _m2 = _re2.search(r"/0_(.+)", su)
-                _kw = _unq(_m2.group(1)) if _m2 else "美食"
-                from .dianping import run as _dp_run
-                _dr = _dp_run(_kw, city=_city, cookie=_ch, limit=int(limit or 15))
-                if _dr.get("rows"):
-                    sample = _dr["rows"][:5]
-                    files = _dr["files"]
-                    total = _dr["total"]
-                    real = sample
-                    log(f"🌶️ 大众点评精配解析覆盖：{total} 家（字段干净，含 address 区域）")
+        from .sites import match_site, run_site
+        _site = match_site(su)
+        if _site:
+            _ch = ((cfg.get("source") or {}).get("headers") or {}).get("Cookie") or ""
+            _px = (cfg.get("anti_bot") or {}).get("proxy") or ""
+            _dr = run_site(su, cookie=_ch, proxy=_px or None, limit=int(limit or 20))
+            if _dr.get("rows"):
+                sample = _dr["rows"][:5]
+                files = _dr["files"]
+                total = _dr["total"]
+                real = sample
+                log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
     except Exception as _e:
-        log(f"⚠️ 大众点评精配解析未启用：{_e}")
+        log(f"⚠️ 精配解析未启用：{_e}")
 
     # 自动复核（字段完整率/去重/数量，不联网，秒级完成）
     verify = None

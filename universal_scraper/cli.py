@@ -168,6 +168,11 @@ def main() -> int:
     wp.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
     wp.add_argument("--share", action="store_true", help="分享模式：同网络的人可访问（0.0.0.0）")
 
+    st_p = sub.add_parser("sites", help="🏆 高频网站表与精配解析器状态")
+    st_p.add_argument("--run", default="", help="可选：URL 命中精配站点时直接精配抓取")
+    st_p.add_argument("--cookie", default="", help="Cookie（配合 --run）")
+    st_p.add_argument("--limit", type=int, default=20, help="条数上限")
+
     dp_p = sub.add_parser("dianping", help="🌶️ 大众点评专用：Cookie 直抓搜索页列表（绕开验证码/csec）")
     dp_p.add_argument("--keyword", required=True, help="关键词，如 美食 / 烤肉")
     dp_p.add_argument("--city", type=int, default=2, help="城市 ID（默认 2=北京，上海=1）")
@@ -314,6 +319,23 @@ def main() -> int:
     if args.cmd == "mcp":
         from .mcp_server import serve_stdio
         return serve_stdio(once=args.once)
+
+    if args.cmd == "sites":
+        from .sites import list_sites, run_site
+        if args.run:
+            r = run_site(args.run, cookie=args.cookie, limit=args.limit)
+            if r.get("error"):
+                print(f"❌ {r['error']}")
+                return 1
+            print(f"🏆 精配[{r.get('site')}] {r['total']} 条：")
+            for row in r["rows"][:10]:
+                print("  ", json.dumps({k: v for k, v in row.items() if k != "_site"}, ensure_ascii=False)[:200])
+            print("  导出:", list(r["files"].values()))
+            return 0
+        print("🏆 高频网站表（v1）：")
+        for s in list_sites():
+            print(f"  {s['status']} {s['name']:<6} {s['domain']:<22} {s['desc']}  [{s['difficulty']}]")
+        return 0
 
     if args.cmd == "dianping":
         from .dianping import run
