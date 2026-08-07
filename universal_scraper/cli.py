@@ -173,6 +173,13 @@ def main() -> int:
     st_p.add_argument("--cookie", default="", help="Cookie（配合 --run）")
     st_p.add_argument("--limit", type=int, default=20, help="条数上限")
 
+    jp = sub.add_parser("journal", help="📚 期刊论文批量下载（magtech 系统，沈阳体育学院学报已精配）")
+    jp.add_argument("--site", default="sytyxb", help="期刊站点（默认 sytyxb=沈阳体育学院学报）")
+    jp.add_argument("--since", type=int, default=2024, help="起始年份（默认 2024）")
+    jp.add_argument("--out", default="", help="输出目录（默认 outputs/journal_<site>）")
+    jp.add_argument("--workers", type=int, default=6, help="并发数")
+    jp.add_argument("--no-meta", action="store_true", help="跳过摘要/关键词拉取（更快）")
+
     dp_p = sub.add_parser("dianping", help="🌶️ 大众点评专用：Cookie 直抓搜索页列表（绕开验证码/csec）")
     dp_p.add_argument("--keyword", required=True, help="关键词，如 美食 / 烤肉")
     dp_p.add_argument("--city", type=int, default=2, help="城市 ID（默认 2=北京，上海=1）")
@@ -337,7 +344,15 @@ def main() -> int:
             print(f"  {s['status']} {s['name']:<6} {s['domain']:<22} {s['desc']}  [{s['difficulty']}]")
         return 0
 
-    if args.cmd == "dianping":
+    if args.cmd == "journal":
+        from .journals import run as journal_run
+        summary = journal_run(args.site, since_year=args.since, out_dir=args.out or None,
+                              workers=args.workers, with_meta=not args.no_meta)
+        if summary.get("error"):
+            print(f"❌ {summary['error']}", file=sys.stderr)
+            return 1
+        return 0
+
         from .dianping import run
         cookie = args.cookie
         if args.cookie_file:

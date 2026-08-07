@@ -21,7 +21,9 @@ HIGH_FREQUENCY_SITES = [
     {"name": "大众点评", "domain": "dianping.com", "module": "dianping", "status": "✅ 已精配",
      "desc": "美食/商家列表（Cookie 直抓 SSR）", "difficulty": "高反爬·需登录 Cookie"},
     {"name": "京东", "domain": "jd.com", "module": "jd", "status": "🔧 浏览器模式·需登录调优",
-     "desc": "商品搜索/价格", "difficulty": "中·浏览器渲染"},
+     "desc": "商品/店铺/评论（浏览器+扫码登录，须有 pt_key/pt_pin）",
+     "difficulty": "高·强风控+需登录",
+     "url_tips": "店铺页: https://mall.jd.com/index-<店铺ID>.html；商品页: https://item.jd.com/<skuID>.html；不要用 <店铺名>sp.jd.com"},
     {"name": "豆瓣", "domain": "douban.com", "module": "douban", "status": "🔄 待精配",
      "desc": "电影/图书/小组", "difficulty": "中·有反爬但 SSR"},
     {"name": "B站", "domain": "bilibili.com", "module": "bilibili", "status": "🔄 待精配",
@@ -46,6 +48,9 @@ HIGH_FREQUENCY_SITES = [
      "desc": "视频列表", "difficulty": "高·需登录"},
     {"name": "快手", "domain": "kuaishou.com", "module": "kuaishou", "status": "🔧 浏览器模式·需登录调优",
      "desc": "视频列表", "difficulty": "高·需登录"},
+    {"name": "沈阳体育学院学报", "domain": "stxb.magtech.com.cn", "module": "sytyxb", "status": "✅ 已精配",
+     "desc": "期刊全文/PDF（magtech 系统，2024 起免费）", "difficulty": "低·公开全文",
+     "url_tips": "期次: /CN/Y<年>/V<卷>/I<期>；文章: /CN/<DOI>；PDF 由 showArticleFile.do 换取直链"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -463,6 +468,25 @@ def match_thepaper(url):
 
 
 register("thepaper", match_thepaper, parse_thepaper, fetch=fetch_thepaper, desc="澎湃新闻")
+
+
+# ===========================================================================
+# 期刊系统精配（magtech：沈阳体育学院学报等——期次/文章/PDF，公开全文）
+# ===========================================================================
+def match_sytyxb(url: str) -> bool:
+    return "stxb.magtech.com.cn" in url and ("/Y20" in url or "showOldVolumn" in url or "/10.12163/" in url)
+
+
+def _sytyxb_parse(html, url):
+    from .journals import parse_issue_html
+    m = re.search(r"/Y(\d{4})/V(\d+)/I(\d+)", url)
+    issue = {"year": m.group(1), "vol": m.group(2), "issue": m.group(3),
+             "label": f"{m.group(1)}年 第{m.group(3)}期"} if m else {}
+    return parse_issue_html(html, issue)
+
+
+register("sytyxb", match_sytyxb, _sytyxb_parse, fetch=fetch_html,
+         desc="沈阳体育学院学报：期次/文章/PDF（magtech 期刊系统）")
 
 
 # ===========================================================================
