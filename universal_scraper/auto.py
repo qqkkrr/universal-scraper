@@ -65,6 +65,8 @@ v3 任务包 config.json 结构（字段含义）：
 - 大众点评/美团这类：过完滑块**还会强制登录**（扫码/账号）。所以 verify 和 login 两个都要配：
   "verify":{...上面...} + "login":{"enabled":true,"url":"https://www.dianping.com/","wait_selector":"#J-userinfo a, .user-info a, a[href*='/member/'], .nav-user"}；
   用户在弹窗里：先过滑块，再扫码/账号登录；工具自动继续并保存会话。
+- **大众点评列表页额外要求住宅代理**：其风控接口 isoapi/module(csec) 对数据中心 IP/被标记 IP 返回 403，页面因此不加载数据。
+  配置 anti_bot.proxy（如 "http://user:pass@host:port"）或提示用户提供住宅代理；详情页(www.dianping.com/shop/<id>)登录后无需代理可直抓。
 - 图片验证码：anti_bot 加 "captcha":{"strategy":"auto"}（自动识别，失败则人工兜底）。
 - 只输出 JSON 对象本身。"""
 

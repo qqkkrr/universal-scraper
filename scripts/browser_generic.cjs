@@ -19,7 +19,11 @@ const path = require("node:path");
 const { parseProxy } = require("./browser_common.cjs");
 
 let chromium = null;
-try { chromium = require("patchright").chromium; } catch (e) { chromium = require("playwright").chromium; }
+if (process.env.US_DISABLE_PATCHRIGHT !== "1") {
+  try { chromium = require("patchright").chromium; } catch (e) { chromium = require("playwright").chromium; }
+} else {
+  chromium = require("playwright").chromium;
+}
 
 const HOME = process.env.HOME || "/Users/kairanqin";
 const USER_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -188,19 +192,41 @@ async function main() {
       context = await browser.newContext(ctxOpts);
       page = await context.newPage();
     }
+    // 控制台/页面错误捕获（诊断"页面为什么没加载数据"的关键）
+    page.on("console", (msg) => {
+      const t = msg.type();
+      if (t === "error" || t === "warning") {
+        out({ type: "console", level: t, text: String(msg.text()).slice(0, 400) });
+      }
+    });
+    page.on("pageerror", (err) => {
+      out({ type: "pageerror", text: String(err).slice(0, 400) });
+    });
+    page.on("requestfailed", (req) => {
+      out({ type: "reqfailed", url: req.url().slice(0, 160), err: String(req.failure() && req.failure().errorText).slice(0, 120) });
+    });
 
     // 网络捕获：拦截 SPA 自己发出的签名 API（不逆向签名）
     const captures = spec.capture || [];
     const capturedBy = {};
     page.on("response", async (res) => {
       const u = res.url();
+      if (res.status() >= 400) {
+        out({ type: "http_4xx", status: res.status(), url: u.slice(0, 260) });
+      }
       for (const c of captures) {
         const pat = c.url_pattern || "";
         const hit = pat.startsWith("/") ? u.includes(pat) : new RegExp(pat).test(u);
         if (!hit) continue;
         const ct = res.headers()["content-type"] || "";
-        if (!ct.includes("json")) continue;
         const key = c.name || pat;
+        // 4xx/5xx：记录 URL（诊断 403 卡点）
+        if (res.status() >= 400) {
+          (capturedBy[key] = capturedBy[key] || []).push({ url: u, status: res.status(), httpError: true });
+          out({ type: "capture_http_error", name: key, url: u.slice(0, 220), status: res.status() });
+          continue;
+        }
+        if (!ct.includes("json")) continue;
         try {
           const j = await res.json();
           (capturedBy[key] = capturedBy[key] || []).push({ url: u, json: j });

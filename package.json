@@ -1,0 +1,29 @@
+{
+  "name": "universal-scraper",
+  "version": "1.0.0",
+  "description": "**配置驱动的多场景爬虫引擎**：一个爬虫任务 = 一份 JSON 配置。改任务不改代码。 参考 GitHub 顶级框架（Crawlee / Scrapy / botasaurus）的成熟设计重写。",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "example": "examples",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qqkkrr/universal-scraper.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/qqkkrr/universal-scraper/issues"
+  },
+  "homepage": "https://github.com/qqkkrr/universal-scraper#readme",
+  "dependencies": {
+    "patchright": "^1.61.1"
+  }
+}
