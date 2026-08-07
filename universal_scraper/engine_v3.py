@@ -92,6 +92,16 @@ class EngineV3:
         self.limit = int(limit) if limit is not None else None  # 防御：网页/API 可能传字符串
         self.dry_run = dry_run
         anti = dict(self.config.get("anti_bot", {}))
+        # 引擎级代理校验（最终防线）：非法/占位符代理一律忽略，防止请求层报错
+        if anti.get("proxy"):
+            import re as _re
+            _pm = _re.match(r"^https?://([^/@:]+(:[^/@:]+)?@)?([^/:]+):(\d+)$", str(anti["proxy"]))
+            if not _pm or _pm.group(3) in ("host", "localhost", "example.com", "proxy"):
+                self._bad_proxy = anti.pop("proxy", None)
+            else:
+                self._bad_proxy = None
+        else:
+            self._bad_proxy = None
         out_dir = Path(self.config.get("output", {}).get("dir", "outputs"))
         out_dir.mkdir(parents=True, exist_ok=True)
         self.out_dir = out_dir

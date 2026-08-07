@@ -65,8 +65,7 @@ v3 任务包 config.json 结构（字段含义）：
 - 大众点评/美团这类：过完滑块**还会强制登录**（扫码/账号）。所以 verify 和 login 两个都要配：
   "verify":{...上面...} + "login":{"enabled":true,"url":"https://www.dianping.com/","wait_selector":"#J-userinfo a, .user-info a, a[href*='/member/'], .nav-user"}；
   用户在弹窗里：先过滑块，再扫码/账号登录；工具自动继续并保存会话。
-- **大众点评列表页额外要求住宅代理**：其风控接口 isoapi/module(csec) 对数据中心 IP/被标记 IP 返回 403，页面因此不加载数据。
-  配置 anti_bot.proxy（如 "http://user:pass@host:port"）或提示用户提供住宅代理；详情页(www.dianping.com/shop/<id>)登录后无需代理可直抓。
+- **大众点评列表页如被风控需要住宅代理**：只有用户明确提供了真实代理时才在 anti_bot.proxy 里填写；**不要写 "host:port" 之类的示例占位符**（会导致请求报错）。用户没给代理就不配置 proxy。
 - 图片验证码：anti_bot 加 "captcha":{"strategy":"auto"}（自动识别，失败则人工兜底）。
 - 如果用户已提供登录 Cookie：source.type 用 http，source.headers 加 "Cookie": "<用户提供的Cookie>"，
   并加 rules/parsers 解析 SSR 页面（如大众点评搜索页 .shop-list li），不要用 browser（Cookie 直抓更快更稳）。
@@ -432,8 +431,15 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         # Cookie 直抓：有登录通行证时优先 HTTP 直连，跳过浏览器/验证/登录弹窗
         cfg.setdefault("source", {})["type"] = "http"
         cfg["source"].setdefault("headers", {})["Cookie"] = cookie
+        cfg.get("source", {}).pop("login", None)
+        cfg.get("source", {}).pop("verify", None)
         cfg.pop("login", None); cfg.pop("verify", None)
         log("🍪 已注入登录 Cookie（HTTP 直抓模式，跳过验证/登录弹窗）")
+    # 清理非法代理（AI 可能生成 host:port 占位符）
+    _ab = cfg.get("anti_bot") or {}
+    if _ab.get("proxy") and not _valid_proxy(_ab["proxy"]):
+        _ab.pop("proxy", None)
+        log("⚠️ 已清理配置中的非法代理占位符（host:port 不能直接用）")
     log(f"✅ 配置已生成（source={cfg.get('source', {}).get('type')}）")
     _src = cfg.get("source", {}) or {}
     _verify = _src.get("verify") or {}
