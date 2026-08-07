@@ -322,7 +322,7 @@ def _llm_fallback_extract(description: str, cfg: dict, log) -> dict:
     url = urls[0]
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        raw = urllib.request.urlopen(req, timeout=8).read(400000).decode("utf-8", "ignore")
+        raw = urllib.request.urlopen(req, timeout=8).read(200000).decode("utf-8", "ignore")
     except Exception:
         return {"items": [], "total": 0, "files": {}}
     head = raw[:3000]

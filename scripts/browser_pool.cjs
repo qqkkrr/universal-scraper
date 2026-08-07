@@ -15,6 +15,7 @@ const readline = require("node:readline");
 const { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy } = require("./browser_common.cjs");
 
 const POOL_SIZE = Math.max(1, parseInt(process.env.US_POOL_SIZE || "3", 10));
+const IDLE_MS = Math.max(1000, parseInt(process.env.US_POOL_IDLE_MS || "120000", 10));
 const STOP_FILE = process.env.US_STOP_FILE || null;
 const stopRequested = () => STOP_FILE && fs.existsSync(STOP_FILE);
 const out = (o) => console.log(JSON.stringify(o));
@@ -59,9 +60,14 @@ async function main() {
   const queue = [];
   const waiters = [];
   let closing = false;
+  let active = 0;
+  let lastActivity = Date.now();
+
+  function touch() { lastActivity = Date.now(); }
 
   function push(req) {
     if (closing) return;
+    touch();
     const waiter = waiters.shift();
     if (waiter) waiter(req);
     else queue.push(req);
@@ -78,11 +84,15 @@ async function main() {
       if (!req) return;
       if (req.type === "close") { closing = true; return; }
       if (stopRequested()) { closing = true; return; }
+      active++;
       try {
         const r = await renderPage(context, req, stealthApplied);
         out({ id: req.id, html: r.html, url: r.url, bytes: r.bytes });
       } catch (e) {
         out({ id: req.id, html: "", url: req.url, error: String((e && e.message) || e) });
+      } finally {
+        active--;
+        touch();
       }
     }
   }
@@ -105,8 +115,16 @@ async function main() {
   rl.on("close", () => { closing = true; });
 
   const done = Promise.all(workers);
-  const timer = setTimeout(() => { closing = true; process.exit(0); }, 30000);
-  done.then(() => { clearTimeout(timer); browser.close().catch(() => {}); process.exit(0); });
+  // 空闲超时退出（US_POOL_IDLE_MS，默认 120s）：只在"无活跃渲染 && 队列空"时退出，
+  // 绝不在页面渲染中途 kill（修复 30s 硬定时器杀活池的 bug）。
+  const idleTimer = setInterval(() => {
+    if (closing) return;
+    if (active === 0 && queue.length === 0 && waiters.length === 0 && Date.now() - lastActivity >= IDLE_MS) {
+      closing = true;
+      process.exit(0);
+    }
+  }, 2000);
+  done.then(() => { clearInterval(idleTimer); browser.close().catch(() => {}); process.exit(0); });
 }
 
 main().catch((e) => {

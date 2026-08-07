@@ -1016,3 +1016,14 @@ AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429
 - **#7 文档注释修正**：`/api/verify?file=xxx.json -> outputs/xxx.json`（与实现一致）。
 
 测试：`run_tests30-39` 共 **147 项全绿**（新增 `run_tests39` 9 项：UA 一致性/指纹匹配/消息上限/编码采样）。
+
+## 第三十八轮：第六轮 review 修复批次（进程生命周期 / 锁范围 / 成本护栏）
+
+- **#1 浏览器池 30s 硬定时器 → 空闲超时**：`browser_pool.cjs` 改为 `US_POOL_IDLE_MS`（默认 120s）空闲退出，
+  且只在"无活跃渲染 && 队列空"时退出——慢页面/多页任务不再被中途 kill（原 30s 定时器从启动就倒计时，
+  >30s 任务必死，登录态全丢）。集成测试：2s 慢页在 1.5s 空闲阈值下成功 + 池退出后自愈重启。
+- **#2 storage.write 移出全局锁**：engine_v3 写存储不再阻塞所有 worker（sqlite/multi 后端吞吐提升）。
+- **#3 LLM 兜底读取上限**：raw 读取 400KB→200KB（LLM 实际只吃 8k markdown，成本已受控）。
+- **#4 v2 Checkpoint 有界保存**：只保留最近 2000 条，避免大任务 O(n²) 全量序列化（复测 3000 条保存 <5s）。
+
+测试：`run_tests30-40` 共 **153 项全绿**（新增 `run_tests40` 6 项：池空闲超时集成、Checkpoint 有界、写锁外）。

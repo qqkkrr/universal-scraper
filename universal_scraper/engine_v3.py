@@ -284,8 +284,9 @@ class EngineV3:
                     if k:
                         self._seen_store.mark(k)
                 if item is not None:
+                    # storage.write 挪到锁外：sqlite/multi 每 item 提交不应阻塞所有 worker
+                    self.storage.write(item)
                     with self._lock:
-                        self.storage.write(item)
                         self.stats["items"] += 1
                         if len(self._all_items) < self._spool_threshold:
                             self._all_items.append(item)

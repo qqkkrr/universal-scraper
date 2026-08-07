@@ -19,9 +19,14 @@ class Checkpoint:
             except Exception:
                 self.data = {}
 
+    MAX_ROWS = 2000
+
     def save(self, rows: List[Dict[str, Any]], done: int, total: int) -> None:
+        """断点保存：只保留最近 MAX_ROWS 条（大任务不再每 20 条全量序列化 O(n²)）。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.data.update({"done": done, "total": total, "rows": rows})
+        kept = rows[-self.MAX_ROWS:] if len(rows) > self.MAX_ROWS else rows
+        self.data.update({"done": done, "total": total, "rows": kept,
+                          "rows_truncated": len(rows) > self.MAX_ROWS})
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, default=str), encoding="utf-8")
 
     def load_rows(self) -> List[Dict[str, Any]]:
