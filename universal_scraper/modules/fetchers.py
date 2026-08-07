@@ -454,6 +454,13 @@ class BrowserFetcher(BaseFetcher):
                 files = sorted(out_dir.glob("*.html"))
                 if files:
                     html = files[0].read_text(encoding="utf-8", errors="replace")
+            # 诊断保留：最近一次交互页面的 HTML（排查"抓了但0条"）
+            try:
+                debug_html = Path(self.scripts_dir).parent / "outputs" / ".debug" / "last_interactive_page.html"
+                debug_html.parent.mkdir(parents=True, exist_ok=True)
+                debug_html.write_text(html or "", encoding="utf-8")
+            except Exception:
+                pass
         return Response(request=req, status=200, body=html.encode("utf-8"),
                         text=html, json=None, url=final_url)
 
