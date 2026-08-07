@@ -360,7 +360,8 @@ def _llm_fallback_extract(description: str, cfg: dict, log) -> dict:
 
 
 def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
-              log_cb=None, round_timeout: Optional[int] = None) -> Dict[str, Any]:
+              log_cb=None, round_timeout: Optional[int] = None,
+              proxy: Optional[str] = None) -> Dict[str, Any]:
     """执行一次自动任务。返回 {config, result, log, sample, files}。"""
     if limit is not None:
         limit = int(limit) or None
@@ -404,6 +405,9 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     cfg["output"]["base_name"] = name
     if limit:
         cfg.setdefault("queue", {})["max_requests"] = int(limit) + 5
+    if proxy:
+        cfg.setdefault("anti_bot", {})["proxy"] = proxy
+        log(f"🛰️ 已注入代理：{proxy}")
     log(f"✅ 配置已生成（source={cfg.get('source', {}).get('type')}）")
     _src = cfg.get("source", {}) or {}
     _verify = _src.get("verify") or {}
