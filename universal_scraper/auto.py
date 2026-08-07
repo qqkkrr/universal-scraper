@@ -232,7 +232,9 @@ def _probe_summary(url: str, max_chars: int = 2500) -> str:
     if not summary:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            raw = urllib.request.urlopen(req, timeout=timeout).read(300000).decode("utf-8", "ignore")
+            # 显式直连（绕过 Clash 系统代理，避免探测被挂起）
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            raw = opener.open(req, timeout=timeout).read(300000).decode("utf-8", "ignore")
             from .extractors import html_to_markdown, extract_links_markdown
             md = html_to_markdown(raw, base_url=url, max_chars=max_chars)
             links = extract_links_markdown(raw, base_url=url, max_links=30)
@@ -268,8 +270,9 @@ def _diagnose_failure(urls, result, log) -> str:
         st, raw = 0, ""
         try:
             req = urllib.request.Request(str(u), headers={"User-Agent": "Mozilla/5.0"})
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             try:
-                resp = urllib.request.urlopen(req, timeout=8)
+                resp = opener.open(req, timeout=8)
                 st = resp.status or 0
                 raw = resp.read(6000).decode("utf-8", "ignore")
             except urllib.error.HTTPError as e:
@@ -552,7 +555,14 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         _t.start()
         _t.join(timeout=round_timeout)
         if _t.is_alive():
-            log(f"⏱️ 本轮超过 {round_timeout}s 未结束，已强制终止（不再重试，避免无限等待）")
+            log(f"⏱️ 本轮超过 {round_timeout}s 未结束，正在发送停止信号并回收后台线程...")
+            try:
+                (Path(task_dir) / ".stop").write_text("1", encoding="utf-8")
+            except Exception:
+                pass
+            _t.join(timeout=30)
+            if _t.is_alive():
+                log("⚠️ 后台线程 30s 后仍未退出（可能卡在子进程），本轮结果作废，不再重试")
             result = {"total": 0, "fetched": 0, "errors": -2, "error": f"运行超时（>{round_timeout}s）"}
             last_result = result
             last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
@@ -736,7 +746,14 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         _t.start()
         _t.join(timeout=round_timeout)
         if _t.is_alive():
-            log(f"⏱️ 本轮超过 {round_timeout}s 未结束，已强制终止（不再重试，避免无限等待）")
+            log(f"⏱️ 本轮超过 {round_timeout}s 未结束，正在发送停止信号并回收后台线程...")
+            try:
+                (Path(task_dir) / ".stop").write_text("1", encoding="utf-8")
+            except Exception:
+                pass
+            _t.join(timeout=30)
+            if _t.is_alive():
+                log("⚠️ 后台线程 30s 后仍未退出（可能卡在子进程），本轮结果作废，不再重试")
             result = {"total": 0, "fetched": 0, "errors": -2, "error": f"运行超时（>{round_timeout}s）"}
             last_result = result
             last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""

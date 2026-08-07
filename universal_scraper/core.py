@@ -580,32 +580,6 @@ def export_rows(rows: List[Dict[str, Any]], out_dir: Path, base_name: str) -> Di
 
 # ---------------------------------------------------------------- 通用分页遍历
 
-def paginate(
-    fetch_page: Callable[[int], Dict[str, Any]],
-    page_size_key: str = "pageSize",
-    total_key: str = "total",
-    records_key: str = "records",
-    max_pages: int = 1000,
-    start_page: int = 1,
-    on_page: Optional[Callable[[int, int, int], None]] = None,
-) -> List[Dict[str, Any]]:
-    """通用分页遍历：fetch_page(n) 返回 {'total':..., 'records':[...]}。"""
-    all_records: List[Dict[str, Any]] = []
-    page = start_page
-    total = None
-    while page <= max_pages:
-        res = fetch_page(page)
-        recs = res.get(records_key) or []
-        total = res.get(total_key, total)
-        if on_page:
-            on_page(page, len(recs), total or 0)
-        all_records.extend(recs)
-        if not recs or total is None or page >= total / max(res.get(page_size_key, len(recs) or 1), 1):
-            break
-        page += 1
-    return all_records
-
-
 class RequestsClient:
     """基于 requests 的高性能客户端：连接池复用、gzip、会话 Cookie、限速、重试。"""
 

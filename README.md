@@ -985,3 +985,18 @@ AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429
 - **#13 dianping 智能解码**：改用 `smart_decode`（GBK 站点不炸）。
 
 测试：`run_tests30-37` 共 **131 项全绿**（新增 `run_tests37` 20 项）。真实链路：新浪 GBK 820 条 0 乱码；`us doctor` 15/19（缺的可选依赖自动降级）。
+
+## 第三十六轮：第四轮 review 修复批次（超时真停止 / 非 tty 防阻塞 / 死代码清理）
+
+- **#1 auto 假超时 → 真停止**：超时后写 `task_dir/.stop` 停止信号 + 等后台线程回收（30s），
+  引擎收到 `.stop` 优雅退出（测试日志实证：“收到停止信号，正在保存检查点并退出”），不再出现
+  “显示超时但请求/弹窗还在跑”。
+- **#2 human_solve 非 tty 防阻塞**：stdin 非终端时直接报“非交互环境”，绝不 `input()` 永久挂起。
+- **#3 core.paginate 死代码删除**：同款 total 字符串炸弹不再潜伏（JsonPagedParser 单点维护）。
+- **#6 auto 探测直连**：`_probe_summary`/`_diagnose_failure` 绕过 Clash 系统代理。
+- **#7 浏览器桥诊断输出节流**：console/pageerror/reqfailed 每类最多 50 条，防 JS 重页面刷爆协议流。
+- **#8 stop_condition 容错**：非法 JS 不再炸整个桥。
+- **#9 human_scroll 未用变量删除**。
+- **#11 journals 元数据缓存批量写**：25 条一批 flush，不再逐条 open/append。
+
+测试：`run_tests30-38` 共 **138 项全绿**（新增 `run_tests38` 7 项）。

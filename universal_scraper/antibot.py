@@ -214,7 +214,12 @@ def solve_captcha_file(
             if not result["answer"]:
                 result["error"] = "nopecha 未返回答案"
         elif strategy == "human":
-            result["answer"] = human_solve(img, af or Path(str(img) + ".answer"), cap.get("prompt", ""))
+            import sys as _sys
+            if not _sys.stdin.isatty():
+                # 守护进程/WebUI 无终端：绝不能 input() 永久阻塞
+                result["error"] = "非交互环境（stdin 非 tty），无法人工输入验证码"
+            else:
+                result["answer"] = human_solve(img, af or Path(str(img) + ".answer"), cap.get("prompt", ""))
         else:
             result["error"] = f"未知策略: {strategy}"
     except Exception as e:

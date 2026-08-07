@@ -236,17 +236,21 @@ async function main() {
       page = await context.newPage();
     }
     // 控制台/页面错误捕获（诊断"页面为什么没加载数据"的关键）
+    // 节流：每类最多输出 50 条，防止 JS 重页面刷爆协议流
+    const diagBudget = { console: 50, pageerror: 50, reqfailed: 50 };
     page.on("console", (msg) => {
       const t = msg.type();
-      if (t === "error" || t === "warning") {
+      if ((t === "error" || t === "warning") && diagBudget.console-- > 0) {
         out({ type: "console", level: t, text: String(msg.text()).slice(0, 400) });
       }
     });
     page.on("pageerror", (err) => {
-      out({ type: "pageerror", text: String(err).slice(0, 400) });
+      if (diagBudget.pageerror-- > 0) out({ type: "pageerror", text: String(err).slice(0, 400) });
     });
     page.on("requestfailed", (req) => {
-      out({ type: "reqfailed", url: req.url().slice(0, 160), err: String(req.failure() && req.failure().errorText).slice(0, 120) });
+      if (diagBudget.reqfailed-- > 0) {
+        out({ type: "reqfailed", url: req.url().slice(0, 160), err: String(req.failure() && req.failure().errorText).slice(0, 120) });
+      }
     });
 
     // 网络捕获：拦截 SPA 自己发出的签名 API（不逆向签名）
@@ -477,7 +481,6 @@ async function main() {
         }
         // 人类化：不是每次到底，而是分段滚动 + 随机停顿（模拟真人阅读节奏）
         if (beh.human_scroll) {
-          const target = await page.evaluate(() => document.body.scrollHeight);
           const steps = 3 + Math.floor(Math.random() * 4);
           for (let st = 0; st < steps; st++) {
             await page.evaluate((pct) => window.scrollTo(0, document.body.scrollHeight * pct), (st + 1) / steps);
@@ -525,7 +528,9 @@ async function main() {
       // 翻页
       const pg = spec.pagination || { type: "none" };
       if (pg.type === "none") break;
-      if (pg.stop_condition && await page.evaluate(pg.stop_condition)) break;
+      if (pg.stop_condition) {
+        try { if (await page.evaluate(pg.stop_condition)) break; } catch (e) {}
+      }
       let changed = false;
       if (pg.type === "click") {
         const sel = pg.selector;

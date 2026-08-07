@@ -271,6 +271,16 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
             if a["id"] in meta_cache_loaded:
                 a.update({k: v for k, v in meta_cache_loaded[a["id"]].items() if k != "id"})
         log(f"🔎 拉取 {len(todo)}/{len(all_arts)} 篇摘要/关键词（缓存 {len(all_arts)-len(todo)} 篇，并发 {workers}）...")
+        _cache_buf: List[str] = []
+        def _flush_cache():
+            if not _cache_buf:
+                return
+            try:
+                with open(meta_cache, "a", encoding="utf-8") as mc:
+                    mc.write("".join(_cache_buf))
+                _cache_buf.clear()
+            except Exception:
+                pass
         with cf.ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {ex.submit(fetch_article_meta, a, site): a for a in todo}
             done = 0
@@ -279,14 +289,16 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
                 try:
                     meta = f.result()
                     a.update(meta)
-                    with open(meta_cache, "a", encoding="utf-8") as mc:
-                        mc.write(json.dumps({"id": a["id"], **meta}, ensure_ascii=False) + "\n")
+                    _cache_buf.append(json.dumps({"id": a["id"], **meta}, ensure_ascii=False) + "\n")
+                    if len(_cache_buf) >= 25:
+                        _flush_cache()
                 except Exception:
                     pass
                 done += 1
                 if done % 25 == 0:
                     log(f"  ... 元数据 {done}/{len(todo)}")
                 time.sleep(min_interval / 2)
+        _flush_cache()
 
     # 4) 下载 PDF（断点续传：已存在且 >10KB 的自动跳过）
     have_pdf = sum(1 for a in all_arts if (pdf_dir / _pdf_name(a)).exists() and (pdf_dir / _pdf_name(a)).stat().st_size > 10*1024)
