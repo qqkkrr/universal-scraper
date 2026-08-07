@@ -32,6 +32,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+# ---------------------------------------------------------------- 常量
+CACHE_DEFAULT_TTL = 86400.0      # HTTP 响应缓存默认有效期（秒，24h）
+CACHE_MAX_FILES = 2000           # 缓存文件上限（超限删最旧）
+DEFAULT_MAX_BODY = 20 * 1024 * 1024  # 默认响应体上限（20MB，流式限读）
+
 # ---------------------------------------------------------------- 日志
 
 def log(msg: str, level: str = "INFO") -> None:
@@ -337,7 +342,7 @@ class HttpClient:
             out["body"] = base64.b64decode(b[4:])
         return out
 
-    def _cache_valid(self, path: Path, ttl: float = 86400.0) -> bool:
+    def _cache_valid(self, path: Path, ttl: float = CACHE_DEFAULT_TTL) -> bool:
         try:
             return time.time() - path.stat().st_mtime <= ttl
         except Exception:
@@ -500,11 +505,11 @@ class HttpClient:
         if use_cache and result["ok"] and self.cache_dir and method == "GET" and not body_bytes:
             _cf = self.cache_dir / self._cache_key(url, b"", method)
             _cf.write_text(json.dumps(self._cache_encode(result), ensure_ascii=False), encoding="utf-8")
-            # 简单淘汰：超过 2000 个缓存文件时删最旧的（防无限增长）
+            # 简单淘汰：超过上限时删最旧的（防无限增长）
             try:
                 _files = sorted(self.cache_dir.glob("*.json"), key=lambda f: f.stat().st_mtime)
-                if len(_files) > 2000:
-                    for _old in _files[: len(_files) - 2000]:
+                if len(_files) > CACHE_MAX_FILES:
+                    for _old in _files[: len(_files) - CACHE_MAX_FILES]:
                         _old.unlink(missing_ok=True)
             except Exception:
                 pass

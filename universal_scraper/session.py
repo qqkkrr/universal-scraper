@@ -41,12 +41,14 @@ class SessionPool:
     """按域名管理会话；rotate_on_errors 次失败后强制换新会话。"""
 
     def __init__(self, proxies: Optional[List[str]] = None, ua_pool: Optional[List[str]] = None,
-                 max_per_domain: int = 3, rotate_on_errors: int = 2, proxy_mode: str = "round_robin"):
+                 max_per_domain: int = 3, rotate_on_errors: int = 2, proxy_mode: str = "round_robin",
+                 max_total: int = 500):
         self.proxies = list(proxies or [])
         self.ua_pool = list(ua_pool or UA_POOL)
         self.max_per_domain = max_per_domain
         self.rotate_on_errors = rotate_on_errors
         self.proxy_mode = proxy_mode
+        self.max_total = max(1, max_total)  # 全局会话上限：防 1 万域名 = 3 万会话驻留内存
         self._pool: Dict[str, List[HttpSession]] = {}
         self._idx: Dict[str, int] = {}
         self._proxy_counter = 0
@@ -90,6 +92,22 @@ class SessionPool:
                 old = min(lst, key=lambda x: x.last_used)
                 lst.remove(old)
                 self.stats["rotated"] += 1
+            # 全局上限：超限时回收整个池里最久未用的会话（防 1 万域名内存爆炸）
+            total = sum(len(v) for v in self._pool.values())
+            if total >= self.max_total:
+                _oldest = None
+                _oldest_at = float("inf")
+                for _lst in self._pool.values():
+                    for _s in _lst:
+                        if _s.last_used < _oldest_at:
+                            _oldest_at = _s.last_used
+                            _oldest = _s
+                if _oldest is not None:
+                    for _lst in self._pool.values():
+                        if _oldest in _lst:
+                            _lst.remove(_oldest)
+                            self.stats["rotated"] += 1
+                            break
             s = HttpSession(dom, random.choice(self.ua_pool), self._next_proxy())
             lst.append(s)
             self._idx[dom] = len(lst) - 1

@@ -19,10 +19,8 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 SOURCES = [
-    ("proxyscrape", "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=3000&country=all&ssl=all&anonymity=all"),
-    ("proxyscrape_socks4", "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks4&timeout=3000&country=all"),
+    # 仅保留实测可用源（proxyscrape/openproxy 已失效，HTTP 000）
     ("geonode", "https://proxylist.geonode.com/api/proxy-list?limit=150&page=1&sort_by=lastChecked&sort_type=desc"),
-    ("openproxy", "https://api.openproxyspace.space/v2/http.txt?limit=100"),
 ]
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -116,7 +114,7 @@ def validate(proxies: List[str], workers: int = 30, log=print) -> List[str]:
 
 def refresh(out: str = "outputs/proxies.txt", workers: int = 30,
             min_ok: int = 5, log=print) -> dict:
-    log("🔄 抓取免费代理（proxyscrape/geonode/openproxy）...")
+    log("🔄 抓取免费代理（geonode，其余公开源已失效移除）...")
     all_p = fetch_all(log=log)
     log(f"共抓取 {len(all_p)} 个（去重后），开始验证连通性...")
     ok = validate(all_p, workers=workers, log=log)

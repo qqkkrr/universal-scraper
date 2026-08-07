@@ -97,6 +97,9 @@ def _validate_and_fix(cfg: dict) -> dict:
     from .config import validate_task
     cfg.setdefault("name", "auto_task")
     cfg.setdefault("start_urls", [])
+    # LLM 可能一次性生成几十个入口：只保留前 10 个（防队列爆炸）
+    if isinstance(cfg.get("start_urls"), list) and len(cfg["start_urls"]) > 10:
+        cfg["start_urls"] = cfg["start_urls"][:10]
     cfg.setdefault("queue", {"max_depth": 3, "max_requests": 100, "max_concurrency": 2})
     cfg.setdefault("source", {"type": "http"})
     cfg.setdefault("storage", {"type": "jsonl", "name": cfg["name"]})
