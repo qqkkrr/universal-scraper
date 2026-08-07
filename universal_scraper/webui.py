@@ -195,6 +195,9 @@ class Handler(BaseHTTPRequestHandler):
                             "status": j["status"], "summary": j["summary"],
                             "created": j["created"]} for j in reversed(list(JOBS.values()))][:20]
                 self._json(lst)
+            elif u.path == "/api/ip":
+                from .net import detect_ip
+                self._json(detect_ip())
             elif u.path == "/api/verify":
                 name = q.get("file", [""])[0]
                 fp = ROOT / "outputs" / name if not name.startswith(("outputs/", "/")) else ROOT / name

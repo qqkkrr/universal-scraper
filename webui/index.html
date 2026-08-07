@@ -49,7 +49,7 @@
 </style>
 </head>
 <body>
-<header><h1>🕷️ 万能爬虫工具</h1><span class="tag">极简版 v3</span><span class="muted" id="server"></span></header>
+<header><h1>🕷️ 万能爬虫工具</h1><span class="tag">极简版 v3</span><span class="muted" id="server"></span><span class="muted" id="ipinfo" style="margin-left:14px">🌐 IP…</span></header>
 <nav>
   <button data-tab="auto" class="active">🤖 一句话任务</button>
   <button data-tab="paste">📋 贴网页爬虫</button>
@@ -110,6 +110,7 @@
 <script>
 const $=s=>document.querySelector(s);
 $('#server').textContent='服务已启动';
+(async()=>{try{const d=await api('/api/ip');$('#ipinfo').textContent='🌐 出口IP: '+(d.ip||'?')+' · '+(d.isp||'');}catch(e){}})();
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));

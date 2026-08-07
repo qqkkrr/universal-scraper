@@ -168,6 +168,8 @@ def main() -> int:
     wp.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
     wp.add_argument("--share", action="store_true", help="分享模式：同网络的人可访问（0.0.0.0）")
 
+    ip_p = sub.add_parser("ip", help="🌐 查看当前出口 IP 与运营商（换网络后确认）")
+
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
     vp.add_argument("--file", required=True, help="结果 JSON 文件，如 outputs/xxx.json")
     vp.add_argument("--network", action="store_true", help="联网抽样重抓对比（默认只做本地检查）")
@@ -303,6 +305,18 @@ def main() -> int:
     if args.cmd == "mcp":
         from .mcp_server import serve_stdio
         return serve_stdio(once=args.once)
+
+    if args.cmd == "ip":
+        from .net import detect_ip
+        d = detect_ip()
+        if d.get("error"):
+            print(f"❌ {d['error']}")
+            return 1
+        print(f"🌐 当前出口 IP: {d.get('ip')}")
+        print(f"   运营商: {d.get('isp')}")
+        print(f"   地区: {d.get('city')} {d.get('region')}")
+        print(f"   类型: {d.get('org')}")
+        return 0
 
     if args.cmd == "verify":
         from .verify import verify_file
