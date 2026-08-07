@@ -397,7 +397,8 @@ async function main() {
         }
         const u = page.url() || "";
         let txt = "";
-        try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 500) : "")); } catch (e) {}
+        // 取前 5000 字符（原 500 会让 txtLen>2000 的"长页面=登录成功"兜底永远不成立）
+        try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 5000) : "")); } catch (e) {}
         const hitMarker = gateMarkers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
         const hitLogin = loginTxt.some(m => txt.includes(m))
           && !(u.includes("m.dianping.com") && !u.includes("/login"));  // 移动版首页不算登录页（登录后常跳这里）
