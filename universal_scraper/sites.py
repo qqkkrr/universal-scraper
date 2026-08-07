@@ -202,8 +202,10 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
         return {"total": 0, "rows": [], "files": {},
                 "error": f"抓取失败 HTTP {res.get('status')}: {res.get('error','')}"}
     rows = s["parse"](res.get("html", ""), url)[:limit]
+    # 空壳行防线：全字段为空的"成功"行按失败处理（防精配假成功）
+    rows = [r for r in rows if any(str(v or "").strip() for k, v in r.items() if k != "_site")]
     if not rows:
-        return {"total": 0, "rows": [], "files": {}, "error": "解析 0 条（页面结构变化或需登录/Cookie）"}
+        return {"total": 0, "rows": [], "files": {}, "error": "解析 0 条（页面结构变化、接口失效或需登录/Cookie）"}
     from pathlib import Path as _P
     from urllib.parse import urlparse as _up
     host = _up(url).netloc.replace(".", "_")
@@ -416,6 +418,10 @@ def parse_baike(html, url):
     try:
         d = json.loads(html)
     except Exception:
+        return []
+    if d.get("errno") is not None and d.get("errno") != 0:
+        return []  # 接口失效/风控（如 {"errno":2}），不再返回空壳行
+    if not (d.get("title") or d.get("desc") or d.get("lemmaUrl")):
         return []
     card = []
     for c in d.get("card", [])[:8]:
