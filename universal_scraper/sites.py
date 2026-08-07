@@ -20,28 +20,32 @@ from typing import Any, Callable, Dict, List, Optional
 HIGH_FREQUENCY_SITES = [
     {"name": "大众点评", "domain": "dianping.com", "module": "dianping", "status": "✅ 已精配",
      "desc": "美食/商家列表（Cookie 直抓 SSR）", "difficulty": "高反爬·需登录 Cookie"},
-    {"name": "京东", "domain": "jd.com", "module": "jd", "status": "🔄 待精配",
-     "desc": "商品搜索/价格", "difficulty": "中·SSR 可抓"},
+    {"name": "京东", "domain": "jd.com", "module": "jd", "status": "🔧 浏览器模式·需登录调优",
+     "desc": "商品搜索/价格", "difficulty": "中·浏览器渲染"},
     {"name": "豆瓣", "domain": "douban.com", "module": "douban", "status": "🔄 待精配",
      "desc": "电影/图书/小组", "difficulty": "中·有反爬但 SSR"},
     {"name": "B站", "domain": "bilibili.com", "module": "bilibili", "status": "🔄 待精配",
      "desc": "视频搜索/信息", "difficulty": "中·有风控"},
-    {"name": "知乎", "domain": "zhihu.com", "module": "zhihu", "status": "🔄 待精配",
-     "desc": "问题/回答/搜索", "difficulty": "中高·需 Cookie"},
-    {"name": "百度百科", "domain": "baike.baidu.com", "module": "baike", "status": "🔄 待精配",
-     "desc": "词条标题/摘要", "difficulty": "低·公开"},
-    {"name": "微博", "domain": "weibo.com", "module": "weibo", "status": "🔄 待精配",
-     "desc": "热搜/用户微博", "difficulty": "高·需登录 Cookie"},
+    {"name": "知乎", "domain": "zhihu.com", "module": "zhihu", "status": "🔧 浏览器模式·需登录调优",
+     "desc": "问题/回答/搜索", "difficulty": "中高·需登录"},
+    {"name": "微博", "domain": "weibo.com", "module": "weibo", "status": "🔧 浏览器模式·需登录调优",
+     "desc": "热搜/用户微博", "difficulty": "高·需登录"},
     {"name": "GitHub", "domain": "github.com", "module": "github", "status": "🔄 待精配",
      "desc": "仓库/代码/Issue（REST API）", "difficulty": "低·API 公开"},
     {"name": "天气", "domain": "wttr.in", "module": "weather", "status": "🔄 待精配",
      "desc": "全球天气（公开 API）", "difficulty": "低·公开 API"},
-    {"name": "澎湃新闻", "domain": "thepaper.cn", "module": "thepaper", "status": "🔄 待精配",
-     "desc": "新闻列表/正文", "difficulty": "低·公开 SSR"},
-    {"name": "网易新闻", "domain": "news.163.com", "module": "netease_news", "status": "🔄 待精配",
-     "desc": "新闻列表/正文", "difficulty": "低·公开 SSR"},
-    {"name": "百度搜索", "domain": "baidu.com", "module": "baidu_search", "status": "🔄 待精配",
+    {"name": "百度百科", "domain": "baike.baidu.com", "module": "baike", "status": "✅ 已精配",
+     "desc": "词条卡片（公开 API）", "difficulty": "低·openapi 可用"},
+    {"name": "澎湃新闻", "domain": "thepaper.cn", "module": "thepaper", "status": "✅ 已精配",
+     "desc": "新闻列表（公开 API）", "difficulty": "低·API 公开"},
+    {"name": "网易新闻", "domain": "news.163.com", "module": "netease_news", "status": "✅ 已精配",
+     "desc": "头条列表（JSONP）", "difficulty": "低·API 公开"},
+    {"name": "百度搜索", "domain": "baidu.com", "module": "baidu_search", "status": "✅ 已精配",
      "desc": "搜索结果（标题/链接/摘要）", "difficulty": "中·有反爬"},
+    {"name": "抖音", "domain": "douyin.com", "module": "douyin", "status": "🔧 浏览器模式·需登录调优",
+     "desc": "视频列表", "difficulty": "高·需登录"},
+    {"name": "快手", "domain": "kuaishou.com", "module": "kuaishou", "status": "🔧 浏览器模式·需登录调优",
+     "desc": "视频列表", "difficulty": "高·需登录"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -342,3 +346,207 @@ def match_bilibili(url: str) -> bool:
 
 
 register("bilibili", match_bilibili, parse_bilibili, desc="B站：视频搜索（SSR）")
+
+
+# ---------- 百度百科（openapi JSON） ----------
+def fetch_baike(url, cookie="", proxy=None):
+    import urllib.parse as _up
+    m = re.search(r"/item/([^/?#]+)", url)
+    key = _up.unquote(m.group(1)) if m else ""
+    api = ("https://baike.baidu.com/api/openapi/BaikeLemmaCardApi?"
+           "scope=103&format=json&appid=379020&bk_key=" + urllib.parse.quote(key))
+    r = fetch_html(api, cookie=cookie, proxy=proxy)
+    return r
+
+
+def parse_baike(html, url):
+    try:
+        d = json.loads(html)
+    except Exception:
+        return []
+    card = []
+    for c in d.get("card", [])[:8]:
+        v = c.get("value") or []
+        if isinstance(v, list):
+            v = "；".join(str(x) for x in v)
+        card.append(f"{c.get('name','')}: {v}")
+    return [{"title": d.get("title", ""), "desc": d.get("desc", ""),
+             "card": " | ".join(card)[:400], "url": d.get("lemmaUrl", ""),
+             "_site": "baike"}]
+
+
+def match_baike(url):
+    return "baike.baidu.com/item" in url
+
+
+register("baike", match_baike, parse_baike, fetch=fetch_baike, desc="百度百科词条卡片")
+
+
+# ---------- 网易新闻（头条 JSONP） ----------
+def fetch_netease(url, cookie="", proxy=None):
+    u = ("https://temp.163.com/special/00804KVA/cm_yaowen20200213.js?callback=data_callback")
+    import urllib.request as _ur
+    headers = {"User-Agent": UA, "Referer": "https://news.163.com/", "Accept-Encoding": "identity"}
+    if cookie:
+        headers["Cookie"] = cookie
+    try:
+        r = _ur.urlopen(_ur.Request(u, headers=headers), timeout=20)
+        raw = r.read().decode(r.headers.get_content_charset() or "gbk", "ignore")
+        return {"ok": True, "status": r.status, "html": raw, "final_url": u}
+    except Exception as e:
+        return {"ok": False, "status": 0, "html": "", "final_url": u, "error": str(e)}
+
+
+def parse_netease(html, url):
+    m = re.search(r"\((\[.*\])\)", html, re.S) or re.search(r"data_callback\((.*)\)\s*$", html, re.S)
+    try:
+        data = json.loads(m.group(1)) if m else []
+    except Exception:
+        return []
+    out = []
+    for it in (data or [])[:30]:
+        t = it.get("title") or ""
+        if t and "\\u" in t:
+            try:
+                t = t.encode("latin1").decode("unicode_escape")
+            except Exception:
+                pass
+        out.append({"title": re.sub(r"<[^>]+>", "", t).strip()[:120],
+                    "url": it.get("docurl", ""), "digest": (it.get("digest") or "")[:120],
+                    "_site": "netease"})
+    return out
+
+
+def match_netease(url):
+    return "163.com" in url
+
+
+register("netease", match_netease, parse_netease, fetch=fetch_netease, desc="网易新闻头条")
+
+
+# ---------- 澎湃新闻（API JSON） ----------
+def fetch_thepaper(url, cookie="", proxy=None):
+    u = "https://api.thepaper.cn/contentapi/wwwIndex/rightSidebar"
+    return fetch_html(u, cookie=cookie, proxy=proxy)
+
+
+def parse_thepaper(html, url):
+    try:
+        d = json.loads(html)
+    except Exception:
+        return []
+    data = d.get("data", {})
+    out = []
+    seen = set()
+    for key in ("hotNews", "financialInformationNews", "editorHandpicked", "morningEveningNews"):
+        for it in data.get(key, []) or []:
+            name = it.get("name") or it.get("title") or ""
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            cid = it.get("contId") or ""
+            out.append({"title": name.strip()[:120],
+                        "url": f"https://www.thepaper.cn/newsDetail_forward_{cid}" if cid else "",
+                        "interaction": it.get("interactionNum") or "",
+                        "_site": "thepaper"})
+    return out
+
+
+def match_thepaper(url):
+    return "thepaper.cn" in url
+
+
+register("thepaper", match_thepaper, parse_thepaper, fetch=fetch_thepaper, desc="澎湃新闻")
+
+
+# ===========================================================================
+# 浏览器渲染精配（京东/知乎/微博/抖音/快手：SSR 无数据，需要真实浏览器）
+# ===========================================================================
+
+def browser_fetch(url, cookie="", proxy=None):
+    """用真实浏览器渲染页面后返回 HTML（无头；需登录的站会走登录档案）。"""
+    import subprocess, tempfile, os
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parent.parent
+    node = os.environ.get("UNIVERSAL_SCRAPER_NODE",
+                          "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+    npath = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH",
+                           "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules")
+    spec = {"url": url, "wait": {"selector": "body", "timeout": 25000},
+            "scrollCount": 3, "scrollWait": 1800}
+    with tempfile.TemporaryDirectory() as tmp:
+        sp = _P(tmp) / "spec.json"; out = _P(tmp) / "out"; out.mkdir()
+        sp.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+        cmd = [node, str(root / "scripts/browser_generic.cjs"),
+               "--spec", str(sp), "--out", str(out), "--headless", "1",
+               "--storageState", str(root / "outputs" / ".session" / "session.json")]
+        env = {**os.environ, "NODE_PATH": npath}
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=240)
+        except Exception as e:
+            return {"ok": False, "status": 0, "html": "", "final_url": url, "error": str(e)}
+        files = sorted(out.glob("*.html"))
+        if files:
+            return {"ok": True, "status": 200, "html": files[0].read_text(encoding="utf-8", errors="replace"),
+                    "final_url": url}
+        return {"ok": False, "status": 0, "html": "", "final_url": url, "error": "渲染无输出"}
+
+
+def parse_browser_generic(html, url, site):
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    cfg = {
+        "jd": {"row": ".gl-item, .gl-warp .gl-item, li[data-sku], .search-product-list .product-item",
+               "title": ".p-name a, .p-name em, .title a", "link": ".p-name a, .title a",
+               "price": ".p-price i, .price i, .p-price"},
+        "weibo": {"row": ".card-wrap, .card, .m-item-list li",
+                  "title": ".txt, h2, .title, a[href*='/weibo?']", "link": "a[href*='weibo.com/']"},
+        "zhihu": {"row": ".SearchResult-Card, .List-item, .search-result-card",
+                  "title": ".ContentItem-title, h2, .title", "link": "a[href*='zhihu.com/']"},
+        "douyin": {"row": "[data-e2e='search-card'], .xgplayer, .video-card, .search-result-card",
+                   "title": "[data-e2e='search-card-title'], .title, h3", "link": "a[href*='douyin.com/video/']"},
+        "kuaishou": {"row": ".video-card, .search-result-card, .card",
+                     "title": ".title, h3, .video-title", "link": "a[href*='kuaishou.com/']"},
+    }.get(site, {})
+    out = []
+    for el in doc.cssselect(cfg.get("row", "body > *"))[:30]:
+        title = ""
+        for sel in (cfg.get("title") or "").split(","):
+            sel = sel.strip()
+            if not sel:
+                continue
+            els = el.cssselect(sel)
+            if els:
+                title = els[0].text_content().strip()
+                break
+        if not title:
+            continue
+        link = ""
+        for sel in (cfg.get("link") or "").split(","):
+            sel = sel.strip()
+            if not sel:
+                continue
+            els = el.cssselect(sel)
+            if els and els[0].get("href"):
+                link = els[0].get("href")
+                if link.startswith("//"):
+                    link = "https:" + link
+                break
+        out.append({"title": title[:120], "url": link, "_site": site})
+    return out
+
+
+SITE_DOMAINS = {"jd": "jd.com", "weibo": "weibo.com", "zhihu": "zhihu.com",
+                "douyin": "douyin.com", "kuaishou": "kuaishou.com"}
+for _name, _dom in SITE_DOMAINS.items():
+    def _mk(_n, _d):
+        def matcher(url):
+            return _d in url
+        def parse(html, url):
+            return parse_browser_generic(html, url, _n)
+        return matcher, parse
+    _m, _p = _mk(_name, _dom)
+    register(_name, _m, _p, fetch=browser_fetch, desc=f"{_name}（浏览器渲染）")
