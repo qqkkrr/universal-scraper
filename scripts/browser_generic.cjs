@@ -22,6 +22,7 @@ let chromium = null;
 try { chromium = require("patchright").chromium; } catch (e) { chromium = require("playwright").chromium; }
 
 const HOME = process.env.HOME || "/Users/kairanqin";
+const USER_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const HEADLESS_SHELL = process.env.PW_EXECUTABLE
   || `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 const FULL_CHROME = process.env.PW_FULL_CHROME
@@ -139,12 +140,16 @@ async function main() {
   const scrollCount = parseInt(arg("scrollCount", "0"), 10);
   const scrollWait = parseInt(arg("scrollWait", "2000"), 10);
   const loginTimeout = parseInt(arg("loginTimeout", "600000"), 10);
+  const profileDir = arg("profile", null);
+  // 真实 Chrome（用户日常浏览器）比 Chrome for Testing 更接近真人，风控识别率低
+  const CHROME_EXE = fs.existsSync(USER_CHROME) ? USER_CHROME : FULL_CHROME;
 
   let browser = null;
+  let context = null;
+  let page = null;
   try {
     const headless = arg("headless", "1") !== "0";
-    browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox"] });
-    const ctxOpts = storageState && fs.existsSync(storageState) ? { storageState } : {};
+    const ctxOpts = (!profileDir && storageState && fs.existsSync(storageState)) ? { storageState } : {};
     const proxy = parseProxy(arg("proxy", null));
     if (proxy) ctxOpts.proxy = proxy;
     // 指纹随机化：视口/UA/时区/语言（反检测，patchright/camoufox 思路的轻量版）
@@ -168,8 +173,21 @@ async function main() {
       // 注入 WebGL/Canvas 指纹噪声（patchright 同款思路的极简实现）
       ctxOpts.extraHTTPHeaders = { "Accept-Language": "zh-CN,zh;q=0.9" };
     }
-    const context = await browser.newContext(ctxOpts);
-    const page = await context.newPage();
+    if (profileDir) {
+      // 持久档案模式：登录态保存在档案目录，登录一次永久复用（最接近真实浏览器）
+      fs.mkdirSync(profileDir, { recursive: true });
+      context = await chromium.launchPersistentContext(profileDir, {
+        ...ctxOpts,
+        headless: false,          // 必须真实窗口（登录/验证需要）
+        executablePath: CHROME_EXE,
+        args: ["--no-sandbox", "--disable-blink-features=AutomationControlled", "--lang=zh-CN"],
+      });
+      page = context.pages()[0] || await context.newPage();
+    } else {
+      browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox"] });
+      context = await browser.newContext(ctxOpts);
+      page = await context.newPage();
+    }
 
     // 网络捕获：拦截 SPA 自己发出的签名 API（不逆向签名）
     const captures = spec.capture || [];
@@ -198,7 +216,7 @@ async function main() {
     // 1) 是否需要登录：无会话 → 需要；有会话但目标页仍显示登录 → 重新登录
     let needLogin = false;
     if (spec.login && spec.login.enabled) {
-      needLogin = !(storageState && fs.existsSync(storageState));
+      needLogin = !profileDir && !(storageState && fs.existsSync(storageState));
       if (!needLogin) {
         try {
           await page.goto(spec.url, { timeout: 45000, waitUntil: "domcontentloaded" });

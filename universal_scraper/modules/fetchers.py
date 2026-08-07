@@ -331,6 +331,7 @@ class BrowserFetcher(BaseFetcher):
             cmd = [_NODE_BIN, str(self.scripts_dir / "browser_generic.cjs"),
                    "--spec", str(spec_file), "--out", str(out_dir),
                    "--headless", "0",
+                   "--profile", str(Path(self.scripts_dir).parent / "outputs" / ".browser_profile"),
                    "--storageState", str(ss),
                    "--scrollCount", str(self.config.get("scroll_count", 0)),
                    "--scrollWait", str(self.config.get("scroll_wait_ms", 2000)),
