@@ -57,7 +57,8 @@ v3 任务包 config.json 结构（字段含义）：
 - 日期范围：把用户说的"2025年1月1日到1月3日"转成 **北京时间** 的 Unix 秒，用 between 过滤（min=2025-01-01 00:00 CST，max=2025-01-04 00:00 CST）。
 - 翻页：HTML 用 extract_links，allow 建议写**锚定路径正则**（如 "^/page/\\d+/$"），引擎会按 URL 路径匹配，防止误吃 /tag/xxx/page/1/ 这类同构 URL；JSON 分页用 type=json_paged（records_path/strategy=page_param/page_param/page_size/max_pages/fields）。
 - 选择器要根据网站常见结构推断（.item/.list/table tr 等），宁可宽一点；字段 CSS 可直接写 ".text" 或 ".text::text"，两种都支持。
-- 需要登录/验证码的网站：source.type 用 browser，并在 anti_bot 里加 "captcha":{"strategy":"auto"}；如果用户没提供登录方式，仍输出配置并在 config 里保留说明字段 "requires_login": true。
+- 需要登录的网站（大众点评/小红书/微博/淘宝等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
+- 验证码：anti_bot 加 "captcha":{"strategy":"auto"}（自动识别，失败则人工兜底）。
 - 只输出 JSON 对象本身。"""
 
 
@@ -188,6 +189,44 @@ def _validate_and_fix(cfg: dict) -> dict:
     return cfg
 
 
+_AUTH_HINTS = ("验证码", "滑动验证", "安全验证", "人机验证", "访问过于频繁",
+              "请登录", "登录后", "请输入手机号", "微信扫码登录", "app 扫码登录")
+
+
+def _diagnose_failure(urls, result, log) -> str:
+    """失败原因诊断（说人话）：404 / 登录验证码 / 字体反爬 / 选择器不匹配。"""
+    reasons = []
+    if result.get("errors", 0) > 0:
+        reasons.append(f"请求错误 {result['errors']} 次")
+    if result.get("error"):
+        reasons.append(str(result["error"])[:120])
+    for u in (urls or [])[:1]:
+        if not str(u).startswith("http"):
+            continue
+        try:
+            from .quick import fetch_url
+            r = fetch_url(str(u), browser=False)
+            st = r.get("status")
+            if st == 404:
+                reasons.append("入口网址不存在（HTTP 404，网站可能改版或网址是 AI 猜的）")
+            elif st and st >= 400:
+                reasons.append(f"入口网址被拦截（HTTP {st}，多为反爬拒绝或需要登录）")
+            raw = (r.get("text") or "")
+            head = raw[:3000]
+            hit = next((k for k in _AUTH_HINTS if k in head), None)
+            if hit:
+                reasons.append(
+                    f"页面出现「{hit}」→ 网站要求登录/验证码。"
+                    "解决：重跑时工具会弹出浏览器，你手动登录一次，登录态会自动保存并复用（无需写代码）")
+            if "@font-face" in raw or "woff" in raw.lower() or "font-face" in head:
+                reasons.append("页面疑似使用字体反爬（数字/文字被自定义字体混淆，需解码字体映射）")
+        except Exception:
+            pass
+    if not reasons:
+        reasons.append("选择器未匹配到内容（可能页面结构变化，或需要浏览器渲染/登录）")
+    return "；".join(dict.fromkeys(reasons))  # 去重保序
+
+
 def _page_context(url: str, max_chars: int = 2500) -> str:
     """抓入口页 → 结构摘要/Markdown 摘要（对标 scrape-mcp/cortex-scout：给 LLM 的是省 token 的文本，
     不是整页 HTML）。失败返回空字符串。"""
@@ -262,19 +301,35 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
 
     last_result = {}
     last_log = ""
+    sample: List[Dict[str, Any]] = []
     for round_i in range(1, rounds + 1):
         # 写任务包
         (task_dir / "modules").mkdir(parents=True, exist_ok=True)
         (task_dir / "config.json").write_text(
             json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        # 运行
-        log(f"▶️ 第 {round_i} 轮运行...")
+        # 运行（带超时保护：单轮最多 round_timeout 秒，超时强制终止并停止重试，绝不无限转圈）
+        import os as _os
+        import threading as _th
+        round_timeout = int(_os.environ.get("US_AUTO_ROUND_TIMEOUT", "240"))
+        log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
         from .engine_v3 import run_task
         from .log import Logger
         log_file = ROOT / "outputs" / f".run_{name}.log"
+        _box = {}
+        def _run_round():
+            _box["r"] = run_task(task_dir, limit=limit, log_file=log_file)
+        _t = _th.Thread(target=_run_round, daemon=True)
+        _t.start()
+        _t.join(timeout=round_timeout)
+        if _t.is_alive():
+            log(f"⏱️ 本轮超过 {round_timeout}s 未结束，已强制终止（不再重试，避免无限等待）")
+            result = {"total": 0, "fetched": 0, "errors": -2, "error": f"运行超时（>{round_timeout}s）"}
+            last_result = result
+            last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
+            break
         try:
-            result = run_task(task_dir, limit=limit, log_file=log_file)
+            result = _box.get("r")
             last_result = result
             last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
         except Exception as e:
@@ -334,6 +389,15 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         fp = ROOT / "outputs" / f"{name}.{ext}"
         if fp.exists():
             files[ext] = str(fp.relative_to(ROOT))
+    # 最终总结：说人话，不再让用户以为卡死
+    total = (last_result or {}).get("total", 0)
+    real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
+    if total > 0 and real:
+        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段），导出 {list(files)}"
+    else:
+        reason = _diagnose_failure(cfg.get("start_urls"), last_result, log)
+        summary = f"⚠️ 任务结束：0 条。原因诊断：{reason}"
+        log(summary)
     return {
         "name": name,
         "config": cfg,
@@ -341,6 +405,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         "log": last_log[-3000:],
         "sample": sample,
         "files": files,
+        "summary": summary,
+        "done": True,
     }
 
 

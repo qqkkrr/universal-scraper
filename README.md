@@ -115,6 +115,19 @@ python3 -m universal_scraper.cli run --config configs/ggzy_datacenter_2025-01.js
 python3 -m universal_scraper.cli run --config configs/ggzy_datacenter_2025-01.json --resume
 ```
 
+## 🔐 高反爬站点（大众点评/小红书/淘宝）的正确用法
+
+这类站点必须登录 + 浏览器渲染，工具内置登录态持久化（首次弹出浏览器人工登录一次，自动保存复用）：
+
+```bash
+python3 -m universal_scraper.cli auto "抓取大众点评某城市美食列表前10个商家：店名/人均/点评数/地址，需要登录"
+```
+
+AI 会自动生成 `source.type=browser + headless=false + login` 配置：运行时弹出真实浏览器 → 你手动登录/过验证一次 → 自动保存登录态 → 继续自动抓取。之后重跑同一任务无需再登录。
+
+> 大众点评另有**字体反爬**（数字被自定义字体混淆）。0 条时会自动诊断并提示：需要登录 or 字体解码，不再让用户误以为卡死。
+> 单轮自动运行带 240s 超时保护（可用 `US_AUTO_ROUND_TIMEOUT` 调整），超时强制终止并给出原因，绝不无限转圈。
+
 ## 诚实边界
 
 引擎覆盖标准爬虫矩阵（公开网页/API/JS渲染/WAF/验证码四级/增量/并发/代理/下载）。

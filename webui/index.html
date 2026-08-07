@@ -146,8 +146,14 @@ async function doAuto(){
   let html='';
   if(d.error){ html+=`<pre class="err">${escapeHtml(d.error)}</pre>`; }
   else {
-    html+=`<div class="stats"><div>条目 <b>${d.result&&d.result.total}</b></div><div>抓取 <b>${d.result&&d.result.fetched}</b></div><div>错误 <b>${d.result&&d.result.errors}</b></div></div>`;
-    if(d.messages && d.messages.length) html+=`<h4 class="muted" style="margin:8px 0">执行过程</h4><pre>${escapeHtml(d.messages.join('\n'))}</pre>`;
+    const n=d.result&&d.result.total||0;
+    const ok=(n>0);
+    html+=`<div class="card" style="border-color:${ok?'#4ade80':'#f87171'}">
+      <h3 style="color:${ok?'#4ade80':'#f87171'};font-size:18px">${ok?'✅ 任务结束 · 抓取成功':'⚠️ 任务结束 · 0 条'}</h3>
+      <div class="stats"><div>条目 <b>${n}</b></div><div>抓取 <b>${d.result&&d.result.fetched}</b> 页</div><div>错误 <b>${d.result&&d.result.errors}</b></div></div>
+      ${d.summary?`<p class="muted" style="margin-top:6px">${escapeHtml(d.summary)}</p>`:''}
+    </div>`;
+    if(d.messages && d.messages.length) html+=`<h4 class="muted" style="margin:8px 0">执行过程（已结束）</h4><pre>${escapeHtml(d.messages.join('\n'))}</pre>`;
     if(d.sample && d.sample.length) html+=`<h4 class="muted" style="margin:8px 0">数据预览（前 5 条）</h4>`+renderTable(d.sample);
     if(d.files && Object.keys(d.files).length) html+=`<h4 class="muted" style="margin:8px 0">导出文件</h4><pre>${escapeHtml(JSON.stringify(d.files,null,2))}</pre>`;
   }
