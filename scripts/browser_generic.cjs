@@ -594,4 +594,6 @@ async function main() {
   }
 }
 
+// 兜底：即使 browser.close() 挂住，也必须在限时内退出（否则 Python 侧一直等 EOF 卡死）
+setTimeout(() => { try { process.exit(0); } catch (e) {} }, 12000).unref();
 main();

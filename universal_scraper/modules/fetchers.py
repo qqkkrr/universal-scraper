@@ -417,6 +417,7 @@ class BrowserFetcher(BaseFetcher):
                                     text=True, encoding="utf-8", env=env)
             html = ""
             final_url = req.url
+            finished = False
             for line in proc.stdout:
                 line = line.strip()
                 if not line:
@@ -427,6 +428,9 @@ class BrowserFetcher(BaseFetcher):
                     continue
                 t = obj.get("type")
                 msg = obj.get("message") or ""
+                if t == "done":
+                    finished = True
+                    break  # 收到 done 即结束（不再等 EOF——桥的 browser.close 可能挂住）
                 if t in ("login", "verify_required", "login_required"):
                     self._notify(f"⚠️ {msg}")
                 elif t in ("login_ok", "verify_ok"):
@@ -445,7 +449,7 @@ class BrowserFetcher(BaseFetcher):
                 elif t == "error":
                     proc.terminate()
                     raise RuntimeError(msg or "浏览器交互桥错误")
-            proc.wait(timeout=600)
+            proc.wait(timeout=30 if finished else 600)
             if not html:
                 files = sorted(out_dir.glob("*.html"))
                 if files:
