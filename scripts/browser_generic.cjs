@@ -179,10 +179,11 @@ async function main() {
     }
     if (profileDir) {
       // 持久档案模式：登录态保存在档案目录，登录一次永久复用（最接近真实浏览器）
+      // headless 默认有头（登录需要），可显式 --headless 1 无头（登录态已存在时抓取用）
       fs.mkdirSync(profileDir, { recursive: true });
       context = await chromium.launchPersistentContext(profileDir, {
         ...ctxOpts,
-        headless: false,          // 必须真实窗口（登录/验证需要）
+        headless: arg("headless", "0") !== "0",
         executablePath: CHROME_EXE,
         args: ["--no-sandbox", "--disable-blink-features=AutomationControlled", "--lang=zh-CN"],
       });

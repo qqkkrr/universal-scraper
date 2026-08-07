@@ -478,17 +478,18 @@ def browser_fetch(url, cookie="", proxy=None):
                           "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
     npath = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH",
                            "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules")
-    spec = {"url": url, "wait": {"selector": "body", "timeout": 25000},
-            "scrollCount": 3, "scrollWait": 1800}
+    spec = {"url": url, "wait": {"selector": "body", "timeout": 12000},
+            "scrollCount": 1, "scrollWait": 1000}
     with tempfile.TemporaryDirectory() as tmp:
         sp = _P(tmp) / "spec.json"; out = _P(tmp) / "out"; out.mkdir()
         sp.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
         cmd = [node, str(root / "scripts/browser_generic.cjs"),
                "--spec", str(sp), "--out", str(out), "--headless", "1",
+               "--profile", str(root / "outputs" / ".browser_profile"),
                "--storageState", str(root / "outputs" / ".session" / "session.json")]
         env = {**os.environ, "NODE_PATH": npath}
         try:
-            p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=240)
+            p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=120)
         except Exception as e:
             return {"ok": False, "status": 0, "html": "", "final_url": url, "error": str(e)}
         files = sorted(out.glob("*.html"))
