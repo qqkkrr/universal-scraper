@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
@@ -302,7 +303,7 @@ class BrowserFetcher(BaseFetcher):
                 return
             except Exception:
                 pass
-        print(msg, flush=True)
+        print(msg, file=sys.stderr, flush=True)  # 必须 stderr：MCP stdio 场景 stdout 是协议流
 
     # ---- 会话池 ----
     def _ensure_pool(self):

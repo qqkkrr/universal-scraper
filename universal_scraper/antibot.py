@@ -145,12 +145,13 @@ def solve_nopecha(
 # ---------------------------------------------------------------- Level 4: 人机结合
 
 def human_solve(image_path: Path, answer_file: Path, prompt: str = "") -> str:
-    """人机结合：打印提示，等用户输入答案（交互式）。"""
-    print("\n" + "=" * 60)
-    print(f"[人机验证] 请打开图片查看验证码: {image_path}")
+    """人机结合：打印提示（stderr，防污染 MCP/WebUI 的 stdout 协议），等用户输入答案（交互式）。"""
+    import sys as _sys
+    print("\n" + "=" * 60, file=_sys.stderr)
+    print(f"[人机验证] 请打开图片查看验证码: {image_path}", file=_sys.stderr)
     if prompt:
-        print(f"提示: {prompt}")
-    print("输入验证码后回车（或输入 q 退出）: ", end="", flush=True)
+        print(f"提示: {prompt}", file=_sys.stderr)
+    print("输入验证码后回车（或输入 q 退出）: ", end="", flush=True, file=_sys.stderr)
     ans = input().strip()
     answer_file.write_text(ans, encoding="utf-8")
     return ans
