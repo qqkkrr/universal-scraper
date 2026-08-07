@@ -400,6 +400,13 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     if limit:
         cfg.setdefault("queue", {})["max_requests"] = int(limit) + 5
     log(f"✅ 配置已生成（source={cfg.get('source', {}).get('type')}）")
+    _src = cfg.get("source", {}) or {}
+    _verify = _src.get("verify") or {}
+    _login = _src.get("login") or {}
+    if _verify.get("enabled") or _login.get("enabled"):
+        wait_s = int(_verify.get("max_wait_ms", 300000)) // 1000
+        log(f"⚠️ 网站需要人工验证/登录：即将弹出真实浏览器，请在弹出的窗口中完成滑块/点选/登录"
+            f"（最长等待 {wait_s} 秒），完成后自动继续并保存会话")
 
     last_result = {}
     last_log = ""

@@ -289,6 +289,11 @@ class BrowserFetcher(BaseFetcher):
                 self._cond.notify_all()
 
     def fetch(self, req: Request) -> Response:
+        # 人工交互场景（登录 / 整页验证码 / headless=false 弹窗）→ browser_generic.cjs
+        if (self.config.get("login") or {}).get("enabled") or \
+           (self.config.get("verify") or {}).get("enabled") or \
+           self.config.get("headless") is False:
+            return self._fetch_interactive(req)
         # 多代理轮换：逐请求换代理，必须走单页桥（池是固定代理）
         if self._single_proxy_mode:
             return self._fetch_single(req)
@@ -296,6 +301,74 @@ class BrowserFetcher(BaseFetcher):
         if pool is not None:
             return self._fetch_pool(pool, req)
         return self._fetch_single(req)
+
+    def _fetch_interactive(self, req: Request) -> Response:
+        """人工交互浏览器取数：登录 / 整页验证码（大众点评/美团验证中心）/ headless=false 弹窗。
+        走 scripts/browser_generic.cjs（支持 login + verify + 会话持久化 + 等真人过验证）。"""
+        import json as _json, subprocess, tempfile
+        spec = {
+            "url": req.url,
+            "js_pre": self.config.get("js_pre"),
+            "login": self.config.get("login"),
+            "verify": self.config.get("verify"),
+            "fingerprint": self.config.get("fingerprint"),
+            "capture": self.config.get("capture"),
+        }
+        wait_sel = self.config.get("wait_selector")
+        wait_to = int(self.config.get("wait_timeout") or 30000)
+        for a in (self.config.get("actions") or []):
+            if isinstance(a, dict) and a.get("type") == "wait" and a.get("selector"):
+                wait_sel = a["selector"]
+                wait_to = int(a.get("timeout") or wait_to)
+        if wait_sel:
+            spec["wait"] = {"selector": wait_sel, "timeout": wait_to}
+        with tempfile.TemporaryDirectory(prefix="us_int_") as tmp:
+            spec_file = Path(tmp) / "spec.json"
+            out_dir = Path(tmp) / "pages"
+            out_dir.mkdir()
+            spec_file.write_text(_json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+            ss = self.session_dir / "session.json"
+            cmd = [_NODE_BIN, str(self.scripts_dir / "browser_generic.cjs"),
+                   "--spec", str(spec_file), "--out", str(out_dir),
+                   "--headless", "0",
+                   "--storageState", str(ss),
+                   "--scrollCount", str(self.config.get("scroll_count", 0)),
+                   "--scrollWait", str(self.config.get("scroll_wait_ms", 2000))]
+            env = {**os.environ, "NODE_PATH": _NODE_PATH}
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, encoding="utf-8", env=env)
+            html = ""
+            final_url = req.url
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = _json.loads(line)
+                except Exception:
+                    continue
+                t = obj.get("type")
+                msg = obj.get("message") or ""
+                if t in ("login", "verify_required"):
+                    print(f"⚠️ {msg}", flush=True)
+                elif t in ("login_ok", "verify_ok"):
+                    print(f"✅ 会话已保存: {obj.get('storageState', '')}", flush=True)
+                elif t == "verify_passed":
+                    print(f"✅ {msg}", flush=True)
+                elif t == "page":
+                    f = obj.get("file")
+                    if f and Path(f).exists():
+                        html = Path(f).read_text(encoding="utf-8", errors="replace")
+                elif t == "error":
+                    proc.terminate()
+                    raise RuntimeError(msg or "浏览器交互桥错误")
+            proc.wait(timeout=600)
+            if not html:
+                files = sorted(out_dir.glob("*.html"))
+                if files:
+                    html = files[0].read_text(encoding="utf-8", errors="replace")
+        return Response(request=req, status=200, body=html.encode("utf-8"),
+                        text=html, json=None, url=final_url)
 
     def _fetch_pool(self, pool, req: Request) -> Response:
         import json as _json, threading
