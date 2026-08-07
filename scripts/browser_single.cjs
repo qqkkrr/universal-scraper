@@ -41,7 +41,7 @@ async function main() {
     if (waitSel) await page.waitForSelector(waitSel, { timeout: 30000 }).catch(() => {});
     for (let s = 0; s < scrollCount; s++) {
       if (stopRequested()) { out({ type: "stopped", url }); process.exit(0); }
-      await page.evaluate(() => { window.scrollTo(0, document.body.scrollHeight); window.dispatchEvent(new Event("scroll")); });
+      await page.evaluate(() => { const _h = document.documentElement ? document.documentElement.scrollHeight : (document.body ? document.body.scrollHeight : 0); window.scrollTo(0, _h); window.dispatchEvent(new Event("scroll")); });
       await sleep(scrollWait);
     }
     if (stopRequested()) { out({ type: "stopped", url }); process.exit(0); }

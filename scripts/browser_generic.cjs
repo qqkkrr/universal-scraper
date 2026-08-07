@@ -520,12 +520,12 @@ async function main() {
         if (beh.human_scroll) {
           const steps = 3 + Math.floor(Math.random() * 4);
           for (let st = 0; st < steps; st++) {
-            await page.evaluate((pct) => window.scrollTo(0, document.body.scrollHeight * pct), (st + 1) / steps);
+            await page.evaluate((pct) => { const _h = document.documentElement ? document.documentElement.scrollHeight : (document.body ? document.body.scrollHeight : 0); window.scrollTo(0, _h * pct); }, (st + 1) / steps);
             await sleep(250 + Math.random() * 500);
           }
         } else {
           await page.evaluate(() => {
-            window.scrollTo(0, document.body.scrollHeight);
+            const _h = document.documentElement ? document.documentElement.scrollHeight : (document.body ? document.body.scrollHeight : 0); window.scrollTo(0, _h);
             window.dispatchEvent(new Event("scroll"));
           });
         }

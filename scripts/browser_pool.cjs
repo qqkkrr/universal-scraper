@@ -33,7 +33,7 @@ async function renderPage(context, req, stealthApplied) {
     await runActions(page, req.actions);
     if (req.wait) await page.waitForSelector(req.wait, { timeout: 30000 }).catch(() => {});
     for (let s = 0; s < (req.scroll || 0); s++) {
-      await page.evaluate(() => { window.scrollTo(0, document.body.scrollHeight); window.dispatchEvent(new Event("scroll")); });
+      await page.evaluate(() => { const _h = document.documentElement ? document.documentElement.scrollHeight : (document.body ? document.body.scrollHeight : 0); window.scrollTo(0, _h); window.dispatchEvent(new Event("scroll")); });
       await sleep(1500);
     }
     const html = await page.evaluate(() => document.documentElement.outerHTML);
