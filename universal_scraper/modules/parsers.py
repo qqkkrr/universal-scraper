@@ -200,20 +200,33 @@ class JsonPagedParser(BaseParser):
             # 从 URL 查询参数推断起始页（--url 覆盖入口时无需 meta.page）
             import urllib.parse as _up
             qs = _up.parse_qs(_up.urlsplit(resp.request.url).query)
-            pp = cfg.get("page_param") or (cfg.get("offset_param") and None)
+            pp = cfg.get("page_param") or cfg.get("offset_param")
             if pp and pp in qs:
                 try:
-                    page = int(qs[pp][0])
+                    val = int(qs[pp][0])
                 except (ValueError, TypeError):
-                    pass
+                    val = None
+                if val is not None:
+                    if cfg.get("strategy") == "offset" and cfg.get("page_size"):
+                        page = val // int(cfg["page_size"]) + 1
+                    else:
+                        page = val
         if page >= max_pages:
             return result
         total = jpath(data, cfg.get("total_path", ""), None) if cfg.get("total_path") else None
         page_size = int(cfg.get("page_size", len(rows) or 1))
+        total_n = None
+        if total is not None:
+            try:
+                # 兼容 "1,000" / "1000" / 1000 等格式；纯非数字视为"未知"→继续翻页（由 max_pages 兜底）
+                _digits = re.sub(r"[^\d]", "", str(total))
+                total_n = int(_digits) if _digits else None
+            except (TypeError, ValueError):
+                total_n = None
 
         # 还有下一页？
-        if total is not None:
-            if page * page_size >= int(total):
+        if total_n is not None:
+            if page * page_size >= total_n:
                 return result
         elif not rows:
             return result

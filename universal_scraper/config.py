@@ -174,6 +174,9 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
             if pt and pt not in ALL_PARSER_TYPES:
                 raise ConfigError(f"parsers.{pname}.type", f"未知解析器类型 '{pt}'",
                                   f"可选: {', '.join(sorted(ALL_PARSER_TYPES))}")
+            if pt == "llm" and not (pcfg or {}).get("schema"):
+                raise ConfigError(f"parsers.{pname}.schema", "llm 解析器需要 schema（字段定义）",
+                                  '例如: {"type": "llm", "schema": {"标题": "...", "价格": "..."}}')
     st = cfg.get("storage", {})
     if st.get("type", "jsonl") not in ALL_STORAGE_TYPES and not has_custom_storage:
         raise ConfigError("storage.type", f"未知存储类型 '{st.get('type')}'",

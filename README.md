@@ -968,3 +968,20 @@ AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429
 
 测试：`run_tests30-36` 共 **111 项全绿**（新增 `run_tests36` 12 项：代理回调/快失败/login 不污染/
 自定义解析器/进度回传/engine log_cb）。真实链路：新浪 GBK 820 条 0 乱码 + log_cb 实时进度。
+
+## 第三十五轮：第三轮 review 修复批次（分页健壮性 / 并发锁 / 误判修复）
+
+- **#1 JsonPaged 分页崩溃**：`total` 兼容 `"1,000"`/`"1000"`/数字/空；纯非数字视为"未知"→继续翻页由 max_pages 兜底（复现崩溃已消除）。
+- **#2 ProxyPool 并发锁**：`next/mark_fail/mark_ok/reset/alive_count/summary` 全部加锁（SessionPool 多 worker 回调安全）。
+- **#3 CaptchaMiddleware 误判**：只有"真图片"（PNG/JPEG/GIF/RIFF magic 或 image content-type）才当验证码求解；普通页面提到"验证码"不再整页误存；文件名 hash()→md5（跨进程稳定）。
+- **#4 WebUI 请求体上限**：`_read_body` 拒绝 >5MB（防 share 模式内存 DoS）。
+- **#5 日志去重**：`_notify` 只回传回调，不再重复写日志文件。
+- **#6 structure 探测直连**：绕过 Clash 系统代理（与 proxy_fetch 一致）。
+- **#7 crawl_url 异常清理**：坏地址不再残留临时 jsonl；`files` 只列真实存在的导出文件。
+- **#8 页码推断修正**：offset 策略也能从 URL 推断起始页。
+- **#9 config 校验**：`llm` 解析器必须带 `schema`。
+- **#10 task_bundle 清理**：import 归位、无用循环删除；`save_result` hash→md5。
+- **#11 webhook 限频**：`on_error` 5 秒内只发一次（防重试风暴）。
+- **#13 dianping 智能解码**：改用 `smart_decode`（GBK 站点不炸）。
+
+测试：`run_tests30-37` 共 **131 项全绿**（新增 `run_tests37` 20 项）。真实链路：新浪 GBK 820 条 0 乱码；`us doctor` 15/19（缺的可选依赖自动降级）。

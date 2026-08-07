@@ -2,6 +2,7 @@
 """任务包脚手架：生成标准任务目录（配置 + 可改模块模板）。"""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 TASK_CONFIG_TEMPLATE = {
@@ -83,16 +84,11 @@ python3 -m universal_scraper.cli run --task {path}
 def scaffold_task(name: str, out: Path) -> Path:
     root = out if out.suffix == "" else out.parent / out.stem
     (root / "modules").mkdir(parents=True, exist_ok=True)
-    cfg = json_loads(json_dumps(TASK_CONFIG_TEMPLATE))
+    cfg = json.loads(json.dumps(TASK_CONFIG_TEMPLATE))
     cfg["name"] = name
-    for k in ("storage", "output"):
-        cfg[k]["name"] = name if k == "storage" else name
-        if k == "output":
-            cfg[k]["base_name"] = name
-    (root / "config.json").write_text(json_dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    cfg["storage"]["name"] = name
+    cfg["output"]["base_name"] = name
+    (root / "config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (root / "modules" / "parser.py").write_text(PARSER_TEMPLATE, encoding="utf-8")
     (root / "README.md").write_text(TASK_README.format(name=name, path=root), encoding="utf-8")
     return root
-
-
-from json import dumps as json_dumps, loads as json_loads  # noqa: E402

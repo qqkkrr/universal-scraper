@@ -200,16 +200,8 @@ class EngineV3:
             self.logger.info(f"增量去重已开启（已见 {len(self._seen_store)} 条，{mode}）")
 
     def _notify(self, msg: str, level: str = "INFO") -> None:
-        """统一进度通道：写日志 + 回传回调（WebUI job.messages）。"""
-        try:
-            if level == "WARN":
-                self.logger.warn(msg)
-            elif level == "ERROR":
-                self.logger.error(msg)
-            else:
-                self.logger.info(msg)
-        except Exception:
-            pass
+        """统一进度通道：只回传回调（WebUI job.messages）。
+        注意：调用方需自行写日志（logger.info/warn），避免同一条消息在日志文件出现两次。"""
         if self._log_cb:
             try:
                 self._log_cb(msg)

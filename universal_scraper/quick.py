@@ -105,8 +105,10 @@ def save_result(result: Dict[str, Any], out: Optional[str] = None,
     if out:
         fp = Path(out)
     else:
+        import hashlib
         ext = ".json" if as_json else ".md"
-        fp = Path(f"outputs/fetch_{abs(hash(result.get('url', ''))) % 100000}{ext}")
+        h = hashlib.md5(str(result.get("url", "")).encode()).hexdigest()[:12]
+        fp = Path(f"outputs/fetch_{h}{ext}")
     fp.parent.mkdir(parents=True, exist_ok=True)
     if as_json:
         fp.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
@@ -171,14 +173,17 @@ def crawl_url(url: str, depth: int = 2, max_pages: int = 100, allow: Optional[st
         result = run_task(tdir)
     finally:
         shutil.rmtree(tdir, ignore_errors=True)
-    # 清理临时 jsonl（导出已生成标准 json/csv/xlsx）
-    try:
-        (Path("outputs/items") / f"crawl_{h}.jsonl").unlink(missing_ok=True)
-    except Exception:
-        pass
+        # 临时 jsonl 也清理（异常路径不残留）
+        try:
+            (Path("outputs/items") / f"crawl_{h}.jsonl").unlink(missing_ok=True)
+        except Exception:
+            pass
     result["base_name"] = base
-    result["files"] = {
-        "json": f"outputs/{base}.json", "csv": f"outputs/{base}.csv",
-        "xlsx": f"outputs/{base}.xlsx",
-    }
+    # 只报真实存在的导出文件，防止"导出失败还报成功"误导
+    files = {}
+    for ext in ("json", "csv", "xlsx"):
+        fp = Path("outputs") / f"{base}.{ext}"
+        if fp.exists():
+            files[ext] = str(fp)
+    result["files"] = files
     return result

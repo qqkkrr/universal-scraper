@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import itertools
 import random
+import threading
 import time
 from typing import List, Optional
 
@@ -26,41 +27,46 @@ class ProxyPool:
         self._dead_until: dict = {}          # proxy -> 冷却截止时间
         self._fail_streak: dict = {}         # proxy -> 连续失败次数
         self._last_fail: Optional[str] = None
+        self._lock = threading.Lock()        # 多 worker 并发调用（SessionPool 回调）
 
     def next(self) -> Optional[str]:
-        """取下一个可用代理；全部冷却中返回 None（调用方直连）。"""
-        if not self.proxies:
-            return None
-        now = time.time()
-        for _ in range(len(self.proxies)):
-            if self.mode == "random":
-                p = random.choice(self.proxies)
-            else:
-                p = next(self._iter) if self._iter else None
-            if p is None:
+        """取下一个可用代理；全部冷却中返回 None（调用方直连）。线程安全。"""
+        with self._lock:
+            if not self.proxies:
                 return None
-            if now >= self._dead_until.get(p, 0):
-                return p
-        return None
+            now = time.time()
+            for _ in range(len(self.proxies)):
+                if self.mode == "random":
+                    p = random.choice(self.proxies)
+                else:
+                    p = next(self._iter) if self._iter else None
+                if p is None:
+                    return None
+                if now >= self._dead_until.get(p, 0):
+                    return p
+            return None
 
     def mark_fail(self, proxy: Optional[str]) -> None:
         if not proxy:
             return
-        self._last_fail = proxy
-        streak = self._fail_streak.get(proxy, 0) + 1
-        self._fail_streak[proxy] = streak
-        cd = self.cooldown * (self.fail_multiplier ** max(0, streak - 1))
-        self._dead_until[proxy] = time.time() + min(cd, self.max_cooldown)
+        with self._lock:
+            self._last_fail = proxy
+            streak = self._fail_streak.get(proxy, 0) + 1
+            self._fail_streak[proxy] = streak
+            cd = self.cooldown * (self.fail_multiplier ** max(0, streak - 1))
+            self._dead_until[proxy] = time.time() + min(cd, self.max_cooldown)
 
     def mark_ok(self, proxy: Optional[str]) -> None:
         if not proxy:
             return
-        self._fail_streak[proxy] = 0
-        self._dead_until.pop(proxy, None)
+        with self._lock:
+            self._fail_streak[proxy] = 0
+            self._dead_until.pop(proxy, None)
 
     def reset(self) -> None:
-        self._dead_until.clear()
-        self._fail_streak.clear()
+        with self._lock:
+            self._dead_until.clear()
+            self._fail_streak.clear()
 
     @property
     def size(self) -> int:
@@ -69,7 +75,9 @@ class ProxyPool:
     @property
     def alive_count(self) -> int:
         now = time.time()
-        return sum(1 for p in self.proxies if now >= self._dead_until.get(p, 0))
+        with self._lock:
+            return sum(1 for p in self.proxies if now >= self._dead_until.get(p, 0))
 
     def summary(self) -> str:
-        return f"{self.alive_count}/{self.size} 可用" + (f"，最近失败 {self._last_fail}" if self._last_fail else "")
+        with self._lock:
+            return f"{self.alive_count}/{self.size} 可用" + (f"，最近失败 {self._last_fail}" if self._last_fail else "")

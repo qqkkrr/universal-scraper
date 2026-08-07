@@ -44,8 +44,9 @@ def fetch_search_page(keyword: str, city: int = 2, cookie: str = "",
         opener.add_handler(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
     req = urllib.request.Request(url, headers=headers)
     try:
+        from .core import smart_decode
         r = opener.open(req, timeout=timeout)
-        html = r.read(500000).decode("utf-8", "ignore")
+        html = smart_decode(r.read(500000), {k.lower(): v for k, v in r.headers.items()})
         final = r.geturl()
         return {"ok": True, "status": r.status, "final_url": final, "html": html}
     except urllib.error.HTTPError as e:

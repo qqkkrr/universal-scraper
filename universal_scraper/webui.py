@@ -215,8 +215,12 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, code=200):
         self._send(code, json.dumps(obj, ensure_ascii=False, default=str))
 
+    MAX_BODY = 5 * 1024 * 1024
+
     def _read_body(self) -> dict:
         n = int(self.headers.get("Content-Length", 0))
+        if n > self.MAX_BODY:
+            raise ValueError("请求体过大（>5MB），已拒绝")
         return json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
 
     def _auth_ok(self, headers) -> bool:

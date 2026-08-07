@@ -39,19 +39,29 @@ class CaptchaMiddleware(BaseMiddleware):
         self.out_dir = None
 
     def on_response(self, resp: Response, ctx: ParseContext):
+        import hashlib
         import re
         from pathlib import Path
         from ..antibot import solve_captcha_file
+        body = resp.body or b""
         text = resp.text[:2000] if resp.text else ""
-        if re.search(self.detect, text, re.I) or b"image" in resp.body[:64]:
-            out = Path(ctx.vars.get("_captcha_dir", "/tmp/universal_scraper_captcha"))
-            out.mkdir(parents=True, exist_ok=True)
-            fp = out / f"captcha_{abs(hash(resp.url)) % 100000}.png"
-            fp.write_bytes(resp.body)
-            res = solve_captcha_file(str(fp), ctx.config.get("anti_bot", {}))
-            if res.get("answer"):
-                ctx.vars["captcha_answer"] = res["answer"]
-                ctx.vars["captcha_image"] = str(fp)
+        ctype = (resp.headers.get("content-type") or "") if hasattr(resp, "headers") else ""
+        # 只有"确实是图片"才当验证码解（防止普通页面提到"验证码"三字就被整页误存）
+        is_image = (body[:8].startswith(b"\x89PNG") or body[:3] == b"\xff\xd8\xff"
+                    or body[:4] in (b"GIF8", b"RIFF") or "image" in str(ctype).lower())
+        if not is_image:
+            if re.search(self.detect, text, re.I):
+                from ..core import log as _log
+                _log(f"  页面含验证码字样但非图片响应，跳过自动求解（url={resp.url[:80]}）", "DEBUG")
+            return resp
+        out = Path(ctx.vars.get("_captcha_dir", "/tmp/universal_scraper_captcha"))
+        out.mkdir(parents=True, exist_ok=True)
+        fp = out / f"captcha_{hashlib.md5(str(resp.url).encode()).hexdigest()[:12]}.png"
+        fp.write_bytes(body)
+        res = solve_captcha_file(str(fp), ctx.config.get("anti_bot", {}))
+        if res.get("answer"):
+            ctx.vars["captcha_answer"] = res["answer"]
+            ctx.vars["captcha_image"] = str(fp)
         return resp
 
 
@@ -84,6 +94,12 @@ class NotifyMiddleware(BaseMiddleware):
             log(f"webhook 发送失败: {e}", "WARN")
 
     def on_error(self, req, error, ctx):
+        # 限频：同一时刻 5s 内只发一次（避免重试风暴刷爆 webhook）
+        import time as _t
+        now = _t.time()
+        if now - getattr(self, "_last_err_ts", 0) < 5:
+            return
+        self._last_err_ts = now
         self._post({"event": "error", "url": req.url, "error": str(error)[:300]})
 
     def on_data(self, item, ctx):

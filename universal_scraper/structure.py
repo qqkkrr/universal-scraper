@@ -25,7 +25,9 @@ def _fetch(url: str, timeout: Optional[int] = None) -> Optional[Dict[str, Any]]:
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        # 显式直连（绕过 Clash 等系统代理，避免探测被代理挂起/干扰）
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=timeout) as r:
             raw = r.read()
             ctype = (r.headers.get("Content-Type") or "").lower()
             if "json" in ctype:
