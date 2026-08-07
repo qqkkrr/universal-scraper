@@ -216,6 +216,33 @@ class Handler(BaseHTTPRequestHandler):
                             "status": j["status"], "summary": j["summary"],
                             "created": j["created"]} for j in reversed(list(JOBS.values()))][:20]
                 self._json(lst)
+            elif u.path == "/api/test-cookie":
+                from urllib.parse import unquote as _uq
+                cookie = q.get("cookie", [""])[0]
+                url = q.get("url", [""])[0]
+                if not cookie:
+                    self._json({"ok": False, "message": "请先粘贴 Cookie"})
+                    return
+                if "dianping.com/search" in url:
+                    from .dianping import fetch_search_page, parse_search_html
+                    r = fetch_search_page("美食", 2, cookie=cookie)
+                    if r.get("ok") and "shop-list" in r.get("html", ""):
+                        n = len(parse_search_html(r.get("html", ""), 3))
+                        self._json({"ok": True, "message": f"✅ Cookie 有效！已识别 {n} 家商家，可直接抓取"})
+                    elif r.get("ok") and "verify.meituan.com" in r.get("final_url", ""):
+                        self._json({"ok": False, "message": "❌ Cookie 失效或被风控：请求被重定向到验证中心，请重新复制 Cookie 或换网络"})
+                    else:
+                        self._json({"ok": False, "message": "❌ 页面未包含商家列表（Cookie 可能失效），请重新复制"})
+                else:
+                    import urllib.request
+                    try:
+                        req = urllib.request.Request(url or "https://www.baidu.com/",
+                                                     headers={"User-Agent": "Mozilla/5.0", "Cookie": cookie})
+                        rr = urllib.request.urlopen(req, timeout=15)
+                        self._json({"ok": True, "message": f"✅ Cookie 已随请求发送（HTTP {rr.status}）"})
+                    except Exception as e:
+                        self._json({"ok": False, "message": f"❌ 测试失败：{type(e).__name__}"})
+
             elif u.path == "/api/ip":
                 from .net import detect_ip
                 self._json(detect_ip())

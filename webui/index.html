@@ -70,16 +70,30 @@
     <label>代理（可选）— 大众点评/美团列表页需要住宅代理（风控 isoapi 对普通 IP 403），有代理填这里：<code>http://user:pass@host:port</code></label>
     <input id="a_proxy" placeholder="例如 http://user:pass@127.0.0.1:7890">
     <label>登录 Cookie（可选）— 填了工具会跳过验证/登录直接抓（Cookie 直抓）</label>
-    <input id="a_cookie" placeholder="粘贴 Cookie 整串（形如 dper=...; ua=...）">
-    <details style="margin-top:6px;font-size:12px;color:var(--muted)"><summary>❓ 如何在 Mac 上获取 Cookie（点开看步骤）</summary>
-      <div style="padding:8px 4px;line-height:1.7">
-      <b>Chrome：</b>① 用 Chrome 登录目标网站 → ② 按 <code>⌥Option + ⌘Command + I</code>（或菜单：显示→开发者→开发者工具）→
-      ③ 点顶部「Network/网络」→ ④ 按 <code>⌘R</code> 刷新页面 → ⑤ 左侧点任意一个请求 → ⑥ 右侧「Headers/标头」里往下找
-      「Request Headers/请求标头」→ ⑦ 找到 <code>Cookie:</code> 那一行 → ⑧ <b>只复制 Cookie: 后面的整串值</b>（很长，全选复制）→ ⑨ 粘贴到这里。<br>
-      <b>Safari：</b>① 菜单 Safari→设置(⌘,)→高级→勾选「显示网页开发者功能」→ ② 登录网站后菜单栏「开发」→「显示网页检查器」(⌥⌘I) →
-      ③ 点「网络」→ <code>⌘R</code> 刷新 → ④ 点任意请求 → 右侧「请求」标签找 Cookie → 复制整串值。<br>
-      <b>注意：</b>必须<b>已登录</b>后复制才有效；只复制值，不要复制 "Cookie:" 这几个字；如果某个请求没有 Cookie，换一个有 Cookie 的请求。
-      </div></details>
+    <div class="row" style="align-items:center;gap:8px">
+      <div style="flex:1;min-width:200px"><input id="a_cookie" placeholder="粘贴 Cookie 整串（形如 dper=...; ua=...）"></div>
+      <div style="flex:0 0 auto;margin-top:10px"><button class="primary" style="padding:8px 14px;margin-top:0" onclick="testCookie('a_cookie','a_cookie_res','')">🧪 测试 Cookie</button></div>
+    </div>
+    <div id="a_cookie_res" style="margin-top:6px"></div>
+    <details style="margin-top:6px;font-size:12px;color:var(--muted)"><summary>❓ 获取 Cookie 教程（点开看详细防错步骤）</summary>
+      <pre style="font-size:12px;line-height:1.8;white-space:pre-wrap;margin-top:6px">❓ 获取 Cookie 教程（Mac · 详细防错）
+① 方法一（推荐·最不会错）：复制为 cURL
+   1) 用 Chrome/Safari 打开目标网站并【登录】
+   2) 打开开发者工具：Chrome 按 ⌥⌘I；Safari 先 设置(⌘,)→高级→勾选"显示网页开发者功能"，再 开发→显示网页检查器
+   3) 点「Network/网络」→ 按 ⌘R 刷新
+   4) 右键【任意请求】→「复制为 cURL / Copy as cURL」
+   5) 在复制内容里找 -H 'Cookie: ...'，把 ... 那串（名字=值; 名字=值; ...）粘贴到上面的框
+② 方法二：从请求头复制
+   1) 同上打开 Network → 点请求 → 「Headers/标头」
+   2) 找「Request Headers/请求标头」里的 Cookie: 行
+   3) 点击 Cookie: 后面的值（变可选中）→ ⌘A 全选 → ⌘C 复制
+⚠️ 五个常见错误
+   ① 从「存储/Cookie」面板复制 → 那里每行没有等号，格式不对（正确：名字=值; 名字=值; ...）
+   ② 把 "Cookie:" 这几个字也复制了 → 只复制等号后面的值
+   ③ 没登录就复制 → 必须先登录，Cookie 才有效
+   ④ 复制到跨域请求（没有 Cookie 头）→ 换一个有 Cookie 的请求
+   ⑤ 测试显示"被重定向验证中心" → Cookie 过期或 IP 被风控：重新复制 / 切手机热点
+💡 粘贴后点下方「🧪 测试」，显示 ✅ 就说明可用</pre></details>
     <button class="primary" onclick="startAuto()" id="a_btn">🚀 开始</button>
   </div>
   <div id="a_progress" style="display:none"></div>
@@ -107,15 +121,30 @@
     <div class="ck"><input id="p_browser" type="checkbox"><span>浏览器渲染（JS 页面 / 需要登录时勾选）</span></div>
     <label>代理（可选）</label><input id="p_proxy" placeholder="http://user:pass@host:port">
     <label>登录 Cookie（可选）— 填了可绕过验证/登录直接抓（Cookie 直抓）</label>
-    <input id="p_cookie" placeholder="粘贴 Cookie 整串（形如 dper=...; ua=...）">
-    <details style="margin-top:6px;font-size:12px;color:var(--muted)"><summary>❓ 如何在 Mac 上获取 Cookie（点开看步骤）</summary>
-      <div style="padding:8px 4px;line-height:1.7">
-      <b>Chrome：</b>① 登录网站 → ② 按 <code>⌥⌘I</code> → ③ 「Network」→ <code>⌘R</code> 刷新 → ④ 点任意请求 →
-      ⑤ 「Headers」→ 找 <code>Cookie:</code> 行 → ⑥ 复制 <code>Cookie:</code> 后面的整串值。<br>
-      <b>Safari：</b>① 设置(⌘,)→高级→勾选「显示网页开发者功能」→ ② 「开发」→「显示网页检查器」→
-      ③ 「网络」→ <code>⌘R</code> → ④ 点请求 → 复制 Cookie 整串。<br>
-      <b>大众点评专用提示：</b>搜索页直接粘贴 Cookie 即可秒抓列表（已自动识别 SSR 解析）。Cookie 过期（几天~几周）后重新复制一次。
-      </div></details>
+    <div class="row" style="align-items:center;gap:8px">
+      <div style="flex:1;min-width:200px"><input id="p_cookie" placeholder="粘贴 Cookie 整串（形如 dper=...; ua=...）"></div>
+      <div style="flex:0 0 auto;margin-top:10px"><button class="primary" style="padding:8px 14px;margin-top:0" onclick="testCookie('p_cookie','p_cookie_res','p_url')">🧪 测试 Cookie</button></div>
+    </div>
+    <div id="p_cookie_res" style="margin-top:6px"></div>
+    <details style="margin-top:6px;font-size:12px;color:var(--muted)"><summary>❓ 获取 Cookie 教程（点开看详细防错步骤）</summary>
+      <pre style="font-size:12px;line-height:1.8;white-space:pre-wrap;margin-top:6px">❓ 获取 Cookie 教程（Mac · 详细防错）
+① 方法一（推荐·最不会错）：复制为 cURL
+   1) 用 Chrome/Safari 打开目标网站并【登录】
+   2) 打开开发者工具：Chrome 按 ⌥⌘I；Safari 先 设置(⌘,)→高级→勾选"显示网页开发者功能"，再 开发→显示网页检查器
+   3) 点「Network/网络」→ 按 ⌘R 刷新
+   4) 右键【任意请求】→「复制为 cURL / Copy as cURL」
+   5) 在复制内容里找 -H 'Cookie: ...'，把 ... 那串（名字=值; 名字=值; ...）粘贴到上面的框
+② 方法二：从请求头复制
+   1) 同上打开 Network → 点请求 → 「Headers/标头」
+   2) 找「Request Headers/请求标头」里的 Cookie: 行
+   3) 点击 Cookie: 后面的值（变可选中）→ ⌘A 全选 → ⌘C 复制
+⚠️ 五个常见错误
+   ① 从「存储/Cookie」面板复制 → 那里每行没有等号，格式不对（正确：名字=值; 名字=值; ...）
+   ② 把 "Cookie:" 这几个字也复制了 → 只复制等号后面的值
+   ③ 没登录就复制 → 必须先登录，Cookie 才有效
+   ④ 复制到跨域请求（没有 Cookie 头）→ 换一个有 Cookie 的请求
+   ⑤ 测试显示"被重定向验证中心" → Cookie 过期或 IP 被风控：重新复制 / 切手机热点
+💡 粘贴后点下方「🧪 测试」，显示 ✅ 就说明可用</pre></details>
     <button class="primary" onclick="startPaste()" id="p_btn">🚀 开始</button>
   </div>
   <div id="p_progress" style="display:none"></div>
@@ -143,6 +172,15 @@ $('#p_mode').onchange=()=>{
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 async function api(path,opts){const r=await fetch(path,opts);return r.json();}
+async function testCookie(cid,resid,urlid){
+  const cookie=$('#'+cid).value.trim();
+  const url=urlid?$('#'+urlid).value.trim():'https://www.dianping.com/search/keyword/2/0_%E7%BE%8E%E9%A3%9F';
+  const box=$('#'+resid);
+  if(!cookie){box.innerHTML='<span class="muted">请先粘贴 Cookie</span>';return;}
+  box.innerHTML='<span class="muted">测试中...</span>';
+  const d=await api('/api/test-cookie?cookie='+encodeURIComponent(cookie)+'&url='+encodeURIComponent(url));
+  box.innerHTML=d.ok?`<span class="ok">${d.message}</span>`:`<span class="err">${d.message}</span>`;
+}
 
 let currentJob=null, timer=null;
 async function pollJob(jobId, box){
