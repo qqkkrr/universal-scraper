@@ -67,8 +67,8 @@
       <div><label>单轮超时（秒）</label><input id="a_timeout" type="number" min="10" value="240"></div>
     </div>
     <div class="ck"><input id="a_browser" type="checkbox"><span>需要登录/JS 渲染的网站：勾选后优先用浏览器（会弹出窗口，登录一次自动保存复用）</span></div>
-    <label>代理（可选）— 大众点评/美团列表页需要住宅代理（风控 isoapi 对普通 IP 403），有代理填这里：<code>http://user:pass@host:port</code></label>
-    <input id="a_proxy" placeholder="例如 http://user:pass@127.0.0.1:7890">
+    <label>代理（可选）— 大众点评/美团列表页需要住宅代理，<b>没有真实代理就留空</b>（有 Cookie 直抓就不需要代理）</label>
+    <input id="a_proxy" placeholder="留空=不用代理；有代理填 http://user:pass@真实IP:真实端口（示例不能直接用）">
     <label>登录 Cookie（可选）— 填了工具会跳过验证/登录直接抓（Cookie 直抓）</label>
     <div class="row" style="align-items:center;gap:8px">
       <div style="flex:1;min-width:200px"><input id="a_cookie" placeholder="粘贴 Cookie 整串（形如 dper=...; ua=...）"></div>
@@ -119,7 +119,7 @@
       <div><label>最多条数（留空=不限）</label><input id="p_limit" type="number" min="1" placeholder="如 50"></div>
     </div>
     <div class="ck"><input id="p_browser" type="checkbox"><span>浏览器渲染（JS 页面 / 需要登录时勾选）</span></div>
-    <label>代理（可选）</label><input id="p_proxy" placeholder="http://user:pass@host:port">
+    <label>代理（可选）— 没有真实代理就留空（示例不能直接用）</label><input id="p_proxy" placeholder="留空=不用代理；有代理填 http://user:pass@真实IP:真实端口">
     <label>登录 Cookie（可选）— 填了可绕过验证/登录直接抓（Cookie 直抓）</label>
     <div class="row" style="align-items:center;gap:8px">
       <div style="flex:1;min-width:200px"><input id="p_cookie" placeholder="粘贴 Cookie 整串（形如 dper=...; ua=...）"></div>

@@ -361,6 +361,20 @@ def _llm_fallback_extract(description: str, cfg: dict, log) -> dict:
     return {"items": items, "total": len(items), "files": {"json": f"outputs/{name}.json"}}
 
 
+def _valid_proxy(p: Optional[str]) -> bool:
+    """代理格式校验：http(s)://[user:pass@]ip:port，host 不能是占位符，port 必须是数字。"""
+    if not p:
+        return False
+    import re as _re
+    m = _re.match(r"^(https?)://([^/@:]+(:[^/@:]+)?@)?([^/:]+):(\d+)$", p)
+    if not m:
+        return False
+    host = m.group(4)
+    if host in ("host", "localhost", "example.com", "proxy"):
+        return False
+    return True
+
+
 def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
               log_cb=None, round_timeout: Optional[int] = None,
               proxy: Optional[str] = None,
@@ -409,8 +423,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     if limit:
         cfg.setdefault("queue", {})["max_requests"] = int(limit) + 5
     if proxy:
-        cfg.setdefault("anti_bot", {})["proxy"] = proxy
-        log(f"🛰️ 已注入代理：{proxy}")
+        if _valid_proxy(proxy):
+            cfg.setdefault("anti_bot", {})["proxy"] = proxy
+            log(f"🛰️ 已注入代理：{proxy}")
+        else:
+            log(f"⚠️ 代理格式无效已忽略：{proxy}（正确格式 http://user:pass@ip:port，host:port 是占位符不能直接用）")
     if cookie:
         # Cookie 直抓：有登录通行证时优先 HTTP 直连，跳过浏览器/验证/登录弹窗
         cfg.setdefault("source", {})["type"] = "http"
