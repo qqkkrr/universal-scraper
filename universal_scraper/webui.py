@@ -82,12 +82,12 @@ def _job_error(job, err: str):
         job["messages"].append(f"❌ 失败：{err}")
 
 
-def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy=""):
+def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie=""):
     try:
         from .auto import auto_task
         out = auto_task(desc, limit=limit, rounds=rounds,
                         round_timeout=timeout, log_cb=lambda m: _job_log(job, m),
-                        proxy=proxy or None)
+                        proxy=proxy or None, cookie=cookie or None)
         _job_done(job, out.get("result"), out.get("summary"), out.get("verify"))
     except Exception as e:
         _job_error(job, f"{type(e).__name__}: {e}")
@@ -249,7 +249,8 @@ class Handler(BaseHTTPRequestHandler):
                 rounds = int(body.get("rounds") or 2)
                 timeout = int(body.get("timeout") or 0) or None
                 proxy = body.get("proxy", "")
-                threading.Thread(target=run_auto_job, args=(job, desc, limit, rounds, timeout, proxy),
+                cookie = body.get("cookie", "")
+                threading.Thread(target=run_auto_job, args=(job, desc, limit, rounds, timeout, proxy, cookie),
                                  daemon=True).start()
                 self._json({"job": job["id"]})
             elif u.path == "/api/paste/start":

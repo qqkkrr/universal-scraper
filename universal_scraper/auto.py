@@ -68,6 +68,8 @@ v3 任务包 config.json 结构（字段含义）：
 - **大众点评列表页额外要求住宅代理**：其风控接口 isoapi/module(csec) 对数据中心 IP/被标记 IP 返回 403，页面因此不加载数据。
   配置 anti_bot.proxy（如 "http://user:pass@host:port"）或提示用户提供住宅代理；详情页(www.dianping.com/shop/<id>)登录后无需代理可直抓。
 - 图片验证码：anti_bot 加 "captcha":{"strategy":"auto"}（自动识别，失败则人工兜底）。
+- 如果用户已提供登录 Cookie：source.type 用 http，source.headers 加 "Cookie": "<用户提供的Cookie>"，
+  并加 rules/parsers 解析 SSR 页面（如大众点评搜索页 .shop-list li），不要用 browser（Cookie 直抓更快更稳）。
 - 只输出 JSON 对象本身。"""
 
 
@@ -361,7 +363,8 @@ def _llm_fallback_extract(description: str, cfg: dict, log) -> dict:
 
 def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
               log_cb=None, round_timeout: Optional[int] = None,
-              proxy: Optional[str] = None) -> Dict[str, Any]:
+              proxy: Optional[str] = None,
+              cookie: Optional[str] = None) -> Dict[str, Any]:
     """执行一次自动任务。返回 {config, result, log, sample, files}。"""
     if limit is not None:
         limit = int(limit) or None
@@ -408,6 +411,12 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     if proxy:
         cfg.setdefault("anti_bot", {})["proxy"] = proxy
         log(f"🛰️ 已注入代理：{proxy}")
+    if cookie:
+        # Cookie 直抓：有登录通行证时优先 HTTP 直连，跳过浏览器/验证/登录弹窗
+        cfg.setdefault("source", {})["type"] = "http"
+        cfg["source"].setdefault("headers", {})["Cookie"] = cookie
+        cfg.pop("login", None); cfg.pop("verify", None)
+        log("🍪 已注入登录 Cookie（HTTP 直抓模式，跳过验证/登录弹窗）")
     log(f"✅ 配置已生成（source={cfg.get('source', {}).get('type')}）")
     _src = cfg.get("source", {}) or {}
     _verify = _src.get("verify") or {}
