@@ -69,6 +69,27 @@ class ConfigParser(BaseParser):
                     out[name] = jpath(row, spec.get("path", ""), None)
         return out
 
+    @staticmethod
+    def _css_value(el_html: str, fspec: Dict[str, Any], limit: int = 0) -> str:
+        """取字段值：优先显式 attr；兼容 css 里的 ::attr(name) 写法（如 .p1 a::attr(href)）。"""
+        from ..selectors import css_attr, css_text, xpath_text, regex_extract
+        css = fspec.get("css") or ""
+        if fspec.get("attr"):
+            return css_attr(el_html, css, fspec["attr"], fspec.get("limit", limit))
+        if "::attr(" in css:
+            import re as _re
+            m = _re.search(r"::attr\(([^)]*)\)", css)
+            attr = m.group(1).strip().strip("'\"") if m else "href"
+            return css_attr(el_html, css, attr, fspec.get("limit", limit))
+        if fspec.get("xpath"):
+            return xpath_text(el_html, fspec["xpath"], fspec.get("limit", limit))
+        if css:
+            return css_text(el_html, css, fspec.get("limit", limit))
+        if fspec.get("regex"):
+            return regex_extract(el_html, fspec["regex"], fspec.get("group", 0))
+        return ""
+
+
     def _html_rows(self, html: str, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
         if cfg.get("row_xpath"):
             from ..selectors import xpath_elements, _lxml_html_tostring
@@ -81,14 +102,8 @@ class ConfigParser(BaseParser):
             el_html = el if isinstance(el, str) else _lxml_html_tostring(el)
             row = {}
             for name, fspec in (cfg.get("fields", {}) or {}).items():
-                if fspec.get("attr"):
-                    row[name] = css_attr(el_html, fspec.get("css") or "", fspec["attr"], fspec.get("limit", 0))
-                elif fspec.get("xpath"):
-                    row[name] = xpath_text(el_html, fspec["xpath"], fspec.get("limit", 0))
-                elif fspec.get("css"):
-                    row[name] = css_text(el_html, fspec["css"], fspec.get("limit", 0))
-                elif fspec.get("regex"):
-                    row[name] = regex_extract(el_html, fspec["regex"], fspec.get("group", 0))
+                if isinstance(fspec, dict):
+                    row[name] = self._css_value(el_html, fspec)
                 else:
                     row[name] = el_html
             out.append(row)
@@ -99,14 +114,12 @@ class ConfigParser(BaseParser):
         out = {}
         for name, spec in fields.items():
             if isinstance(spec, dict):
-                if spec.get("attr"):
-                    out[name] = css_attr(html, spec.get("css") or "", spec["attr"], spec.get("limit", 0))
-                elif spec.get("xpath"):
-                    out[name] = xpath_text(html, spec["xpath"], spec.get("limit", 0))
-                elif spec.get("css"):
-                    out[name] = css_text(html, spec["css"], spec.get("limit", 0))
-                else:
+                if spec.get("type") == "json":
                     out[name] = apply_extractor(spec, html, html, None)
+                else:
+                    out[name] = self._css_value(html, spec)
+            else:
+                out[name] = apply_extractor(spec, html, html, None)
         return out
 
 
