@@ -92,6 +92,8 @@
       <div><label>最多条数（留空=不限）</label><input id="p_limit" type="number" min="1" placeholder="如 50"></div>
     </div>
     <div class="ck"><input id="p_browser" type="checkbox"><span>浏览器渲染（JS 页面 / 需要登录时勾选）</span></div>
+    <label>登录 Cookie（可选）— 在已登录大众点评的浏览器按 F12 → Network → 复制请求头里的 Cookie 整串粘贴到这里，可绕过验证/登录弹窗直接抓</label>
+    <input id="p_cookie" placeholder="粘贴 Cookie（形如 _lxsdk_cuid=...; dper=...）">
     <button class="primary" onclick="startPaste()" id="p_btn">🚀 开始</button>
   </div>
   <div id="p_progress" style="display:none"></div>
@@ -179,7 +181,8 @@ async function startPaste(){
     browser:$('#p_browser').checked,
     depth:parseInt($('#p_depth').value)||2,
     max_pages:parseInt($('#p_pages').value)||100,
-    limit:$('#p_limit').value||null};
+    limit:$('#p_limit').value||null,
+    cookie:$('#p_cookie').value.trim()};
   startJob('/api/paste/start',payload,$('#p_btn'),$('#p_progress'));
   $('#p_progress').innerHTML='<div class="card"><h4>🚀 已提交，等待启动...</h4></div>';
   $('#p_progress').style.display='block';

@@ -93,7 +93,7 @@ def run_auto_job(job: dict, desc: str, limit, rounds, timeout):
 
 
 def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
-                  max_pages: int, limit: int, proxy: str = ""):
+                  max_pages: int, limit: int, proxy: str = "", cookie: str = ""):
     try:
         _job_log(job, f"🌐 正在抓取 {url}")
         if mode == "crawl":
@@ -111,7 +111,7 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
                       summary, _auto_verify(rows, None))
             return
         from .quick import fetch_url
-        kw = {"browser": browser, "proxy": proxy or None}
+        kw = {"browser": browser, "proxy": proxy or None, "cookie": cookie or None}
         if mode == "article":
             kw["article"] = True
         elif mode == "table":
@@ -238,8 +238,9 @@ class Handler(BaseHTTPRequestHandler):
                 max_pages = int(body.get("max_pages") or 100)
                 limit = body.get("limit") or None
                 proxy = body.get("proxy", "")
+                cookie = body.get("cookie", "")
                 threading.Thread(target=run_paste_job,
-                                 args=(job, url, mode, browser, depth, max_pages, limit, proxy),
+                                 args=(job, url, mode, browser, depth, max_pages, limit, proxy, cookie),
                                  daemon=True).start()
                 self._json({"job": job["id"]})
             else:

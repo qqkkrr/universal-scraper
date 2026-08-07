@@ -22,7 +22,9 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
               remove_overlays: bool = True, timeout: float = 60,
               links: bool = False, links_allow: Optional[str] = None,
               links_deny: Optional[str] = None,
-              screenshot: Optional[str] = None) -> Dict[str, Any]:
+              screenshot: Optional[str] = None,
+              cookie: Optional[str] = None,
+              headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """抓取一个 URL，返回 {url, status, text, markdown?, selector?, article?, tables?, links?}。
     links=True 时额外提取页面所有外链（对标 Firecrawl scrape links）。
     - browser=False: 走 HTTP（curl_cffi→requests→urllib 自动选后端）
@@ -33,8 +35,14 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
         browser = True  # 截图需要浏览器渲染
     if not browser:
         from .core import make_http_client
-        client = make_http_client({"min_interval": 0.2, "timeout": timeout,
-                                   "http_backend": "auto", "proxy": proxy})
+        _anti = {"min_interval": 0.2, "timeout": timeout,
+                 "http_backend": "auto", "proxy": proxy}
+        _hdrs = dict(headers or {})
+        if cookie:
+            _hdrs["Cookie"] = cookie
+        if _hdrs:
+            _anti["headers"] = _hdrs
+        client = make_http_client(_anti)
         res = client.get(url)
         result["status"] = res.get("status", 0)
         result["url"] = res.get("url") or url
