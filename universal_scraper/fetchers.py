@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from .core import HttpClient, log, die, smart_decode
+from .core import HttpClient, log, die, smart_decode, update_cookie_jar, jar_cookie_header
 from .antibot import solve_captcha_file, detect_block
 from .session import SessionPool
 from .selectors import jpath, css_text, xpath_text
@@ -106,13 +106,14 @@ class HttpFetcher(BaseFetcher):
         if page_params:
             query.update(page_params)
         method = s.get("method", "GET")
-        # 会话池：取当前域会话（含 Cookie/UA/代理），封禁自动轮换
+        # 会话池：取当前域会话（含 Cookie jar/UA/代理），封禁自动轮换
         sess = self.sessions.acquire(url)
         self._cur_session = sess
         hdrs = dict(s.get("headers") or {})
         hdrs.setdefault("User-Agent", sess.ua)
-        if sess.cookies:
-            hdrs["Cookie"] = "; ".join(f"{k}={v}" for k, v in sess.cookies.items())
+        ck = jar_cookie_header(sess.jar, url)
+        if ck:
+            hdrs.setdefault("Cookie", ck)
         kw = dict(params=query or None, headers=hdrs, proxy=sess.proxy)
         try:
             if method.upper() == "POST":
@@ -129,14 +130,12 @@ class HttpFetcher(BaseFetcher):
         blocked = bd["kind"] != "none"
         self.sessions.report(sess, ok=ok, blocked=blocked)
         self._report_proxy(ok and not blocked)
-        # 会话 Cookie 续存（Set-Cookie 由 HttpClient 收集后再这里同步）
-        if ok and res.get("headers"):
+        # 会话 Cookie 续存（真 cookie jar：多 Set-Cookie + Expires 逗号正确处理）
+        if ok:
             try:
-                setck = res["headers"].get("set-cookie", "") or res["headers"].get("Set-Cookie", "")
-                for part in setck.split(","):
-                    if "=" in part:
-                        k, v = part.split("=", 1)
-                        sess.cookies[k.strip()] = v.split(";")[0].strip()
+                update_cookie_jar(sess.jar, res.get("url") or url,
+                                  res.get("headers"), res.get("raw_headers"))
+                sess.cookies = {c.name: c.value for c in sess.jar}
             except Exception:
                 pass
         if blocked:

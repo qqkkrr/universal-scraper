@@ -123,7 +123,7 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
 
 
 def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
-               timeout: int = 20) -> Dict[str, Any]:
+               timeout: int = 20, allow_html_404: bool = True) -> Dict[str, Any]:
     """GET URL 返回 HTML/JSON（curl_cffi TLS 指纹伪装优先，回退 urllib）。
     成功 {ok, status, html, final_url, headers}。"""
     from .core import smart_decode
@@ -147,7 +147,8 @@ def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
             except Exception:
                 pass
         text = smart_decode(raw, dict(resp.headers))
-        return {"ok": resp.status_code < 400, "status": resp.status_code, "html": text,
+        ok = resp.status_code < 400 or (allow_html_404 and resp.status_code == 404 and len(text) > 200)
+        return {"ok": ok, "status": resp.status_code, "html": text,
                 "final_url": str(resp.url), "headers": {k.lower(): v for k, v in resp.headers.items()}}
     except Exception:
         pass

@@ -165,6 +165,17 @@ class EngineV3:
         self._lock = threading.Lock()
         self._stop = False
         self._all_items: List[Dict[str, Any]] = []
+        # 内存 spool：大任务不把全部条目驻留内存（默认 5 万条后自动切磁盘读）
+        out_cfg = self.config.get("output", {}) or {}
+        self._spool_threshold = int(out_cfg.get("spool_threshold", 50000))
+        self._spooling = False
+        self._spool_start = 0
+        self._spool_path: Optional[Path] = None
+        try:
+            # store_cfg["dir"] 已在上方被引擎绝对化（out_dir 已拼接），直接用即可
+            self._spool_path = Path(str(store_cfg.get("dir", "items"))) / f"{self.storage_name}.jsonl"
+        except Exception:
+            self._spool_path = None
         # 失败重试队列：{url: attempts}
         self._retries: Dict[str, int] = {}
         self.max_retries = int(anti.get("max_retries", 2))
@@ -265,7 +276,11 @@ class EngineV3:
                     with self._lock:
                         self.storage.write(item)
                         self.stats["items"] += 1
-                        self._all_items.append(item)
+                        if len(self._all_items) < self._spool_threshold:
+                            self._all_items.append(item)
+                        elif not self._spooling:
+                            self._spooling = True
+                            self.logger.info(f"条目超过 {self._spool_threshold}，已切换为磁盘 spool（内存不再累计）")
             # 重试成功：按该请求的失败次数冲销错误（stats.errors 只算最终失败）
             with self._lock:
                 _fails = self._retries.get(req.key(), 0)
@@ -363,6 +378,11 @@ class EngineV3:
             (Path(self.task.root) / ".stop").unlink(missing_ok=True)
         except Exception:
             pass
+        if self._spool_path is not None and self._spool_path.exists():
+            try:
+                self._spool_start = self._spool_path.stat().st_size
+            except Exception:
+                self._spool_start = 0
         self.storage.open(self.storage_name)
         self.logger.info(f"任务启动: {self.task.name} | 队列 {len(self.queue)} | 规则 {len(self.rules)}")
         try:
@@ -518,6 +538,26 @@ class EngineV3:
         """把 JSONL/CSV 汇总导出为标准 json/csv/xlsx（与 v2 一致）。resume 时合并历史。"""
         from .core import export_rows
         rows = self._all_items
+        if self._spooling:
+            # 从 jsonl 全量读回（内存不驻留，导出时才读）
+            try:
+                store_cfg = self.config.get("storage", {}) or {}
+                _sd = store_cfg.get("dir", "items")
+                _dir = Path(_sd) if Path(str(_sd)).is_absolute() else self.out_dir / str(_sd)
+                _sp = _dir / f"{self.storage_name}.jsonl"
+                if _sp.exists():
+                    loaded = []
+                    data = _sp.read_bytes()
+                    tail = data[self._spool_start:]
+                    for line in tail.decode("utf-8", "ignore").splitlines():
+                        try:
+                            loaded.append(json.loads(line))
+                        except Exception:
+                            continue
+                    rows = loaded
+                    self.logger.info(f"spool：从 {_sp} 读回本次 {len(loaded)} 条用于导出")
+            except Exception as e:
+                self.logger.warn(f"spool 读取失败，退回内存数据: {e}")
         base = self.config.get("output", {}).get("base_name", self.task.name)
         # resume：合并之前已导出的记录（按 _url 去重），保证输出完整
         prev_json = self.out_dir / f"{base}.json"

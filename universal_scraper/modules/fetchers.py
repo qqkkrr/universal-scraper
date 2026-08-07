@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 from ..protocols import BaseFetcher, Request, Response
+from ..session import SessionPool
+from ..antibot import detect_block
+from ..core import update_cookie_jar, jar_cookie_header
 
 
 class HttpFetcher(BaseFetcher):
@@ -24,6 +27,17 @@ class HttpFetcher(BaseFetcher):
             from ..proxy import ProxyPool
             self.proxy_pool = ProxyPool(anti.get("proxies"), anti.get("proxy_mode", "round_robin"))
         self._last_proxy = None
+        # HTTP 会话池（Crawlee SessionPool 思路）：按域名 Cookie/UA/代理，封禁自动换会话
+        sp_proxies = list(anti.get("proxies") or [])
+        if not sp_proxies and anti.get("proxy"):
+            sp_proxies = [anti["proxy"]]
+        self.sessions = SessionPool(proxies=sp_proxies or None,
+                                    max_per_domain=int(anti.get("session_pool_max", 3)),
+                                    rotate_on_errors=int(anti.get("session_rotate_on_errors", 2)),
+                                    proxy_mode=anti.get("proxy_mode", "round_robin"))
+        if self.proxy_pool is not None:
+            self.sessions._proxy_source = self.proxy_pool.next
+        self._cur_session = None
 
     def _pick_proxy(self) -> str:
         """从代理池取一个可用代理；没有则直连（None）。"""
@@ -63,25 +77,48 @@ class HttpFetcher(BaseFetcher):
             if hit is not None:
                 return hit
         url = self._build_url(req)
+        # 会话池：取当前域会话（含 Cookie jar/UA/代理），封禁自动轮换
+        sess = self.sessions.acquire(url)
+        self._cur_session = sess
         headers = self._sign_headers(req)
-        proxy = self._pick_proxy()
+        headers.setdefault("User-Agent", sess.ua)
+        ck = jar_cookie_header(sess.jar, url)
+        if ck:
+            headers.setdefault("Cookie", ck)
         try:
             res = self.client.request(url, method=req.method, data=req.body,
-                                      headers=headers, allow_html_404=True, proxy=proxy)
+                                      headers=headers, allow_html_404=True, proxy=sess.proxy)
         except Exception:
-            # 客户端抛异常（网络层/自定义客户端）：同样标记代理失败后继续抛出
+            # 客户端抛异常（网络层/自定义客户端）：会话+代理标记失败后继续抛出
+            self.sessions.report(sess, ok=False, blocked=True)
             self._report_proxy(False)
             raise
+        # 响应 Set-Cookie → 会话 Cookie jar（真 cookie 持久化）
+        try:
+            update_cookie_jar(sess.jar, res.get("url") or url,
+                              res.get("headers"), res.get("raw_headers"))
+        except Exception:
+            pass
+        # 封禁识别：HTTP 200 但被风控的页面也能识破
+        ok = bool(res.get("ok"))
+        bd = detect_block(res.get("status", 0), res.get("text", ""), res.get("headers"), url)
+        blocked = bd["kind"] != "none"
+        self.sessions.report(sess, ok=ok and not blocked, blocked=blocked)
+        self._report_proxy(ok and not blocked)
+        if blocked:
+            if self.anti.get("_block_stats") is not None:
+                self.anti["_block_stats"][bd["kind"]] = self.anti["_block_stats"].get(bd["kind"], 0) + 1
+            from ..protocols import RateLimitedError
+            raise RateLimitedError(req.url, retry_after=0, status=res.get("status", 403),
+                                   detail=f"反爬拦截[{bd['kind']}] {bd['detail']}")
         # 请求失败：抛错交给引擎队列重试（客户端内部重试耗尽后不再静默吞掉）
-        if not res.get("ok"):
+        if not ok:
             status = res.get("status", 0)
-            self._report_proxy(False)
             from ..protocols import RateLimitedError
             if status == 429:
                 ra = self._retry_after(res.get("headers") or {})
                 raise RateLimitedError(req.url, retry_after=ra, status=429)
             raise RuntimeError(f"HTTP {status}: {str(res.get('text', ''))[:200]}")
-        self._report_proxy(True)
         body = res.get("body", b"")
         text = res.get("text", "")
         # 响应大小限制：防内存爆（max_size 字节，默认 20MB）
@@ -93,7 +130,13 @@ class HttpFetcher(BaseFetcher):
         resp = Response(request=req, status=res.get("status", 0),
                         body=body, text=text,
                         json=res.get("json"), url=res.get("url", req.url))
-        if self._cache is not None and req.method == "GET" and res.get("ok"):
+        if self._cache is not None and req.method == "GET" and ok:
+            # 内存缓存上限（防长任务内存爆炸）：超 2000 条丢最旧
+            if len(self._cache) > 2000:
+                try:
+                    self._cache.pop(next(iter(self._cache)))
+                except Exception:
+                    pass
             self._cache[req.url] = resp
         return resp
 
@@ -234,6 +277,11 @@ class BrowserFetcher(BaseFetcher):
             self.proxy_pool = ProxyPool([anti["proxy"]])
         self._single_proxy_mode = bool(self.proxy_pool is not None and self.proxy_pool.size > 1)
         self._proxy = anti.get("proxy") or (self.proxy_pool.next() if self.proxy_pool else None)
+        # 任务停止信号（WebUI 一键停止 → 任务目录写 .stop）
+        self._task_dir = Path(str(config.get("_task_dir") or anti.get("_task_dir") or ""))
+
+    def _stopped(self) -> bool:
+        return bool(self._task_dir) and (self._task_dir / ".stop").exists()
 
     # ---- 会话池 ----
     def _ensure_pool(self):
@@ -289,6 +337,8 @@ class BrowserFetcher(BaseFetcher):
                 self._cond.notify_all()
 
     def fetch(self, req: Request) -> Response:
+        if self._stopped():
+            raise KeyboardInterrupt("任务已停止（WebUI 停止信号）")
         # 人工交互场景（登录 / 整页验证码 / headless=false 弹窗）→ browser_generic.cjs
         if (self.config.get("login") or {}).get("enabled") or \
            (self.config.get("verify") or {}).get("enabled") or \
@@ -336,6 +386,8 @@ class BrowserFetcher(BaseFetcher):
                    "--scrollCount", str(self.config.get("scroll_count", 0)),
                    "--scrollWait", str(self.config.get("scroll_wait_ms", 2000)),
                    "--debugDir", str(Path(self.scripts_dir).parent / "outputs" / ".debug")]
+            if self._task_dir:
+                cmd += ["--stopFile", str(self._task_dir / ".stop")]
             env = {**os.environ, "NODE_PATH": _NODE_PATH}
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, encoding="utf-8", env=env)
@@ -361,6 +413,9 @@ class BrowserFetcher(BaseFetcher):
                     f = obj.get("file")
                     if f and Path(f).exists():
                         html = Path(f).read_text(encoding="utf-8", errors="replace")
+                elif t == "stopped":
+                    proc.terminate()
+                    raise KeyboardInterrupt("任务已停止（浏览器桥收到停止信号）")
                 elif t == "error":
                     proc.terminate()
                     raise RuntimeError(msg or "浏览器交互桥错误")
@@ -406,6 +461,8 @@ class BrowserFetcher(BaseFetcher):
                     raise TimeoutError(f"浏览器池渲染超时: {req.url}")
                 self._cond.wait(1.0)
             obj = self._pending.pop(rid)
+        if self._stopped():
+            raise KeyboardInterrupt("任务已停止（WebUI 停止信号）")
         if "error" in obj and obj["error"]:
             raise RuntimeError(obj["error"])
         html = obj.get("html", "")
@@ -450,6 +507,11 @@ class BrowserFetcher(BaseFetcher):
                         text=html, json=None, url=obj.get("url") or req.url)
 
     def close(self) -> None:
+        if self._pool is not None and self._stopped():
+            try:
+                self._pool.terminate()
+            except Exception:
+                pass
         if self._pool is not None:
             try:
                 if self._pool.stdin:

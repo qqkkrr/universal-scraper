@@ -27,25 +27,35 @@ def _get_key() -> str:
 
 class LLMClient:
     def __init__(self, model: Optional[str] = None, base_url: Optional[str] = None,
-                 api_key: Optional[str] = None, timeout: int = 90):
+                 api_key: Optional[str] = None, timeout: Optional[int] = None):
+        timeout = timeout or int(os.environ.get("LLM_TIMEOUT", "150"))
         self.api_key = api_key or _get_key()
         self.base_url = base_url or os.environ.get(
             "OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
         self.model = model or os.environ.get("LLM_MODEL", "qwen3.7-plus")
         self.timeout = timeout
 
-    def chat(self, messages: List[Dict[str, str]], temperature: float = 0.1) -> str:
+    def chat(self, messages: List[Dict[str, str]], temperature: float = 0.1,
+             retries: int = 3) -> str:
+        """带指数退避重试（LLM 一慢/一闪断不应让整个任务死掉）。"""
+        import time
         import urllib.request
         body = json.dumps({"model": self.model, "messages": messages, "temperature": temperature}).encode()
-        req = urllib.request.Request(
-            self.base_url.rstrip("/") + "/chat/completions", data=body,
-            headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                data = json.load(r)
-            return data["choices"][0]["message"]["content"]
-        except Exception as e:
-            raise RuntimeError(f"LLM 调用失败: {e}")
+        last_err = ""
+        for attempt in range(1, retries + 1):
+            req = urllib.request.Request(
+                self.base_url.rstrip("/") + "/chat/completions", data=body,
+                headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                    data = json.load(r)
+                return data["choices"][0]["message"]["content"]
+            except Exception as e:
+                last_err = str(e)
+                if attempt < retries:
+                    wait = 2 ** attempt + 1
+                    time.sleep(wait)
+        raise RuntimeError(f"LLM 调用失败（重试 {retries} 次后）: {last_err}")
 
     def extract_json(self, content: str, schema: Dict[str, Any],
                      instruction: str = "请从以下内容中提取字段，输出严格 JSON。") -> Dict[str, Any]:

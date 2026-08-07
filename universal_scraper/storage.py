@@ -31,9 +31,11 @@ class Checkpoint:
 class SeenStore:
     """增量去重：跨任务保存已见 key（基于 key 的哈希集合，避免内存爆炸）。"""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, flush_every: int = 200):
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._flush_every = max(1, flush_every)
+        self._pending: list = []
         self._seen: set = set()
         if self.path.exists():
             try:
@@ -50,8 +52,20 @@ class SeenStore:
     def mark(self, key: str) -> None:
         if key not in self._seen:
             self._seen.add(key)
+            self._pending.append(key)
+            # 批量 flush：避免 10 万条 = 10 万次文件 open/write
+            if len(self._pending) >= self._flush_every:
+                self.flush()
+
+    def flush(self) -> None:
+        if not self._pending:
+            return
+        try:
             with open(self.path, "a", encoding="utf-8") as f:
-                f.write(key + "\n")
+                f.write("\n".join(self._pending) + "\n")
+        except Exception:
+            pass
+        self._pending = []
 
     def __len__(self) -> int:
         return len(self._seen)

@@ -166,6 +166,7 @@ def main() -> int:
     wp.add_argument("--port", type=int, default=8642, help="端口（默认 8642）")
     wp.add_argument("--host", default="127.0.0.1", help="监听地址（默认本机）")
     wp.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
+    wp.add_argument("--token", default="", help="访问令牌（share 模式建议设置；也可用 US_WEBUI_TOKEN）")
     wp.add_argument("--share", action="store_true", help="分享模式：同网络的人可访问（0.0.0.0）")
 
     st_p = sub.add_parser("sites", help="🏆 高频网站表与精配解析器状态")
@@ -443,7 +444,10 @@ def main() -> int:
 
     if args.cmd == "webui":
         from .webui import serve
-        return serve(args.port, args.host, auto_open=not args.no_open, share=args.share)
+        import os
+        token = getattr(args, "token", "") or os.environ.get("US_WEBUI_TOKEN", "")
+        return serve(args.port, args.host, auto_open=not args.no_open,
+                     share=args.share, token=token)
 
     if args.cmd == "crawl":
         from .quick import crawl_url

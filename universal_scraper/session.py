@@ -22,13 +22,15 @@ UA_POOL = [
 
 
 class HttpSession:
-    __slots__ = ("domain", "ua", "proxy", "cookies", "errors", "last_used", "id")
+    __slots__ = ("domain", "ua", "proxy", "cookies", "errors", "last_used", "id", "jar")
 
     def __init__(self, domain: str, ua: str, proxy: Optional[str]):
         self.domain = domain
         self.ua = ua
         self.proxy = proxy
         self.cookies: Dict[str, str] = {}
+        from http.cookiejar import CookieJar
+        self.jar = CookieJar()
         self.errors = 0
         self.last_used = 0.0
         self.id = random.randint(100000, 999999)
@@ -46,17 +48,24 @@ class SessionPool:
         self.proxy_mode = proxy_mode
         self._pool: Dict[str, List[HttpSession]] = {}
         self._idx: Dict[str, int] = {}
+        self._proxy_counter = 0
         self._lock = threading.Lock()
         self.stats = {"created": 0, "rotated": 0, "blocked": 0}
+        # 可选外部代理池回调（ProxyPool.next / mark_fail），打通冷却与失败惩罚
+        self._proxy_source = None
 
     def _next_proxy(self) -> Optional[str]:
+        if self._proxy_source is not None:
+            return self._proxy_source()
         if not self.proxies:
             return None
         if self.proxy_mode == "random":
             return random.choice(self.proxies)
-        # round_robin：按时间轮换
-        i = int(time.time() * 10) % len(self.proxies)
-        return self.proxies[i]
+        # round_robin：计数器轮换（修复同秒新建会话拿同一代理）
+        with self._lock:
+            i = self._proxy_counter % len(self.proxies)
+            self._proxy_counter += 1
+            return self.proxies[i]
 
     def acquire(self, url: str) -> HttpSession:
         """取一个会话：域内轮换；全被污染则新建（新 UA/代理）。"""

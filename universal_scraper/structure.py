@@ -33,8 +33,9 @@ def _fetch(url: str, timeout: Optional[int] = None) -> Optional[Dict[str, Any]]:
                     return {"kind": "json", "data": json.loads(raw.decode("utf-8", "replace"))}
                 except Exception:
                     return {"kind": "json", "data": raw.decode("utf-8", "replace")[:2000]}
+            from .core import smart_decode
             enc = r.headers.get_content_charset() or "utf-8"
-            return {"kind": "html", "text": raw.decode(enc, "replace")}
+            return {"kind": "html", "text": smart_decode(raw, {"content-type": enc})}
     except Exception as e:
         return {"kind": "error", "error": f"{type(e).__name__}: {e}"}
 

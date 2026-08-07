@@ -40,10 +40,11 @@ def jpath(obj: Any, path: str, default: Any = None) -> Any:
             for idx in re.findall(r"\[([^\]]*)\]", m.group(2)):
                 tokens.append(idx)
     cur: Any = obj
-    for tok in tokens:
+    for i, tok in enumerate(tokens):
         if tok == "*":
             if isinstance(cur, list):
-                out = [jpath(x, ".".join(tokens[tokens.index(tok) + 1:]), default) for x in cur]
+                # 用剩余 token 递归（修复多通配 a.*.b.*.c 时 index() 永远取第一个 * 的 bug）
+                out = [jpath(x, ".".join(tokens[i + 1:]), default) for x in cur]
                 return out
             return default
         if isinstance(cur, dict):

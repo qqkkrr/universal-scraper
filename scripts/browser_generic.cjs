@@ -177,6 +177,8 @@ async function main() {
   const loginTimeout = parseInt(arg("loginTimeout", "600000"), 10);
   const profileDir = arg("profile", null);
   const cdpUrl = arg("cdp", null);
+  const stopFile = arg("stopFile", null);
+  const stopRequested = () => stopFile && fs.existsSync(stopFile);
   // 真实 Chrome（用户日常浏览器）比 Chrome for Testing 更接近真人，风控识别率低
   const CHROME_EXE = fs.existsSync(USER_CHROME) ? USER_CHROME : FULL_CHROME;
 
@@ -364,6 +366,10 @@ async function main() {
         out({ type: "verify_required", message: "检测到网站验证码/登录要求：请在弹出的浏览器窗口（标题通常为 Google Chrome for Testing）中完成 ①滑块/点选验证 ②扫码或账号登录，完成后自动继续。最长等待 " + Math.round(gateMaxWait / 1000) + " 秒" });
       }
       while (!done && Date.now() < deadline) {
+        if (stopRequested()) {
+          out({ type: "stopped", message: "收到停止信号（.stop）" });
+          process.exit(0);
+        }
         const u = page.url() || "";
         let txt = "";
         try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 500) : "")); } catch (e) {}
@@ -446,6 +452,10 @@ async function main() {
       await page.waitForSelector(spec.wait.selector, { timeout: spec.wait.timeout || 20000 }).catch(() => {});
     }
     await sleep(settle);
+    if (stopRequested()) {
+      out({ type: "stopped", message: "收到停止信号（.stop）" });
+      process.exit(0);
+    }
 
     // 真人浏览捕获模式：保持窗口打开，让用户手动操作（验证/登录/滚动），期间持续捕获接口
     if (spec.hold_ms) {
@@ -458,6 +468,10 @@ async function main() {
       out({ type: "scroll", count: scrollCount });
       const beh = spec.behavior || {};
       for (let s = 0; s < scrollCount; s++) {
+        if (stopRequested()) {
+          out({ type: "stopped", message: "收到停止信号（.stop）" });
+          process.exit(0);
+        }
         // 人类化：不是每次到底，而是分段滚动 + 随机停顿（模拟真人阅读节奏）
         if (beh.human_scroll) {
           const target = await page.evaluate(() => document.body.scrollHeight);

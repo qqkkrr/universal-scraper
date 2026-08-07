@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import csv
 import gzip
+import base64
 import hashlib
+import threading
 import zlib
 import io
 import json
@@ -127,6 +129,100 @@ def smart_decode(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
     return _decode_body(raw, headers)
 
 
+# ---------------------------------------------------------------- Cookie 工具
+# 多后端（urllib/curl_cffi/requests）会把多个 Set-Cookie 合并成一个逗号串，
+# Expires 日期里也带逗号——直接喂 http.cookiejar 会解析错，这里先按"新 cookie 名=值"
+# 特征切分，再把每条单独喂给 CookieJar（RFC 6265 语义）。
+
+def split_set_cookie(value: str) -> List[str]:
+    """把可能逗号合并的 Set-Cookie 串切成单条。"""
+    if not value:
+        return []
+    parts: List[str] = []
+    cur = ""
+    for seg in re.split(r',(?=(?:[^"]*"[^"]*")*[^"]*$)', value):
+        seg = seg.strip()
+        if not seg:
+            continue
+        # 新 cookie：以 "名字=值" 开头（名字不含 =;,\s）
+        if cur and not re.match(r"^[^=;,\s]+=", seg):
+            cur += ", " + seg          # Expires 日期延续
+        else:
+            if cur:
+                parts.append(cur)
+            cur = seg
+    if cur:
+        parts.append(cur)
+    return parts
+
+
+def set_cookie_strings(headers: Optional[Dict[str, Any]] = None,
+                       raw_headers: Any = None) -> List[str]:
+    """从响应里取所有 Set-Cookie 字符串（优先 raw 的多值接口）。"""
+    out: List[str] = []
+    if raw_headers is not None:
+        try:
+            if hasattr(raw_headers, "get_all"):
+                out = list(raw_headers.get_all("Set-Cookie") or [])
+            elif hasattr(raw_headers, "getlist"):
+                out = list(raw_headers.getlist("Set-Cookie") or [])
+        except Exception:
+            out = []
+    if not out:
+        v = (headers or {}).get("set-cookie", "") or (headers or {}).get("Set-Cookie", "")
+        out = split_set_cookie(str(v))
+    # raw 多值里可能仍有个别被合并，逐条再切一次（幂等）
+    final: List[str] = []
+    for o in out:
+        final.extend(split_set_cookie(o))
+    return final
+
+
+def update_cookie_jar(jar, url: str, headers: Optional[Dict[str, Any]] = None,
+                      raw_headers: Any = None) -> None:
+    """把响应的 Set-Cookie 写入 CookieJar。"""
+    if jar is None:
+        return
+    try:
+        from http.cookiejar import CookieJar
+        from http.client import HTTPMessage
+        import urllib.request as _ur
+        if not isinstance(jar, CookieJar):
+            return
+        req = _ur.Request(url or "http://localhost/")
+        for sc in set_cookie_strings(headers, raw_headers):
+            if not sc:
+                continue
+            msg = HTTPMessage()
+            msg.add_header("Set-Cookie", sc)
+            class _Resp:
+                def __init__(self, m):
+                    self._m = m
+                def info(self):
+                    return self._m
+                def geturl(self):
+                    return url or "http://localhost/"
+            try:
+                jar.extract_cookies(_Resp(msg), req)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def jar_cookie_header(jar, url: str) -> str:
+    """从 CookieJar 生成 Cookie 请求头（无 cookie 返回 ""）。"""
+    if jar is None:
+        return ""
+    try:
+        import urllib.request as _ur
+        req = _ur.Request(url or "http://localhost/")
+        jar.add_cookie_header(req)
+        return req.get_header("Cookie") or ""
+    except Exception:
+        return ""
+
+
 def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optional[str] = None,
                timeout: int = 60) -> Optional[bytes]:
     """下载原始字节（curl_cffi TLS 伪装优先，回退 urllib+gzip）。失败返回 None。"""
@@ -179,15 +275,18 @@ class HttpClient:
 
     def __post_init__(self) -> None:
         self._last_ts = 0.0
+        self._throttle_lock = threading.Lock()
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     # -- 限速 --
     def _throttle(self) -> None:
-        elapsed = time.time() - self._last_ts
-        if elapsed < self.min_interval:
-            time.sleep(self.min_interval - elapsed)
-        self._last_ts = time.time()
+        # 多 worker 并发调用：必须加锁，否则限速形同虚设（可 2 倍突发）
+        with self._throttle_lock:
+            elapsed = time.time() - self._last_ts
+            if elapsed < self.min_interval:
+                time.sleep(self.min_interval - elapsed)
+            self._last_ts = time.time()
 
     def _headers(self, extra: Optional[Dict[str, str]]) -> Dict[str, str]:
         h = {
@@ -221,6 +320,28 @@ class HttpClient:
     def _cache_key(self, url: str, body: bytes, method: str) -> str:
         raw = f"{method}|{url}|{body.decode('utf-8', 'replace')}"
         return hashlib.md5(raw.encode()).hexdigest() + ".json"
+
+    def _cache_encode(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """缓存编码：body bytes → base64（json 无法直接存 bytes）；raw_headers 不落盘。"""
+        out = dict(result)
+        out.pop("raw_headers", None)
+        b = out.get("body")
+        if isinstance(b, bytes):
+            out["body"] = "b64:" + base64.b64encode(b).decode("ascii")
+        return out
+
+    def _cache_decode(self, cached: Dict[str, Any]) -> Dict[str, Any]:
+        out = dict(cached)
+        b = out.get("body")
+        if isinstance(b, str) and b.startswith("b64:"):
+            out["body"] = base64.b64decode(b[4:])
+        return out
+
+    def _cache_valid(self, path: Path, ttl: float = 86400.0) -> bool:
+        try:
+            return time.time() - path.stat().st_mtime <= ttl
+        except Exception:
+            return False
 
     def request(
         self,
@@ -258,9 +379,9 @@ class HttpClient:
 
         if use_cache and self.cache_dir and method == "GET" and not body_bytes:
             cf = self.cache_dir / self._cache_key(url, b"", method)
-            if cf.exists():
+            if cf.exists() and self._cache_valid(cf):
                 try:
-                    return json.loads(cf.read_text(encoding="utf-8"))
+                    return self._cache_decode(json.loads(cf.read_text(encoding="utf-8")))
                 except Exception:
                     pass
 
@@ -318,6 +439,7 @@ class HttpClient:
                         "json": parsed,
                         "url": resp.geturl() or url,
                         "headers": {k.lower(): v for k, v in resp.headers.items()},
+                        "raw_headers": resp.headers,
                     }
                     break
             except urllib.error.HTTPError as e:
@@ -330,6 +452,7 @@ class HttpClient:
                         "text": _decode_body(raw, {k.lower(): v for k, v in e.headers.items()} if e.headers else {}),
                         "json": None, "url": url,
                         "headers": {k.lower(): v for k, v in e.headers.items()} if e.headers else {},
+                        "raw_headers": e.headers if e.headers else None,
                     }
                     break
                 if status in (429, 403, 500, 502, 503, 504):
@@ -362,8 +485,16 @@ class HttpClient:
             return {"ok": False, "status": last_status, "body": b"", "text": last_err, "json": None, "url": url,
                     "headers": last_headers}
         if use_cache and result["ok"] and self.cache_dir and method == "GET" and not body_bytes:
-            (self.cache_dir / self._cache_key(url, b"", method)).write_text(
-                json.dumps(result, ensure_ascii=False, default=str), encoding="utf-8")
+            _cf = self.cache_dir / self._cache_key(url, b"", method)
+            _cf.write_text(json.dumps(self._cache_encode(result), ensure_ascii=False), encoding="utf-8")
+            # 简单淘汰：超过 2000 个缓存文件时删最旧的（防无限增长）
+            try:
+                _files = sorted(self.cache_dir.glob("*.json"), key=lambda f: f.stat().st_mtime)
+                if len(_files) > 2000:
+                    for _old in _files[: len(_files) - 2000]:
+                        _old.unlink(missing_ok=True)
+            except Exception:
+                pass
         return result
 
     def get(self, url: str, **kw) -> Dict[str, Any]:
@@ -498,16 +629,19 @@ class RequestsClient:
             self.session.proxies = {"http": proxy, "https": proxy}
         if cookies:
             self.session.cookies.update(cookies)
+        self._throttle_lock = threading.Lock()
         # 连接池
         adapter = requests.adapters.HTTPAdapter(pool_connections=8, pool_maxsize=16, max_retries=0)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
 
     def _throttle(self) -> None:
-        elapsed = time.time() - self._last_ts
-        if elapsed < self.min_interval:
-            time.sleep(self.min_interval - elapsed)
-        self._last_ts = time.time()
+        # 多 worker 并发调用：必须加锁，否则限速形同虚设（可 2 倍突发）
+        with self._throttle_lock:
+            elapsed = time.time() - self._last_ts
+            if elapsed < self.min_interval:
+                time.sleep(self.min_interval - elapsed)
+            self._last_ts = time.time()
 
     def request(self, url: str, method: str = "GET", params=None, data=None,
                 json_data=None, headers=None, use_cache: bool = False,
@@ -546,7 +680,8 @@ class RequestsClient:
                 return {"ok": True, "status": resp.status_code, "body": raw,
                         "text": resp.text if resp.text else _decode_body(raw, {k.lower(): v for k, v in resp.headers.items()}),
                         "json": parsed, "url": resp.url,
-                        "headers": {k.lower(): v for k, v in resp.headers.items()}}
+                        "headers": {k.lower(): v for k, v in resp.headers.items()},
+                        "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None)}
             except Exception as e:
                 wait = self.backoff_base ** attempt
                 log(f"  网络异常: {e}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
@@ -587,15 +722,18 @@ class CurlCffiClient:
         self.rotate_ua = rotate_ua
         self.proxy = proxy
         self.impersonate = impersonate
+        self._throttle_lock = threading.Lock()
         self.extra_headers = dict(extra_headers or {})
         self.cookies = dict(cookies or {})
         self._last_ts = 0.0
 
     def _throttle(self) -> None:
-        elapsed = time.time() - self._last_ts
-        if elapsed < self.min_interval:
-            time.sleep(self.min_interval - elapsed)
-        self._last_ts = time.time()
+        # 多 worker 并发调用：必须加锁，否则限速形同虚设（可 2 倍突发）
+        with self._throttle_lock:
+            elapsed = time.time() - self._last_ts
+            if elapsed < self.min_interval:
+                time.sleep(self.min_interval - elapsed)
+            self._last_ts = time.time()
 
     def request(self, url: str, method: str = "GET", params=None, data=None,
                 json_data=None, headers=None, use_cache: bool = False,
@@ -636,7 +774,8 @@ class CurlCffiClient:
                 return {"ok": True, "status": resp.status_code, "body": raw,
                         "text": resp.text if resp.text else _decode_body(raw, {k.lower(): v for k, v in resp.headers.items()}),
                         "json": parsed,
-                        "url": str(resp.url), "headers": {k.lower(): v for k, v in resp.headers.items()}}
+                        "url": str(resp.url), "headers": {k.lower(): v for k, v in resp.headers.items()},
+                        "raw_headers": resp.headers}
             except Exception as e:
                 last_err = str(e)
                 wait = self.backoff_base ** attempt

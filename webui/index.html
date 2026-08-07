@@ -190,7 +190,20 @@ $('#p_mode').onchange=()=>{
 };
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-async function api(path,opts){const r=await fetch(path,opts);return r.json();}
+async function api(path,opts){
+  opts=opts||{};
+  const token=localStorage.getItem('us_token')||'';
+  const h={...(opts.headers||{})};
+  if(token) h['X-Auth-Token']=token;
+  opts.headers=h;
+  let r=await fetch(path,opts);
+  if(r.status===403 && !opts._retried){
+    const tk=prompt('需要访问令牌（分享模式）：');
+    if(tk){ localStorage.setItem('us_token',tk); opts._retried=true; r=await api(path,opts); }
+    else { return {error:'未提供访问令牌'}; }
+  }
+  return r.json();
+}
 async function testCookie(cid,resid,urlid){
   const cookie=$('#'+cid).value.trim();
   const url=urlid?$('#'+urlid).value.trim():'https://www.dianping.com/search/keyword/2/0_%E7%BE%8E%E9%A3%9F';

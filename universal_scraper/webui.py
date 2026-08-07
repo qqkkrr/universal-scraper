@@ -35,6 +35,7 @@ PY = None  # 延迟到 serve 里注入 sys.executable
 JOBS: dict = {}
 JOBS_LOCK = threading.Lock()
 JOBS_MAX = 50
+AUTH_TOKEN = ""
 
 
 # --------------------------------------------------------------------------
@@ -218,7 +219,15 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         return json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
 
+    def _auth_ok(self, headers) -> bool:
+        if not AUTH_TOKEN:
+            return True
+        return (headers.get("X-Auth-Token") or "") == AUTH_TOKEN
+
     def do_GET(self):
+        if not self._auth_ok(self.headers):
+            self._send(403, "Forbidden: 需要 X-Auth-Token")
+            return
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         try:
@@ -248,7 +257,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(detect_ip())
             elif u.path == "/api/verify":
                 name = q.get("file", [""])[0]
-                fp = ROOT / "outputs" / name if not name.startswith(("outputs/", "/")) else ROOT / name
+                # 路径穿越防护：只允许 outputs 目录内（resolve 后校验前缀，拒绝绝对路径/..）
+                try:
+                    fp = (ROOT / "outputs" / name).resolve()
+                    fp.relative_to((ROOT / "outputs").resolve())
+                except Exception:
+                    self._json({"error": "非法文件路径（仅允许 outputs 目录内）"})
+                    return
                 if not fp.exists():
                     self._json({"error": f"文件不存在: {name}"})
                     return
@@ -263,6 +278,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": f"{type(e).__name__}: {e}"})
 
     def do_POST(self):
+        if not self._auth_ok(self.headers):
+            self._send(403, "Forbidden: 需要 X-Auth-Token")
+            return
         u = urllib.parse.urlparse(self.path)
         try:
             body = self._read_body()
@@ -401,16 +419,24 @@ def _lan_urls(port: int):
 
 
 def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
-          share: bool = False) -> int:
-    global PY
-    import sys
+          share: bool = False, token: str = "") -> int:
+    global PY, AUTH_TOKEN
+    import sys, secrets
     PY = sys.executable
+    AUTH_TOKEN = token or os.environ.get("US_WEBUI_TOKEN", "")
     print("🕷️ 万能爬虫工具 · 可视化版 v3", flush=True)
     if share:
         host = "0.0.0.0"
-        print("   📡 分享模式：同一网络（WiFi）的人可用下面地址访问", flush=True)
+        if not AUTH_TOKEN:
+            AUTH_TOKEN = secrets.token_hex(8)
+            os.environ["US_WEBUI_TOKEN"] = AUTH_TOKEN
+        print("   ⚠️  分享模式已开启访问令牌（所有 /api/* 需带 X-Auth-Token）", flush=True)
+        print(f"   🔑 访问令牌: {AUTH_TOKEN}", flush=True)
+        print("   📡 同一网络（WiFi）的人可用下面地址访问（页面需输入令牌）", flush=True)
         for u in _lan_urls(port):
             print(f"      {u}", flush=True)
+    elif AUTH_TOKEN:
+        print(f"   🔑 访问令牌: {AUTH_TOKEN}（所有 /api/* 需带 X-Auth-Token）", flush=True)
     try:
         srv = ThreadingHTTPServer((host, port), Handler)
     except OSError as e:
@@ -439,5 +465,6 @@ if __name__ == "__main__":
     ap.add_argument("--port", type=int, default=8642)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--share", action="store_true")
+    ap.add_argument("--token", default="", help="访问令牌（share 模式建议设置；也可用 US_WEBUI_TOKEN）")
     a = ap.parse_args()
-    serve(a.port, a.host, share=a.share)
+    serve(a.port, a.host, share=a.share, token=a.token)
