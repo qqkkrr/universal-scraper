@@ -37,7 +37,17 @@ class HttpFetcher(BaseFetcher):
                                     proxy_mode=anti.get("proxy_mode", "round_robin"))
         if self.proxy_pool is not None:
             self.sessions._proxy_source = self.proxy_pool.next
+            self.sessions._proxy_ok_cb = self.proxy_pool.mark_ok
+            self.sessions._proxy_fail_cb = self.proxy_pool.mark_fail
         self._cur_session = None
+        # 死代理快速失败：代理模式下客户端不再同一代理内部退避 3 次，
+        # 第一次失败就抛回引擎 → 新会话自动换下一个代理（比死等 2+4+8s 快得多）
+        if self.sessions.size > 0 or self.proxy_pool is not None:
+            try:
+                if getattr(self.client, "max_retries", 3) > 1:
+                    self.client.max_retries = 1
+            except Exception:
+                pass
 
     def _pick_proxy(self) -> str:
         """从代理池取一个可用代理；没有则直连（None）。"""
@@ -91,7 +101,6 @@ class HttpFetcher(BaseFetcher):
         except Exception:
             # 客户端抛异常（网络层/自定义客户端）：会话+代理标记失败后继续抛出
             self.sessions.report(sess, ok=False, blocked=True)
-            self._report_proxy(False)
             raise
         # 响应 Set-Cookie → 会话 Cookie jar（真 cookie 持久化）
         try:
@@ -102,9 +111,9 @@ class HttpFetcher(BaseFetcher):
         # 封禁识别：HTTP 200 但被风控的页面也能识破
         ok = bool(res.get("ok"))
         bd = detect_block(res.get("status", 0), res.get("text", ""), res.get("headers"), url)
-        blocked = bd["kind"] != "none"
+        # login 登录墙是"预期状态"不是会话污染：只提示不轮换（否则需要登录的 API 每次换会话丢 cookie）
+        blocked = bd["kind"] != "none" and bd["kind"] != "login"
         self.sessions.report(sess, ok=ok and not blocked, blocked=blocked)
-        self._report_proxy(ok and not blocked)
         if blocked:
             if self.anti.get("_block_stats") is not None:
                 self.anti["_block_stats"][bd["kind"]] = self.anti["_block_stats"].get(bd["kind"], 0) + 1
@@ -283,6 +292,17 @@ class BrowserFetcher(BaseFetcher):
     def _stopped(self) -> bool:
         return bool(self._task_dir) and (self._task_dir / ".stop").exists()
 
+    def _notify(self, msg: str) -> None:
+        """进度回传：WebUI job.messages（engine 通过 anti._log_cb 注入），无则打印终端。"""
+        cb = self.anti.get("_log_cb")
+        if cb:
+            try:
+                cb(msg)
+                return
+            except Exception:
+                pass
+        print(msg, flush=True)
+
     # ---- 会话池 ----
     def _ensure_pool(self):
         if not self._pool_enabled:
@@ -299,6 +319,8 @@ class BrowserFetcher(BaseFetcher):
             env["US_STORAGE_STATE"] = str(ss)
         if self._proxy and not self._single_proxy_mode:
             env["US_PROXY"] = self._proxy
+        if self._task_dir:
+            env["US_STOP_FILE"] = str(self._task_dir / ".stop")
         self._pool = subprocess.Popen(
             [_NODE_BIN, str(self.scripts_dir / "browser_pool.cjs")],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -404,11 +426,11 @@ class BrowserFetcher(BaseFetcher):
                 t = obj.get("type")
                 msg = obj.get("message") or ""
                 if t in ("login", "verify_required", "login_required"):
-                    print(f"⚠️ {msg}", flush=True)
+                    self._notify(f"⚠️ {msg}")
                 elif t in ("login_ok", "verify_ok"):
-                    print(f"✅ 会话已保存: {obj.get('storageState', '')}", flush=True)
+                    self._notify(f"✅ 会话已保存: {obj.get('storageState', '')}")
                 elif t == "verify_passed":
-                    print(f"✅ {msg}", flush=True)
+                    self._notify(f"✅ {msg}")
                 elif t == "page":
                     f = obj.get("file")
                     if f and Path(f).exists():
@@ -455,14 +477,21 @@ class BrowserFetcher(BaseFetcher):
         deadline = time.time() + 120
         with self._cond:
             while self._pending.get(rid) is None:
+                if self._stopped():
+                    with self._lock:
+                        self._pending.pop(rid, None)
+                    try:
+                        if self._pool is not None:
+                            self._pool.terminate()
+                    except Exception:
+                        pass
+                    raise KeyboardInterrupt("任务已停止（WebUI 停止信号，浏览器池已终止）")
                 if time.time() > deadline:
                     with self._lock:
                         self._pending.pop(rid, None)
                     raise TimeoutError(f"浏览器池渲染超时: {req.url}")
                 self._cond.wait(1.0)
             obj = self._pending.pop(rid)
-        if self._stopped():
-            raise KeyboardInterrupt("任务已停止（WebUI 停止信号）")
         if "error" in obj and obj["error"]:
             raise RuntimeError(obj["error"])
         html = obj.get("html", "")
@@ -487,6 +516,8 @@ class BrowserFetcher(BaseFetcher):
             cmd += ["--stealth", "1"]
         if self.config.get("remove_overlays"):
             cmd += ["--removeOverlays", "1"]
+        if self._task_dir:
+            cmd += ["--stopFile", str(self._task_dir / ".stop")]
         proxy = None
         if self._single_proxy_mode and self.proxy_pool is not None:
             proxy = self.proxy_pool.next()
@@ -502,6 +533,8 @@ class BrowserFetcher(BaseFetcher):
             raise RuntimeError(f"浏览器桥输出异常: {proc.stderr[-300:]}")
         if obj.get("type") == "error":
             raise RuntimeError(obj.get("message"))
+        if obj.get("type") == "stopped" or self._stopped():
+            raise KeyboardInterrupt("任务已停止（WebUI 停止信号）")
         html = Path(out_file).read_text(encoding="utf-8", errors="replace")
         return Response(request=req, status=200, body=html.encode("utf-8"),
                         text=html, json=None, url=obj.get("url") or req.url)

@@ -53,6 +53,8 @@ class SessionPool:
         self.stats = {"created": 0, "rotated": 0, "blocked": 0}
         # 可选外部代理池回调（ProxyPool.next / mark_fail），打通冷却与失败惩罚
         self._proxy_source = None
+        self._proxy_ok_cb = None
+        self._proxy_fail_cb = None
 
     def _next_proxy(self) -> Optional[str]:
         if self._proxy_source is not None:
@@ -94,12 +96,23 @@ class SessionPool:
             return s
 
     def report(self, session: HttpSession, ok: bool, blocked: bool = False) -> None:
-        """上报结果：ok=True 清零错误；blocked=True 立即污染并换新。"""
+        """上报结果：ok=True 清零错误；blocked=True 立即污染并换新。
+        同时把代理成败反馈给外部 ProxyPool（打通冷却/失败惩罚）。"""
         with self._lock:
             if ok:
                 session.errors = 0
+                if self._proxy_ok_cb is not None and session.proxy:
+                    try:
+                        self._proxy_ok_cb(session.proxy)
+                    except Exception:
+                        pass
             else:
                 session.errors += 1
+                if self._proxy_fail_cb is not None and session.proxy:
+                    try:
+                        self._proxy_fail_cb(session.proxy)
+                    except Exception:
+                        pass
                 if blocked:
                     session.errors = self.rotate_on_errors  # 立即触发轮换
                     self.stats["blocked"] += 1
@@ -118,6 +131,11 @@ class SessionPool:
             self.stats["created"] += 1
             self.stats["rotated"] += 1
             return s
+
+    @property
+    def size(self) -> int:
+        """配置的代理数量（不含外部 _proxy_source）。"""
+        return len(self.proxies)
 
     def summary(self) -> str:
         with self._lock:

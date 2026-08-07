@@ -15,6 +15,8 @@ const readline = require("node:readline");
 const { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy } = require("./browser_common.cjs");
 
 const POOL_SIZE = Math.max(1, parseInt(process.env.US_POOL_SIZE || "3", 10));
+const STOP_FILE = process.env.US_STOP_FILE || null;
+const stopRequested = () => STOP_FILE && fs.existsSync(STOP_FILE);
 const out = (o) => console.log(JSON.stringify(o));
 
 async function renderPage(context, req, stealthApplied) {
@@ -75,6 +77,7 @@ async function main() {
       const req = await pop();
       if (!req) return;
       if (req.type === "close") { closing = true; return; }
+      if (stopRequested()) { closing = true; return; }
       try {
         const r = await renderPage(context, req, stealthApplied);
         out({ id: req.id, html: r.html, url: r.url, bytes: r.bytes });

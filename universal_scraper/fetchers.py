@@ -122,14 +122,12 @@ class HttpFetcher(BaseFetcher):
                 res = self.http.get(url, **kw)
         except Exception:
             self.sessions.report(sess, ok=False, blocked=True)
-            self._report_proxy(False)
             raise
         # 封禁识别（Crawlee block-detection 思路）：200 但被风控的页面也会被识破
         ok = bool(res.get("ok"))
         bd = detect_block(res.get("status", 0), res.get("text", ""), res.get("headers"), url)
-        blocked = bd["kind"] != "none"
+        blocked = bd["kind"] != "none" and bd["kind"] != "login"
         self.sessions.report(sess, ok=ok, blocked=blocked)
-        self._report_proxy(ok and not blocked)
         # 会话 Cookie 续存（真 cookie jar：多 Set-Cookie + Expires 逗号正确处理）
         if ok:
             try:

@@ -23,6 +23,8 @@ async function main() {
   const stealth = arg("stealth", "0") === "1";
   const removeOverlays = arg("removeOverlays", "0") === "1";
   const proxy = parseProxy(arg("proxy", null));
+  const stopFile = arg("stopFile", null);
+  const stopRequested = () => stopFile && fs.existsSync(stopFile);
   let browser = null;
   try {
     browser = await loadChromium().launch({ headless, executablePath: CHROMIUM_EXE, args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"] });
@@ -38,9 +40,11 @@ async function main() {
     if (actionsJson) await runActions(page, JSON.parse(actionsJson));
     if (waitSel) await page.waitForSelector(waitSel, { timeout: 30000 }).catch(() => {});
     for (let s = 0; s < scrollCount; s++) {
+      if (stopRequested()) { out({ type: "stopped", url }); process.exit(0); }
       await page.evaluate(() => { window.scrollTo(0, document.body.scrollHeight); window.dispatchEvent(new Event("scroll")); });
       await sleep(scrollWait);
     }
+    if (stopRequested()) { out({ type: "stopped", url }); process.exit(0); }
     const html = await page.evaluate(() => document.documentElement.outerHTML);
     fs.writeFileSync(outFile, html);
     out({ type: "html", file: outFile, url: page.url(), bytes: html.length });

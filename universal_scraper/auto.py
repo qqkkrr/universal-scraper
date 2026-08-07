@@ -547,7 +547,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         log_file = ROOT / "outputs" / f".run_{name}.log"
         _box = {}
         def _run_round():
-            _box["r"] = run_task(task_dir, limit=limit, log_file=log_file)
+            _box["r"] = run_task(task_dir, limit=limit, log_file=log_file, log_cb=log_cb)
         _t = _th.Thread(target=_run_round, daemon=True)
         _t.start()
         _t.join(timeout=round_timeout)
@@ -731,7 +731,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         log_file = ROOT / "outputs" / f".run_{name}.log"
         _box = {}
         def _run_round():
-            _box["r"] = run_task(td, limit=limit, log_file=log_file)
+            _box["r"] = run_task(td, limit=limit, log_file=log_file, log_cb=log_cb)
         _t = _th.Thread(target=_run_round, daemon=True)
         _t.start()
         _t.join(timeout=round_timeout)

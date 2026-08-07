@@ -82,7 +82,7 @@ class EngineV3:
     def __init__(self, task: Task, overrides: Optional[Dict[str, str]] = None,
                  limit: Optional[int] = None, resume: bool = False,
                  dry_run: bool = False, log_file: Optional[Path] = None,
-                 start_url: Optional[str] = None):
+                 start_url: Optional[str] = None, log_cb=None):
         self.task = task
         self.config = task.config
         self.vars = dict(task.config.get("vars", {}))
@@ -111,6 +111,8 @@ class EngineV3:
         (out_dir / ".session").mkdir(parents=True, exist_ok=True)
         (out_dir / ".captcha").mkdir(parents=True, exist_ok=True)
         self.logger = Logger(log_file=log_file or (out_dir / f".run_{task.name}.log"))
+        self._log_cb = log_cb
+        anti["_log_cb"] = log_cb  # 供 fetcher（浏览器交互提示）回传 WebUI 进度
         self.anti = anti
 
         # 插件装配
@@ -196,6 +198,23 @@ class EngineV3:
             self._inc_key = inc.get("key", "id")
             mode = "内容哈希(跨运行去重)" if self._inc_key == "content_hash" else f"key={self._inc_key}"
             self.logger.info(f"增量去重已开启（已见 {len(self._seen_store)} 条，{mode}）")
+
+    def _notify(self, msg: str, level: str = "INFO") -> None:
+        """统一进度通道：写日志 + 回传回调（WebUI job.messages）。"""
+        try:
+            if level == "WARN":
+                self.logger.warn(msg)
+            elif level == "ERROR":
+                self.logger.error(msg)
+            else:
+                self.logger.info(msg)
+        except Exception:
+            pass
+        if self._log_cb:
+            try:
+                self._log_cb(msg)
+            except Exception:
+                pass
 
     @staticmethod
     def _builtin_middleware(action):
@@ -386,7 +405,9 @@ class EngineV3:
             except Exception:
                 self._spool_start = 0
         self.storage.open(self.storage_name)
-        self.logger.info(f"任务启动: {self.task.name} | 队列 {len(self.queue)} | 规则 {len(self.rules)}")
+        _start_msg = f"任务启动: {self.task.name} | 队列 {len(self.queue)} | 规则 {len(self.rules)}"
+        self.logger.info(_start_msg)
+        self._notify(_start_msg)
         try:
             self._run_pool()
         except KeyboardInterrupt:
@@ -394,6 +415,10 @@ class EngineV3:
             self.logger.warn("收到中断，保存检查点并尽力导出已抓数据...")
             try:
                 self._save_pending()
+                try:
+                    self.storage.close()   # 先 flush jsonl，spool 才能读到全部
+                except Exception as e:
+                    self.logger.warn(f"中断时存储关闭失败: {e}")
                 self._finalize()
                 self._save_state()
             except Exception as e:
@@ -415,11 +440,15 @@ class EngineV3:
                 pass
         self._finalize()
         self._save_state()
-        self.logger.info(f"完成: 抓取 {self.stats['fetched']} | 条目 {self.stats['items']} | 错误 {self.stats['errors']}")
+        _done_msg = f"完成: 抓取 {self.stats['fetched']} | 条目 {self.stats['items']} | 错误 {self.stats['errors']}"
+        self.logger.info(_done_msg)
+        self._notify(_done_msg)
         blocks = dict(self.anti.get("_block_stats") or {})
         if blocks:
             from .antibot import block_summary
-            self.logger.info(f"反爬拦截统计: {block_summary(blocks)}")
+            _bs = f"反爬拦截统计: {block_summary(blocks)}"
+            self.logger.info(_bs)
+            self._notify(_bs)
         return {"name": self.task.name, "total": self.stats["items"],
                 "fetched": self.stats["fetched"], "errors": self.stats["errors"],
                 "block_stats": blocks}
@@ -532,7 +561,9 @@ class EngineV3:
                 with self._lock:
                     self._active -= 1
                 if self.stats["fetched"] % 25 == 0:
-                    self.logger.info(f"进度: 抓取 {self.stats['fetched']} | 条目 {self.stats['items']} | 队列 {len(self.queue)}")
+                    _p = f"进度: 抓取 {self.stats['fetched']} | 条目 {self.stats['items']} | 队列 {len(self.queue)}"
+                    self.logger.info(_p)
+                    self._notify(_p)
                 if self.stats["fetched"] % 10 == 0:
                     self._save_pending()
 
@@ -558,6 +589,8 @@ class EngineV3:
                             continue
                     rows = loaded
                     self.logger.info(f"spool：从 {_sp} 读回本次 {len(loaded)} 条用于导出")
+                else:
+                    self.logger.warn("spool 已开启但找不到 jsonl（storage 非 jsonl 时 spool 不生效，回退内存数据）")
             except Exception as e:
                 self.logger.warn(f"spool 读取失败，退回内存数据: {e}")
         base = self.config.get("output", {}).get("base_name", self.task.name)
@@ -580,7 +613,8 @@ class EngineV3:
 
 
 def run_task(task_path: Path, overrides=None, limit=None, resume=False,
-             dry_run=False, log_file=None, start_url=None) -> Dict[str, Any]:
+             dry_run=False, log_file=None, start_url=None, log_cb=None) -> Dict[str, Any]:
     task = Task(task_path)
     return EngineV3(task, overrides=overrides, limit=limit, resume=resume,
-                    dry_run=dry_run, log_file=log_file, start_url=start_url).run()
+                    dry_run=dry_run, log_file=log_file, start_url=start_url,
+                    log_cb=log_cb).run()

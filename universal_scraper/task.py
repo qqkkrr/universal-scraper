@@ -34,7 +34,8 @@ class Task:
             raise FileNotFoundError(f"任务包缺少 config.json: {root}")
         self.config = validate(json.loads(self.config_path.read_text(encoding="utf-8")),
                                 has_custom_fetcher=(self.modules_dir / "fetcher.py").exists(),
-                                has_custom_storage=(self.modules_dir / "storage.py").exists())
+                                has_custom_storage=(self.modules_dir / "storage.py").exists(),
+                                has_custom_parser=(self.modules_dir / "parser.py").exists())
         self.name = self.config.get("name", root.name)
         self.modules: Dict[str, Any] = {}
 

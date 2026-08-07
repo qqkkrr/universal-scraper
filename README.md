@@ -948,3 +948,23 @@ AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429
 - **新增 `us doctor` 自检**：依赖 / Node / patchright / Chrome / 端口 / git / outputs 一键体检。
 
 测试：`run_tests30-35` 共 **99 项全绿**（本轮新增 `run_tests35` 15 项：配置校验统一 + doctor）。
+
+## 第三十四轮：第二轮 review 修复批次（代理反馈 / 进度回传 / 停止覆盖）
+
+- **#1 代理反馈断链修复**：SessionPool 新增 `_proxy_ok_cb/_proxy_fail_cb`，v2/v3 HttpFetcher 接线到
+  ProxyPool.mark_ok/mark_fail → 冷却/失败惩罚真正生效（复现：死代理 → alive 归零）。
+- **#3 死代理快速失败**：代理模式下客户端 `max_retries=1`，不再同一代理上退避 2+4+8s，第一次失败即
+  抛回引擎 → 新会话自动换代理（实测死代理 <1s 失败并标记冷却）。
+- **#5 login 不算会话封禁**：登录墙只提示不轮换，需要登录的 API 不再每次换会话丢 Cookie。
+- **#2 spool 中断丢数据**：KeyboardInterrupt 路径先 `storage.close()`（flush jsonl）再 `_finalize()`；
+  spool 且非 jsonl 存储时明确告警。
+- **#4 WebUI 进度回传**：engine 新增 `log_cb` 通道（`run_task(log_cb=...)`），任务启动/进度/完成/封禁统计
+  实时进 WebUI job.messages；浏览器交互提示（请扫码登录/验证）走 `_notify` 回传。
+- **#7 停止覆盖全桥**：`_fetch_pool` 等待循环每秒查 `.stop`（命中即 kill 池）；`_fetch_single` 传
+  `--stopFile`；`browser_single.cjs`/`browser_pool.cjs` 支持停止信号。
+- **#8 自定义解析器**：`validate_task(has_custom_parser=True)` 放行自定义 parser type。
+- 过程中还抓到并修复一个**自伤 bug**：engine `_notify` 插入时把 `__init__` 的插件装配段吞进方法体
+  （fetcher/storage 全部未初始化）——被新测试当场逮住，已重构恢复。
+
+测试：`run_tests30-36` 共 **111 项全绿**（新增 `run_tests36` 12 项：代理回调/快失败/login 不污染/
+自定义解析器/进度回传/engine log_cb）。真实链路：新浪 GBK 820 条 0 乱码 + log_cb 实时进度。

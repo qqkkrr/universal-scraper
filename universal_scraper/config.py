@@ -111,7 +111,8 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
-                 has_custom_storage: bool = False) -> Dict[str, Any]:
+                 has_custom_storage: bool = False,
+                 has_custom_parser: bool = False) -> Dict[str, Any]:
     """v3 任务包配置校验：source + start_urls + rules + parsers + storage。
     - 任务包自带 modules/fetcher.py 时允许任意 source.type（插件协议）
     - 仅 http/browser 需要 start_urls（桥/自定义 fetch_all 可省略）"""
@@ -167,11 +168,12 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
         if pt == "download" and not step.get("field"):
             raise ConfigError(f"pipelines[{i}]", "download 流水线需要 field（下载 URL 字段）")
     # parsers 类型校验（任务自带 modules/parser.py 时跳过）
-    for pname, pcfg in (cfg.get("parsers", {}) or {}).items():
-        pt = (pcfg or {}).get("type")
-        if pt and pt not in ALL_PARSER_TYPES:
-            raise ConfigError(f"parsers.{pname}.type", f"未知解析器类型 '{pt}'",
-                              f"可选: {', '.join(sorted(ALL_PARSER_TYPES))}")
+    if not has_custom_parser:
+        for pname, pcfg in (cfg.get("parsers", {}) or {}).items():
+            pt = (pcfg or {}).get("type")
+            if pt and pt not in ALL_PARSER_TYPES:
+                raise ConfigError(f"parsers.{pname}.type", f"未知解析器类型 '{pt}'",
+                                  f"可选: {', '.join(sorted(ALL_PARSER_TYPES))}")
     st = cfg.get("storage", {})
     if st.get("type", "jsonl") not in ALL_STORAGE_TYPES and not has_custom_storage:
         raise ConfigError("storage.type", f"未知存储类型 '{st.get('type')}'",
