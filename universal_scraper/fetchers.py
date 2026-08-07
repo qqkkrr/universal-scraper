@@ -391,6 +391,9 @@ class BrowserFetcher(BaseFetcher):
                    "--headless", "0" if self.source.get("headless") is False else "1"]
             if self.source.get("cdp"):
                 cmd += ["--cdp", str(self.source["cdp"])]
+            _td = self.source.get("_task_dir") or self.anti.get("_task_dir") or ""
+            if _td:
+                cmd += ["--stopFile", str(Path(_td) / ".stop")]
             env = dict(os.environ); env["NODE_PATH"] = NODE_PATH
             pp = self.anti.get("_proxy_pool")
             if pp is not None and pp.size:

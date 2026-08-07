@@ -101,8 +101,8 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
             e, s2 = _score(_c.encoding)
             if s2 is not None and e < best_err:
                 best_err, best_s = e, s2
-    except Exception:
-        pass
+    except Exception as _e:
+        log(f"  charset_normalizer 探测失败: {_e}", "DEBUG")
 
     single_byte = (enc.lower() in ("latin-1", "latin1", "ascii", "iso-8859-1", "windows-1252", "cp1252")
                    or enc.lower().startswith("iso-8859") or enc.lower().startswith("windows-125")

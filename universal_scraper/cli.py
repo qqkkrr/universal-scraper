@@ -186,6 +186,8 @@ def main() -> int:
     pr_p.add_argument("--out", default="outputs/proxies.txt", help="输出文件")
     pr_p.add_argument("--workers", type=int, default=30)
 
+    doc_p = sub.add_parser("doctor", help="🩺 自检：依赖/Node/浏览器/端口/仓库/输出目录")
+
     ck_p = sub.add_parser("cookies", help="🍪 浏览器登录态 → Cookie 直抓串（登录一次，HTTP 直抓复用）")
     ck_p.add_argument("--session", default="outputs/.session/session.json", help="storageState JSON 路径")
     ck_p.add_argument("--domain", default="", help="按域名过滤，如 jd.com / dianping.com / weibo.com")
@@ -355,7 +357,10 @@ def main() -> int:
             print(f"  {s['status']} {s['name']:<6} {s['domain']:<22} {s['desc']}  [{s['difficulty']}]")
         return 0
 
-    if args.cmd == "proxy":
+    if args.cmd == "doctor":
+        from .doctor import run as doctor_run, main as doctor_main
+        return doctor_main()
+
         from .proxy_fetch import refresh as _pf_refresh
         r = _pf_refresh(out=args.out, workers=args.workers)
         print(json.dumps(r, ensure_ascii=False))

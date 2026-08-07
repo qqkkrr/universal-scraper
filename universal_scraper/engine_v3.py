@@ -287,6 +287,8 @@ class EngineV3:
                 if _fails:
                     self.stats["errors"] = max(0, self.stats["errors"] - _fails)
                     self.logger.info(f"重试成功（冲销 {_fails} 错误）: {req.url}")
+                if req.key() in self._retries:
+                    del self._retries[req.key()]  # 清理，防长任务内存累计
         except Exception as e:
             with self._lock:
                 self.stats["errors"] += 1

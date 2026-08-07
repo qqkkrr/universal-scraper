@@ -935,3 +935,16 @@ AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429
 | P2 命名捕获无上限 | v3 HTTP 内存缓存加 2000 上限 |
 
 验证：`run_tests30-34` 共 **84 项全绿**；新浪 GBK 端到端 820 条 0 乱码；WebUI 令牌 + 路径穿越冒烟通过。
+
+## 第三十三轮：Code Review 收尾批次
+
+- **#9 v2/v3 配置校验合并**：`config.py` 统一 `ALL_PIPELINE_TYPES / ALL_ACTION_TYPES / ALL_PARSER_TYPES / ALL_STORAGE_TYPES`，
+  v2 不再拒绝 pipelines.py 已支持的 download/template/split/default/validate；v3 补上缺失的
+  pipelines / parsers / storage 校验（未知类型、download 缺 field、multi 缺 backends 都会报友好错误）。
+- **#15 命名捕获上限**：浏览器桥 `capturedBy` 每个接口最多 5000 条（防长任务内存爆炸）。
+- **#5 关键路径补日志**：Cookie jar 更新失败、内存缓存淘汰、charset_normalizer 探测失败等改为 DEBUG 日志。
+- **v2 浏览器任务停止**：v2 BrowserFetcher 也传 `--stopFile`，浏览器桥统一响应 `.stop`。
+- **`_retries` 内存清理**：请求重试成功后删除计数，防长任务累计。
+- **新增 `us doctor` 自检**：依赖 / Node / patchright / Chrome / 端口 / git / outputs 一键体检。
+
+测试：`run_tests30-35` 共 **99 项全绿**（本轮新增 `run_tests35` 15 项：配置校验统一 + doctor）。

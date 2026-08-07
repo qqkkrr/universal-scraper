@@ -275,10 +275,13 @@ async function main() {
         if (!ct.includes("json")) continue;
         try {
           const j = await res.json();
-          (capturedBy[key] = capturedBy[key] || []).push({ url: u, json: j });
-          if (c.save && capturedBy[key].length % (c.save_every || 5) === 0) {
+          const arr = (capturedBy[key] = capturedBy[key] || []);
+          if (arr.length < 5000) {  // 命名捕获上限，防长任务内存爆炸
+            arr.push({ url: u, json: j });
+          }
+          if (c.save && arr.length % (c.save_every || 5) === 0) {
             const f = path.join(outDir, `${key}.json`);
-            fs.writeFileSync(f, JSON.stringify(capturedBy[key], null, 1));
+            fs.writeFileSync(f, JSON.stringify(arr, null, 1));
           }
         } catch (e) {}
       }

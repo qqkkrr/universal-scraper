@@ -9,7 +9,7 @@ from typing import Any, Dict
 from ..protocols import BaseFetcher, Request, Response
 from ..session import SessionPool
 from ..antibot import detect_block
-from ..core import update_cookie_jar, jar_cookie_header
+from ..core import update_cookie_jar, jar_cookie_header, log
 
 
 class HttpFetcher(BaseFetcher):
@@ -97,8 +97,8 @@ class HttpFetcher(BaseFetcher):
         try:
             update_cookie_jar(sess.jar, res.get("url") or url,
                               res.get("headers"), res.get("raw_headers"))
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"  Cookie jar 更新失败（{type(e).__name__}: {e}）", "DEBUG")
         # 封禁识别：HTTP 200 但被风控的页面也能识破
         ok = bool(res.get("ok"))
         bd = detect_block(res.get("status", 0), res.get("text", ""), res.get("headers"), url)
@@ -135,8 +135,8 @@ class HttpFetcher(BaseFetcher):
             if len(self._cache) > 2000:
                 try:
                     self._cache.pop(next(iter(self._cache)))
-                except Exception:
-                    pass
+                except Exception as e:
+                    log(f"  内存缓存淘汰失败（{type(e).__name__}）", "DEBUG")
             self._cache[req.url] = resp
         return resp
 

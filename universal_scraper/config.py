@@ -8,9 +8,22 @@ from typing import Any, Dict, List, Optional
 
 SOURCE_TYPES = {"http_json", "http_html", "browser_script", "browser"}
 PAGINATION_STRATEGIES = {"page_param", "offset", "next_url", "none"}
-PIPELINE_TYPES = {"filter", "dedup", "rename", "cast", "add"}
 EXTRACT_TYPES = {"json", "css_text", "css_attr", "css_html", "xpath_text", "xpath_attr", "regex", "regex_all", "constant"}
 CAPTCHA_STRATEGIES = {"auto", "ddddocr", "opencv_slider", "2captcha", "nopecha", "human", "config", "none", "external"}
+
+# ---------------------------------------------------------------- 共享常量（v2/v3 一套，杜绝 API 分裂）
+# 与 modules/pipelines.py / modules/parsers.py 实际实现对齐
+ALL_PIPELINE_TYPES = {"filter", "dedup", "dedup_content", "cast", "add", "validate",
+                      "rename", "default", "template", "split", "download"}
+ALL_ACTION_TYPES = {"click", "type", "write", "fill", "press", "select", "wait",
+                    "wait_time", "wait_for_selector", "waitfor", "scroll",
+                    "exec", "js", "execute_javascript", "screenshot", "noop"}
+ALL_PARSER_TYPES = {"html", "json", "llm", "article", "table", "json_paged"}
+ALL_STORAGE_TYPES = {"jsonl", "csv", "sqlite", "multi"}
+# 兼容别名（旧代码引用）
+PIPELINE_TYPES = ALL_PIPELINE_TYPES
+V3_ACTION_TYPES = ALL_ACTION_TYPES
+V3_SOURCE_TYPES = {"http", "browser", "bridge"}
 
 
 class ConfigError(ValueError):
@@ -97,12 +110,6 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return cfg
 
 
-V3_ACTION_TYPES = {"click", "type", "write", "fill", "press", "select", "wait",
-                    "wait_time", "wait_for_selector", "waitfor", "scroll",
-                    "exec", "js", "execute_javascript", "screenshot", "noop"}
-V3_SOURCE_TYPES = {"http", "browser", "bridge"}
-
-
 def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
                  has_custom_storage: bool = False) -> Dict[str, Any]:
     """v3 任务包配置校验：source + start_urls + rules + parsers + storage。
@@ -151,10 +158,24 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
         if pname not in cfg.get("parsers", {}):
             raise ConfigError(f"parsers.{pname}", f"规则引用了未定义的 parser '{pname}'",
                               "在 parsers 里声明，或写 modules/parser.py 提供同名 Parser")
+    # pipelines 校验（与 modules/pipelines.py 实现对齐）
+    for i, step in enumerate(cfg.get("pipelines", []) or []):
+        pt = (step or {}).get("type")
+        if pt not in ALL_PIPELINE_TYPES:
+            raise ConfigError(f"pipelines[{i}].type", f"未知流水线类型 '{pt}'",
+                              f"可选: {', '.join(sorted(ALL_PIPELINE_TYPES))}")
+        if pt == "download" and not step.get("field"):
+            raise ConfigError(f"pipelines[{i}]", "download 流水线需要 field（下载 URL 字段）")
+    # parsers 类型校验（任务自带 modules/parser.py 时跳过）
+    for pname, pcfg in (cfg.get("parsers", {}) or {}).items():
+        pt = (pcfg or {}).get("type")
+        if pt and pt not in ALL_PARSER_TYPES:
+            raise ConfigError(f"parsers.{pname}.type", f"未知解析器类型 '{pt}'",
+                              f"可选: {', '.join(sorted(ALL_PARSER_TYPES))}")
     st = cfg.get("storage", {})
-    if st.get("type", "jsonl") not in ("jsonl", "csv", "sqlite", "multi") and not has_custom_storage:
+    if st.get("type", "jsonl") not in ALL_STORAGE_TYPES and not has_custom_storage:
         raise ConfigError("storage.type", f"未知存储类型 '{st.get('type')}'",
-                          "可选: jsonl / csv / sqlite / multi 或提供 modules/storage.py 自定义")
+                          "可选: " + " / ".join(sorted(ALL_STORAGE_TYPES)) + " 或提供 modules/storage.py 自定义")
     if st.get("type") == "multi" and not st.get("backends"):
         raise ConfigError("storage.backends", "multi 存储需要 backends 数组",
                           '[{"type": "jsonl"}, {"type": "sqlite"}]')
