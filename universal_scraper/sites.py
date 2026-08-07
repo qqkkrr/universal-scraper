@@ -99,8 +99,14 @@ def list_sites() -> List[Dict[str, str]]:
                "weather": "weather"}
     for s in HIGH_FREQUENCY_SITES:
         key = mapping.get(s["module"], s["module"])
-        done = key in SITES
-        out.append({**s, "status": "✅ 已精配" if done else s["status"]})
+        reg = SITES.get(key)
+        if reg:
+            if "浏览器渲染" in reg.get("desc", ""):
+                out.append({**s, "status": "🔧 浏览器模式·需登录调优"})
+            else:
+                out.append({**s, "status": "✅ 已精配（HTTP/API）"})
+        else:
+            out.append({**s, "status": s["status"]})
     return out
 
 
