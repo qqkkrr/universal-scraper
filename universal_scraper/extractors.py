@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from urllib.parse import urljoin
 
 from typing import Any, Dict, List, Optional
@@ -87,13 +88,13 @@ def _inline_md(el) -> str:
     if tag == "img":
         alt = (el.get("alt") or "").strip()
         src = el.get("src") or el.get("data-src") or ""
-        if src and _BASE_URL:
-            src = urljoin(_BASE_URL, src)
+        if src and _get_base():
+            src = urljoin(_get_base(), src)
         return f"![{alt}]({src})" if src else alt
     if tag == "a":
         href = el.get("href") or ""
-        if href and _BASE_URL and not href.startswith(("http://", "https://", "mailto:", "tel:", "javascript:", "#")):
-            href = urljoin(_BASE_URL, href)
+        if href and _get_base() and not href.startswith(("http://", "https://", "mailto:", "tel:", "javascript:", "#")):
+            href = urljoin(_get_base(), href)
         txt = _inline_md_children(el).strip()
         return f"[{txt}]({href})" if href and txt else txt
     if tag in ("strong", "b"):
@@ -237,12 +238,16 @@ def _md_blocks(el) -> list:
     return lines
 
 
-_BASE_URL = None  # 模块级当前 base_url（_inline_md 使用）
+# base_url 用线程本地存储（WebUI 多线程并发调用 html_to_markdown 不会串）
+_base_state = threading.local()
+
+
+def _get_base() -> Optional[str]:
+    return getattr(_base_state, "url", None)
 
 
 def _set_base_url(url: Optional[str]):
-    global _BASE_URL
-    _BASE_URL = url
+    _base_state.url = url
 
 
 def html_to_markdown(html_text: str, base_url: Optional[str] = None,

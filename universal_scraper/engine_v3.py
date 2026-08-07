@@ -121,7 +121,6 @@ class EngineV3:
         self.pipeline_cls = task.get_pipeline_cls()
         self.storage_cls = task.get_storage_cls()
         self.mw_cls = task.get_middleware_cls()
-        self._custom_parsers = task.get_custom_parser_classes()
         _src_cfg = resolve_tpl(dict(self.config.get("source", {})), self.vars)
         _src_cfg["_task_dir"] = str(task.root)
         self.fetcher = self.fetcher_cls(_src_cfg, self.vars, anti)

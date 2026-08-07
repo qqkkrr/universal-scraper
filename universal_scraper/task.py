@@ -39,15 +39,20 @@ class Task:
         self.name = self.config.get("name", root.name)
         self.modules: Dict[str, Any] = {}
 
-    # ---- 模块加载 ----
+    # ---- 模块加载（按文件缓存：同一任务内每个自定义模块只 exec 一次，
+    #      避免 get_parsers/get_custom_parser_classes 重复加载导致副作用双跑）----
     def _load_module_file(self, filename: str) -> Optional[Type]:
+        if filename in self.modules:
+            return self.modules[filename]
         fp = self.modules_dir / filename
         if not fp.exists():
+            self.modules[filename] = None
             return None
         spec = importlib.util.spec_from_file_location(f"task_{self.name}_{filename[:-3]}", fp)
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
+        self.modules[filename] = mod
         return mod
 
     def _find_class(self, mod, base, default_name: str):

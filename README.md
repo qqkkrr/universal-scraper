@@ -1056,3 +1056,15 @@ AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429
 
 测试：`run_tests30-42` 共 **168 项全绿**（新增 `run_tests42` 9 项：三后端限读/流式 JSON/gzip 限读、
 sitemap 环、多任务轮询、防抖、workers 上限）。回归中修复了 stream 模式下 JSON 变 0 条的自伤 bug。
+
+## 第四十一轮：第九轮 review 修复批次（模块加载 / 线程安全 / 前端兜底）
+
+- **#1 自定义模块只 exec 一次**：`Task._load_module_file` 按文件缓存；删除 engine 里只赋值不使用的
+  `_custom_parsers` 死代码（此前 `get_parsers()` 与 `get_custom_parser_classes()` 各自加载 parser.py →
+  顶层副作用双跑、类对象双份）。
+- **#2 `html_to_markdown` base_url 线程安全**：模块级全局 `_BASE_URL` → `threading.local()`，
+  WebUI 多线程并发转换不再串 base_url（复现：6 线程 × 60 次并发，链接域名零串扰）。
+- **#3 WebUI `api()` 响应兜底**：服务器返回非 JSON 时不再 unhandled rejection，显示错误提示。
+- **#4 停止按钮按任务**：`stopJob(jobId)` 停当前任务，不再误停别的任务。
+
+测试：`run_tests30-43` 共 **174 项全绿**（新增 `run_tests43` 6 项：单次 exec、并发 base 隔离、前端兜底）。
