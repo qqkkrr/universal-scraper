@@ -911,3 +911,27 @@ AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429
   仅应急；强风控站请用付费住宅代理）。任务配置 anti_bot.proxies_file 指向代理文件即可自动轮换。
 - WebUI 一键停止：执行中任务出现 ⏹ 停止任务 按钮（写 .stop 标志，引擎优雅保存检查点退出）。
 - curl_cffi 指纹轮换：`impersonate: "auto"` 时每次请求随机 Chrome/Edge/Safari/Firefox TLS 指纹。
+
+## 第三十二轮：Code Review 修复批次（linus-torvalds-skill 审查 → 逐条落地）
+
+按 Linus 审查模式跑完整 review 后修复，全部有复现证据 + 新测试（`tests/run_tests34.py` 13/13）：
+
+| Review 项 | 修复 |
+|---|---|
+| P0 `/api/verify` 路径穿越 | resolve 后强制 `is_relative_to(outputs)`，拒绝绝对路径/`..`（实测 `/etc/passwd`、`../../etc/passwd` 均被拒） |
+| P0 share 模式无认证 | `--token` / `US_WEBUI_TOKEN`，所有 `/api/*` 校验 `X-Auth-Token`；页面仍可打开供输入令牌 |
+| P0 会话池 Cookie 是假的 | 真 `http.cookiejar`：`split_set_cookie` 处理 Expires 逗号 + 多 Set-Cookie，实测 a/b 两条正确入库并回传 |
+| P1 会话池/封禁识别没进 v3 活动路径 | `modules/fetchers.py`（auto 任务真正用的）接入 SessionPool + detect_block + Cookie jar + UA 轮换 |
+| P1 WebUI 停止对浏览器无效 | `.stop` 传 `--stopFile` 给浏览器桥，门卫/滚动/主流程检查即退；池模式 kill |
+| P1 `_all_items` 内存爆炸 | 引擎磁盘 spool（默认 5 万条后切 jsonl 读回导出，按本次偏移只读新增） |
+| P1 限速无锁 | 三个 HTTP 客户端 `_throttle` 加锁 |
+| P1 HTTP 缓存 body 损坏 | body 存 base64，读回 bytes；缓存加 TTL + 2000 条淘汰 |
+| P1 LLM 无重试 | `chat()` 3 次指数退避重试 + `LLM_TIMEOUT` 可配 |
+| P2 jpath 多通配 | `a.*.b.*.c` 递归修复 |
+| P2 structure 乱码 | 结构摘要改用 `smart_decode` |
+| P2 sites 404 精配失效 | `fetch_html` 对 WAF 假 404 兼容（`allow_html_404`） |
+| P2 session 代理轮换同秒重复 | 计数器轮换 + 可对接 ProxyPool |
+| P2 SeenStore 每次一条 IO | 批量 flush（默认 200 条） |
+| P2 命名捕获无上限 | v3 HTTP 内存缓存加 2000 上限 |
+
+验证：`run_tests30-34` 共 **84 项全绿**；新浪 GBK 端到端 820 条 0 乱码；WebUI 令牌 + 路径穿越冒烟通过。

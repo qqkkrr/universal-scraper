@@ -225,7 +225,8 @@ class Handler(BaseHTTPRequestHandler):
         return (headers.get("X-Auth-Token") or "") == AUTH_TOKEN
 
     def do_GET(self):
-        if not self._auth_ok(self.headers):
+        # 页面/静态资源不鉴权（否则用户连输入令牌的页面都打不开）；仅 /api/* 需要
+        if self.path.startswith("/api/") and not self._auth_ok(self.headers):
             self._send(403, "Forbidden: 需要 X-Auth-Token")
             return
         u = urllib.parse.urlparse(self.path)
