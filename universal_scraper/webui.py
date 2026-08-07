@@ -82,12 +82,19 @@ def _job_error(job, err: str):
         job["messages"].append(f"❌ 失败：{err}")
 
 
-def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie=""):
+def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie="",
+                  config=None, name="", task_dir=""):
     try:
-        from .auto import auto_task
-        out = auto_task(desc, limit=limit, rounds=rounds,
-                        round_timeout=timeout, log_cb=lambda m: _job_log(job, m),
-                        proxy=proxy or None, cookie=cookie or None)
+        if config:
+            from .auto import run_with_config
+            out = run_with_config(config, name, task_dir, description=desc,
+                                  limit=limit, rounds=rounds, round_timeout=timeout,
+                                  log_cb=lambda m: _job_log(job, m))
+        else:
+            from .auto import auto_task
+            out = auto_task(desc, limit=limit, rounds=rounds,
+                            round_timeout=timeout, log_cb=lambda m: _job_log(job, m),
+                            proxy=proxy or None, cookie=cookie or None)
         _job_done(job, out.get("result"), out.get("summary"), out.get("verify"))
     except Exception as e:
         _job_error(job, f"{type(e).__name__}: {e}")
@@ -239,18 +246,37 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         try:
             body = self._read_body()
+            if u.path == "/api/auto/plan":
+                desc = str(body.get("description", "")).strip()
+                if not desc:
+                    self._json({"error": "请先描述任务"})
+                    return
+                from .auto import plan_task
+                plan = plan_task(desc,
+                                 limit=body.get("limit") or None,
+                                 proxy=body.get("proxy", "") or None,
+                                 cookie=body.get("cookie", "") or None,
+                                 log_cb=lambda m: None)
+                self._json(plan)
             if u.path == "/api/auto/start":
                 desc = str(body.get("description", "")).strip()
                 if not desc:
                     self._json({"error": "请先描述任务"})
                     return
+                config = body.get("config")
+                name = body.get("name", "")
+                task_dir = body.get("task_dir", "")
+                if config and name and task_dir:
+                    desc = body.get("description", "") or desc
                 job = _new_job("auto", desc[:60])
                 limit = body.get("limit") or None
                 rounds = int(body.get("rounds") or 2)
                 timeout = int(body.get("timeout") or 0) or None
                 proxy = body.get("proxy", "")
                 cookie = body.get("cookie", "")
-                threading.Thread(target=run_auto_job, args=(job, desc, limit, rounds, timeout, proxy, cookie),
+                threading.Thread(target=run_auto_job,
+                                 args=(job, desc, limit, rounds, timeout, proxy, cookie,
+                                       config, name, task_dir),
                                  daemon=True).start()
                 self._json({"job": job["id"]})
             elif u.path == "/api/test-cookie":

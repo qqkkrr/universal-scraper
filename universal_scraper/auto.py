@@ -374,23 +374,17 @@ def _valid_proxy(p: Optional[str]) -> bool:
     return True
 
 
-def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
-              log_cb=None, round_timeout: Optional[int] = None,
-              proxy: Optional[str] = None,
-              cookie: Optional[str] = None) -> Dict[str, Any]:
-    """执行一次自动任务。返回 {config, result, log, sample, files}。"""
-    if limit is not None:
-        limit = int(limit) or None
-
-    def log(msg):
-        if log_cb:
-            log_cb(msg)
-
+def _build_config(description: str, proxy: Optional[str] = None,
+                    cookie: Optional[str] = None, log=None) -> tuple:
+    """生成任务配置（探测 + LLM + 校验 + 注入），返回 (cfg, name, task_dir)。不运行。"""
+    if log is None:
+        log = lambda m: None
     h = hashlib.md5(description.encode()).hexdigest()[:10]
     name = f"auto_{h}"
     task_dir = ROOT / "tasks" / name
+    (task_dir / "modules").mkdir(parents=True, exist_ok=True)
 
-    # 第 1 轮：生成配置（先做入口页结构探测，把结构摘要喂给 AI，而非整页源码）
+    # 生成配置（先做入口页结构探测，把结构摘要喂给 AI）
     from .structure import build_structure_summary, extract_urls
     summary = None
     urls = extract_urls(description)
@@ -416,11 +410,6 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     log("🤖 AI 正在理解任务并生成配置...")
     cfg = _extract_json(_llm_chat(messages))
     cfg = _validate_and_fix(cfg)
-    cfg["name"] = name
-    cfg["storage"]["name"] = name
-    cfg["output"]["base_name"] = name
-    if limit:
-        cfg.setdefault("queue", {})["max_requests"] = int(limit) + 5
     if proxy:
         if _valid_proxy(proxy):
             cfg.setdefault("anti_bot", {})["proxy"] = proxy
@@ -428,19 +417,16 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         else:
             log(f"⚠️ 代理格式无效已忽略：{proxy}（正确格式 http://user:pass@ip:port，host:port 是占位符不能直接用）")
     if cookie:
-        # Cookie 直抓：有登录通行证时优先 HTTP 直连，跳过浏览器/验证/登录弹窗
         cfg.setdefault("source", {})["type"] = "http"
         cfg["source"].setdefault("headers", {})["Cookie"] = cookie
         cfg.get("source", {}).pop("login", None)
         cfg.get("source", {}).pop("verify", None)
         cfg.pop("login", None); cfg.pop("verify", None)
         log("🍪 已注入登录 Cookie（HTTP 直抓模式，跳过验证/登录弹窗）")
-    # 清理非法代理（AI 可能生成 host:port 占位符）
     _ab = cfg.get("anti_bot") or {}
     if _ab.get("proxy") and not _valid_proxy(_ab["proxy"]):
         _ab.pop("proxy", None)
         log("⚠️ 已清理配置中的非法代理占位符（host:port 不能直接用）")
-    log(f"✅ 配置已生成（source={cfg.get('source', {}).get('type')}）")
     _src = cfg.get("source", {}) or {}
     _verify = _src.get("verify") or {}
     _login = _src.get("login") or {}
@@ -448,6 +434,91 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         wait_s = int(_verify.get("max_wait_ms", 300000)) // 1000
         log(f"⚠️ 网站需要人工验证/登录：即将弹出真实浏览器，请在弹出的窗口中完成滑块/点选/登录"
             f"（最长等待 {wait_s} 秒），完成后自动继续并保存会话")
+    log(f"✅ 配置已生成（source={cfg.get('source', {}).get('type')}）")
+    return cfg, name, task_dir
+
+
+def describe_route(cfg: dict) -> Dict[str, str]:
+    """生成技术路线说明（给用户确认用）。"""
+    from .sites import match_site
+    su = (cfg.get("start_urls") or [""])[0]
+    src = cfg.get("source", {}) or {}
+    parts = []
+    site = match_site(su) if su else None
+    if site:
+        parts.append(f"🏆 命中精配站点[{site}]：用专用解析器，字段干净")
+    st = src.get("type", "http")
+    cookie = bool((src.get("headers") or {}).get("Cookie"))
+    if st == "http":
+        if cookie:
+            parts.append("🍪 Cookie 直抓（HTTP+登录态，无弹窗/无验证）")
+        elif (cfg.get("anti_bot") or {}).get("proxy"):
+            parts.append("🛰️ 代理直抓（HTTP+代理）")
+        else:
+            parts.append("🌐 HTTP 直连（公开页面）")
+    elif st == "browser":
+        if (src.get("verify") or {}).get("enabled"):
+            parts.append("🖥️ 浏览器 + 人工验证（会弹窗，需拖滑块/点选）")
+        if (src.get("login") or {}).get("enabled"):
+            parts.append("🔑 浏览器 + 登录（会弹窗，需扫码/账号）")
+        if not (src.get("verify") or {}).get("enabled") and not (src.get("login") or {}).get("enabled"):
+            parts.append("🖥️ 浏览器渲染（JS 页面，无人工步骤）")
+    elif st == "bridge":
+        parts.append("🌉 桥取数（Node 桥过 WAF）")
+    fields = []
+    for pcfg in (cfg.get("parsers") or {}).values():
+        if isinstance(pcfg, dict):
+            fields.extend(list((pcfg.get("fields") or {}).keys()))
+    fields = list(dict.fromkeys(fields))[:8]
+    q = cfg.get("queue", {})
+    summary_parts = [f"入口: {su[:70]}"]
+    if fields:
+        summary_parts.append("字段: " + "、".join(fields))
+    summary_parts.append(f"上限: {q.get('max_requests', '默认')} 请求 / 深度 {q.get('max_depth', '默认')}")
+    for pl in (cfg.get("pipelines") or [])[:3]:
+        if pl.get("type") == "filter" and pl.get("op") == "between":
+            import datetime
+            try:
+                t0 = datetime.datetime.fromtimestamp(int(pl["min"])).strftime("%Y-%m-%d")
+                t1 = datetime.datetime.fromtimestamp(int(pl["max"])).strftime("%Y-%m-%d")
+                summary_parts.append(f"日期过滤: {t0} ~ {t1}")
+            except Exception:
+                pass
+    return {"route": "；".join(parts) if parts else "通用 AI 流程",
+            "summary": "；".join(summary_parts)}
+
+
+def plan_task(description: str, limit: Optional[int] = None, proxy: Optional[str] = None,
+              cookie: Optional[str] = None, log_cb=None) -> Dict[str, Any]:
+    """🔍 生成「执行计划」但不运行：任务理解 + 技术路线 + 完整配置。"""
+    lines = []
+    def log(msg):
+        lines.append(msg)
+        if log_cb:
+            log_cb(msg)
+    try:
+        cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
+        plan = describe_route(cfg)
+        return {"ok": True, "name": name, "task_dir": str(task_dir),
+                "config": cfg, "route": plan["route"], "summary": plan["summary"],
+                "messages": lines, "description": description}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "messages": lines}
+
+
+def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
+              log_cb=None, round_timeout: Optional[int] = None,
+              proxy: Optional[str] = None,
+              cookie: Optional[str] = None) -> Dict[str, Any]:
+    """执行一次自动任务。返回 {config, result, log, sample, files}。"""
+    if limit is not None:
+        limit = int(limit) or None
+
+    def log(msg):
+        if log_cb:
+            log_cb(msg)
+
+    cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
 
     last_result = {}
     last_log = ""
@@ -602,6 +673,170 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     return {
         "name": name,
         "config": cfg,
+        "result": last_result,
+        "log": last_log[-3000:],
+        "sample": sample,
+        "files": files,
+        "summary": summary,
+        "verify": verify,
+        "done": True,
+    }
+
+
+def run_with_config(config: dict, name: str, task_dir, description: str = "",
+                   limit: Optional[int] = None, rounds: int = 2,
+                   round_timeout: Optional[int] = None,
+                   log_cb=None) -> Dict[str, Any]:
+    """确认后的执行：用已确认的 config 直接运行（跳过 AI 生成）。"""
+    import json as _json
+    from pathlib import Path as _P
+    if limit is not None:
+        limit = int(limit) or None
+
+    def log(msg):
+        if log_cb:
+            log_cb(msg)
+
+    td = _P(task_dir)
+    (td / "modules").mkdir(parents=True, exist_ok=True)
+    (td / "config.json").write_text(_json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    last_result = {}
+    last_log = ""
+    sample: List[Dict[str, Any]] = []
+    import os as _os
+    import threading as _th
+    if round_timeout is None:
+        round_timeout = int(_os.environ.get("US_AUTO_ROUND_TIMEOUT", "240"))
+    _src0 = config.get("source", {}) or {}
+    if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
+        round_timeout = max(round_timeout, 600)
+    for round_i in range(1, rounds + 1):
+        log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
+        from .engine_v3 import run_task
+        log_file = ROOT / "outputs" / f".run_{name}.log"
+        _box = {}
+        def _run_round():
+            _box["r"] = run_task(td, limit=limit, log_file=log_file)
+        _t = _th.Thread(target=_run_round, daemon=True)
+        _t.start()
+        _t.join(timeout=round_timeout)
+        if _t.is_alive():
+            log(f"⏱️ 本轮超过 {round_timeout}s 未结束，已强制终止（不再重试，避免无限等待）")
+            result = {"total": 0, "fetched": 0, "errors": -2, "error": f"运行超时（>{round_timeout}s）"}
+            last_result = result
+            last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
+            break
+        try:
+            result = _box.get("r")
+            last_result = result
+            last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
+        except Exception as e:
+            result = {"total": 0, "fetched": 0, "errors": -1, "error": str(e)}
+            last_result = result
+            last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else str(e)
+        items_path = ROOT / "outputs" / "items" / f"{name}.jsonl"
+        sample = []
+        if items_path.exists():
+            for line in items_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.strip():
+                    try:
+                        sample.append(_json.loads(line))
+                    except Exception:
+                        pass
+                    if len(sample) >= 5:
+                        break
+        META = ("_url", "_parser", "_ts", "_id")
+        real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
+        if result.get("total", 0) > 0 and real:
+            log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
+            break
+        if result.get("total", 0) > 0 and not real:
+            log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
+        if round_i < rounds:
+            log(f"⚠️ 第 {round_i} 轮 0 条/报错，AI 正在自修复...")
+            fix_messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": (
+                    f"任务：{description}\n"
+                    f"上次配置：{_json.dumps(config, ensure_ascii=False)}\n"
+                    f"运行结果：{_json.dumps(result, ensure_ascii=False)}\n"
+                    f"{_page_context((config.get('start_urls') or [''])[0]) if config.get('start_urls') else ''}\n"
+                    f"运行日志（末尾）：\n{last_log[-2000:]}\n\n"
+                    f"请修正配置（选择器/网址/解析方式等），只输出修正后的完整 config.json。"
+                )},
+            ]
+            try:
+                config = _extract_json(_llm_chat(fix_messages))
+                config = _validate_and_fix(config)
+                config["name"] = name
+                config["storage"]["name"] = name
+                config["output"]["base_name"] = name
+                (td / "config.json").write_text(_json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception as e:
+                log(f"❌ 自修复生成失败: {e}")
+                break
+
+    files = {}
+    for ext in ("json", "csv", "xlsx"):
+        fp = ROOT / "outputs" / f"{name}.{ext}"
+        if fp.exists():
+            files[ext] = str(fp.relative_to(ROOT))
+    META = ("_url", "_parser", "_ts", "_id")
+    total = (last_result or {}).get("total", 0)
+    real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
+
+    try:
+        su = (config.get("start_urls") or [""])[0]
+        from .sites import match_site, run_site
+        _site = match_site(su)
+        if _site:
+            _ch = ((config.get("source") or {}).get("headers") or {}).get("Cookie") or ""
+            _px = (config.get("anti_bot") or {}).get("proxy") or ""
+            _dr = run_site(su, cookie=_ch, proxy=_px or None, limit=int(limit or 20))
+            if _dr.get("rows"):
+                sample = _dr["rows"][:5]
+                files = _dr["files"]
+                total = _dr["total"]
+                real = sample
+                log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
+    except Exception as _e:
+        log(f"⚠️ 精配解析未启用：{_e}")
+
+    if not (total > 0 and real):
+        log("🧠 常规解析未命中，尝试 LLM 直接抽取（兜底）...")
+        fb = _llm_fallback_extract(description, config, log)
+        if fb.get("items"):
+            sample = fb["items"][:5]
+            files = fb["files"]
+            last_result = dict(last_result or {})
+            last_result["total"] = fb["total"]
+            last_result["llm_fallback"] = True
+            total = fb["total"]
+            real = sample
+            log("✅ LLM 兜底成功，任务视为完成")
+
+    verify = None
+    try:
+        from .verify import verify_rows
+        verify = verify_rows(sample, config, sample_n=0, network=False,
+                             declared=total or len(sample))
+    except Exception:
+        verify = None
+
+    if total > 0 and real:
+        vtxt = ""
+        if verify and verify.get("checks"):
+            bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]
+            vtxt = ("｜复核 ✅ 通过" if not bad else "｜复核 ⚠️ " + "；".join(bad))
+        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段）{vtxt}，导出 {list(files)}"
+    else:
+        reason = _diagnose_failure(config.get("start_urls"), last_result, log)
+        summary = f"⚠️ 任务结束：0 条。原因诊断：{reason}"
+        log(summary)
+    return {
+        "name": name,
+        "config": config,
         "result": last_result,
         "log": last_log[-3000:],
         "sample": sample,
