@@ -55,6 +55,14 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/slow":
+            import time as _t
+            _t.sleep(10)
+            body = b"slow done"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/file.pdf":
             body = b"%PDF-1.4 fake pdf content 1234567890"
             self.send_response(200)
@@ -176,6 +184,37 @@ def main():
     check("capture_all records", len(recs) == 2, str(len(recs)))
     check("capture_all dedup", recs[0]["_api_url"].endswith("/api/list") and recs[1]["_api_url"].endswith("/api/detail"),
           str([r["_api_url"] for r in recs]))
+
+    print("== 停止信号（WebUI 一键停止）==")
+    import time, threading as _th
+    from universal_scraper.engine_v3 import run_task as _rt
+    st_dir = ROOT / "outputs" / ".test_tmp" / "stop_task"
+    (st_dir / "modules").mkdir(parents=True, exist_ok=True)
+    (st_dir / "config.json").write_text(json.dumps({
+        "name": "stop_task",
+        "start_urls": [base + "/slow"],
+        "queue": {"max_depth": 1, "max_requests": 1, "max_concurrency": 1},
+        "source": {"type": "http"},
+        "rules": [{"match": "contains", "pattern": "/", "parser": "default"}],
+        "parsers": {"default": {"type": "html", "row_css": "body",
+                                "fields": {"t": {"css": "body::text"}}}},
+        "storage": {"type": "jsonl", "name": "stop_task"},
+        "output": {"dir": "outputs/.test_tmp", "base_name": "stop_task"},
+        "anti_bot": {"min_interval": 0.1, "max_retries": 1, "timeout": 30},
+    }), encoding="utf-8")
+    # 给 mock server 加 /slow（10 秒响应）
+    import tests.run_tests33 as _self
+    box = {}
+    def _slow_runner():
+        box["r"] = _rt(st_dir)
+    t = _th.Thread(target=_slow_runner, daemon=True)
+    t.start()
+    time.sleep(1.5)
+    (st_dir / ".stop").write_text("1", encoding="utf-8")
+    t.join(timeout=15)
+    check("stop signal exits", not t.is_alive(), "任务未退出")
+    r = box.get("r") or {}
+    check("stop signal result", "total" in r, str(r)[:120])
 
     print("== 期刊期次解析 ==")
     from universal_scraper.journals import parse_issue_html

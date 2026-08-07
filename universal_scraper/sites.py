@@ -134,7 +134,7 @@ def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
     # 1) curl_cffi：伪装 Chrome TLS/JA3/HTTP2 指纹（反 403），安装 vendor 或 pip 后自动启用
     try:
         import curl_cffi.requests as cffi
-        kw = {"headers": headers, "timeout": timeout, "impersonate": "chrome"}
+        kw = {"headers": headers, "timeout": timeout, "impersonate": "auto"}
         if proxy:
             kw["proxies"] = {"http": proxy, "https": proxy}
         resp = cffi.get(url, **kw)

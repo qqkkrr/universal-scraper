@@ -46,6 +46,7 @@ def _new_job(kind: str, title: str) -> dict:
         "id": uuid.uuid4().hex[:12],
         "kind": kind,
         "title": title,
+        "task_dir": "",
         "status": "running",
         "messages": ["▶️ 任务已创建，开始执行..."],
         "result": None,
@@ -102,6 +103,7 @@ def run_journal_job(job: dict, site: str, since: int, out: str, workers: int, wi
 
 def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie="",
                   config=None, name="", task_dir=""):
+    job["task_dir"] = task_dir or ""
     try:
         if config:
             from .auto import run_with_config
@@ -323,6 +325,24 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception as e:
                         self._json({"ok": False, "message": f"❌ 测试失败：{type(e).__name__}"})
 
+            elif u.path == "/api/job/stop":
+                jid = str(body.get("job", "")).strip()
+                with JOBS_LOCK:
+                    job = JOBS.get(jid)
+                    td = job.get("task_dir", "") if job else ""
+                if not td:
+                    self._json({"error": "该任务不支持停止（无任务目录）"})
+                    return
+                try:
+                    from pathlib import Path as _P
+                    _P(td).mkdir(parents=True, exist_ok=True)
+                    (_P(td) / ".stop").write_text("1", encoding="utf-8")
+                    if job:
+                        with JOBS_LOCK:
+                            job["messages"].append("⏹ 已发送停止信号，正在保存检查点并退出...")
+                    self._json({"ok": True, "message": "已发送停止信号"})
+                except Exception as e:
+                    self._json({"error": f"{type(e).__name__}: {e}"})
             elif u.path == "/api/journal/start":
                 site = str(body.get("site", "sytyxb")).strip() or "sytyxb"
                 since = int(body.get("since") or 2024)

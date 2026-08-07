@@ -608,7 +608,8 @@ class CurlCffiClient:
         if not self.rotate_ua and "User-Agent" not in h:
             h["User-Agent"] = DEFAULT_UA
         proxy_use = proxy if proxy is not None else self.proxy
-        kw = dict(impersonate=self.impersonate, timeout=self.timeout, headers=h,
+        imp = random.choice(self.impersonate_pool) if self.impersonate == "auto" else self.impersonate
+        kw = dict(impersonate=imp, timeout=self.timeout, headers=h,
                   allow_redirects=True, verify=True)
         if proxy_use:
             kw["proxies"] = {"http": proxy_use, "https": proxy_use}

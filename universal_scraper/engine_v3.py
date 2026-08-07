@@ -359,6 +359,10 @@ class EngineV3:
                              f"fetcher={self.fetcher_cls.__name__} parsers={list(self.parser_cls_map)}")
             return {"name": self.task.name, "dry_run": True}
 
+        try:
+            (Path(self.task.root) / ".stop").unlink(missing_ok=True)
+        except Exception:
+            pass
         self.storage.open(self.storage_name)
         self.logger.info(f"任务启动: {self.task.name} | 队列 {len(self.queue)} | 规则 {len(self.rules)}")
         try:
@@ -472,7 +476,13 @@ class EngineV3:
             pass
 
     def _worker_loop(self) -> None:
+        stop_flag = Path(self.task.root) / ".stop"
         while not self._stop:
+            # WebUI 一键停止：任务目录出现 .stop 文件即优雅退出（保存检查点）
+            if stop_flag.exists():
+                self._stop = True
+                self.logger.warn("收到停止信号（.stop），正在保存检查点并退出...")
+                break
             if self.limit and self.stats["items"] >= self.limit:
                 break
             if self.stats["fetched"] >= self.max_requests:
