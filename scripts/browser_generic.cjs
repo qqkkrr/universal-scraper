@@ -256,7 +256,8 @@ async function main() {
         let txt = "";
         try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 500) : "")); } catch (e) {}
         const hitMarker = gateMarkers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
-        const hitLogin = loginTxt.some(m => txt.includes(m));
+        const hitLogin = loginTxt.some(m => txt.includes(m))
+          && !(u.includes("m.dianping.com") && !u.includes("/login"));  // 移动版首页不算登录页（登录后常跳这里）
         if (hitMarker && !notifGate) {
           notifGate = true;
           await snap("verify");
@@ -269,11 +270,11 @@ async function main() {
           try { await page.bringToFront(); } catch (e) {}
           out({ type: "login_required", message: "检测到登录页：请在浏览器中扫码或账号登录，登录后自动继续" });
         }
-        let selOk = true;
         if (gateSuccessSel) {
-          try { await page.waitForSelector(gateSuccessSel, { timeout: 2000 }); done = true; break; } catch (e) { selOk = false; }
+          try { await page.waitForSelector(gateSuccessSel, { timeout: 2000 }); done = true; break; } catch (e) {}
         }
-        if (selOk && !hitMarker && !hitLogin) { done = true; break; }
+        // 通过条件：已离开验证页 且 不在登录页（success_selector 匹配不到也继续，交给解析层/LLM 兜底）
+        if (!hitMarker && !hitLogin) { done = true; break; }
         await sleep(pollMs);
       }
       if (!done) {
@@ -283,6 +284,21 @@ async function main() {
         out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）。当前页面: " + _u + " | 标题: " + _tt + "。请确保在弹出的窗口中完成滑块验证和扫码/账号登录" });
         process.exit(1);
       }
+      // 登录/验证通过后，若被跳走（如移动版 dphome），强制回到目标页再抓
+      try {
+        const cur = page.url() || "";
+        const target = spec.url || "";
+        const sameHost = (cur.split("?")[0].replace(/\/$/, "") === target.split("?")[0].replace(/\/$/, ""))
+          || (cur.includes("/search/") && target.includes("/search/"));
+        if (!sameHost) {
+          out({ type: "redirect", message: "登录后跳转到 " + cur + "，正在回到目标页 " + target });
+          await page.goto(target, { timeout: 60000, waitUntil: "domcontentloaded" });
+          await sleep(2500);
+          if (gateSuccessSel) {
+            try { await page.waitForSelector(gateSuccessSel, { timeout: 5000 }); } catch (e) {}
+          }
+        }
+      } catch (e) {}
       if (storageState) {
         await context.storageState({ path: storageState });
         out({ type: "verify_ok", storageState });
