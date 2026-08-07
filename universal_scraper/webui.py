@@ -97,6 +97,27 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
                   max_pages: int, limit: int, proxy: str = "", cookie: str = ""):
     try:
         _job_log(job, f"🌐 正在抓取 {url}")
+        # 大众点评搜索页：Cookie 直抓 SSR 解析（绕开验证码/csec），无需浏览器弹窗
+        if "dianping.com/search" in url and cookie:
+            try:
+                import re as _re
+                m = _re.search(r"/search/keyword/(\d+)/", url)
+                city = int(m.group(1)) if m else 2
+                m2 = _re.search(r"/0_(.+)", url)
+                kw = urllib.parse.unquote(m2.group(1)) if m2 else "美食"
+                from .dianping import run as dp_run
+                _job_log(job, f"🌶️ 检测到大众点评搜索页：Cookie 直抓「{kw}」城市 {city}...")
+                r = dp_run(kw, city=city, cookie=cookie, limit=int(limit or 10), proxy=proxy or None)
+                if r.get("error"):
+                    _job_error(job, r["error"])
+                    return
+                summary = f"✅ 任务结束：大众点评「{kw}」抓取 {r['total']} 家，导出 {list(r['files'].values())}"
+                _job_done(job, {"total": r["total"], "fetched": 1, "errors": 0, "files": r["files"]},
+                          summary, _auto_verify(r["rows"], None))
+                return
+            except Exception as e:
+                _job_error(job, f"大众点评直抓失败：{type(e).__name__}: {e}")
+                return
         if mode == "crawl":
             from .quick import crawl_url
             _job_log(job, f"🔄 整站爬取模式：深度 {depth}，最多 {max_pages} 页")
