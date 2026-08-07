@@ -161,6 +161,22 @@ def main():
     check("cookies cli jd", cp.returncode == 0 and "pt_key=AAA" in cp.stdout and "other=x" not in cp.stdout,
           cp.stdout[:100] + cp.stderr[:100])
 
+    print("== capture_all 接口捕获 ==")
+    from universal_scraper.fetchers import BrowserFetcher
+    ca_dir = ROOT / "outputs" / ".test_tmp" / "ca"
+    ca_dir.mkdir(parents=True, exist_ok=True)
+    (ca_dir / "capture_all.json").write_text(json.dumps([
+        {"url": "https://x.com/api/list", "json": {"items": [{"id": 1}]}},
+        {"url": "https://x.com/api/list", "json": {"items": [{"id": 1}]}},
+        {"url": "https://x.com/api/detail", "json": {"id": 2}},
+    ]), encoding="utf-8")
+    f2 = BrowserFetcher({"type": "browser", "url": "http://127.0.0.1:1/"},
+                       {"min_interval": 0.01}, {}, ROOT)
+    recs = f2._records_from_capture_all(ca_dir)
+    check("capture_all records", len(recs) == 2, str(len(recs)))
+    check("capture_all dedup", recs[0]["_api_url"].endswith("/api/list") and recs[1]["_api_url"].endswith("/api/detail"),
+          str([r["_api_url"] for r in recs]))
+
     print("== 期刊期次解析 ==")
     from universal_scraper.journals import parse_issue_html
     sample = '''

@@ -427,6 +427,8 @@ class BrowserFetcher(BaseFetcher):
             # 记录来源 = 网络捕获（SPA 签名接口，如小红书评论）
             if self.source.get("record_from") == "capture":
                 records = self._records_from_capture(out_dir)
+            elif self.source.get("record_from") == "capture_all":
+                records = self._records_from_capture_all(out_dir)
             # 登录态自动导出 Cookie 串（浏览器登录一次 → HTTP Cookie 直抓复用）
             try:
                 if Path(storage_state).exists():
@@ -468,6 +470,33 @@ class BrowserFetcher(BaseFetcher):
                     row[name] = css_text(el_html, ".", fspec.get("limit", 0))
             out.append(row)
         return out
+
+    def _records_from_capture_all(self, out_dir: Path) -> List[Dict[str, Any]]:
+        """从 capture_all.json（浏览器自动捕获的所有 JSON 响应）生成记录。
+        每条记录 = {_api_url, data}，交给 LLM/解析器事后挑字段。"""
+        f = out_dir / "capture_all.json"
+        if not f.exists():
+            return []
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        recs = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            recs.append({"_api_url": item.get("url", ""), "data": item.get("json")})
+        # 去重（同一接口多次响应）
+        seen = set()
+        out = []
+        for r in recs:
+            k = str(r.get("_api_url", "")) + ":" + json.dumps(r.get("data"), ensure_ascii=False)[:200]
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(r)
+        return out
+
 
     def _records_from_capture(self, out_dir: Path) -> List[Dict[str, Any]]:
         """从捕获的接口 JSON 提取记录。source.capture: [{name, url_pattern, records_path, fields}]"""

@@ -250,6 +250,9 @@ async function main() {
     // 网络捕获：拦截 SPA 自己发出的签名 API（不逆向签名）
     const captures = spec.capture || [];
     const capturedBy = {};
+    // capture_all：把页面上所有 JSON 响应都存下来（不知道接口名也能事后挖数据）
+    const captureAll = !!spec.capture_all;
+    const capturedAll = [];
     page.on("response", async (res) => {
       const u = res.url();
       if (res.status() >= 400) {
@@ -276,6 +279,17 @@ async function main() {
             fs.writeFileSync(f, JSON.stringify(capturedBy[key], null, 1));
           }
         } catch (e) {}
+      }
+      if (captureAll && res.status() < 400 && (res.headers()["content-type"] || "").includes("json")) {
+        if (capturedAll.length < 2000) {
+          try {
+            const j = await res.json();
+            capturedAll.push({ url: u, json: j });
+            if (capturedAll.length % 50 === 0) {
+              fs.writeFileSync(path.join(outDir, "capture_all.json"), JSON.stringify(capturedAll, null, 1));
+            }
+          } catch (e) {}
+        }
       }
     });
 
@@ -467,6 +481,10 @@ async function main() {
     }
 
     // 把捕获到的 API 数据落盘
+    if (captureAll && capturedAll.length) {
+      fs.writeFileSync(path.join(outDir, "capture_all.json"), JSON.stringify(capturedAll, null, 1));
+      out({ type: "capture_file", name: "capture_all", file: path.join(outDir, "capture_all.json"), count: capturedAll.length });
+    }
     for (const key of Object.keys(capturedBy)) {
       const f = path.join(outDir, `${key}.json`);
       fs.writeFileSync(f, JSON.stringify(capturedBy[key], null, 1));
