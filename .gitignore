@@ -15,3 +15,4 @@ challenges/learnspider/db.sqlite3
 challenges/learnspider/__pycache__/
 challenges/results.json
 challenges2/results.json
+challenges/learnspider_results.json
