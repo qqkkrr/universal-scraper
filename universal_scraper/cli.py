@@ -180,6 +180,11 @@ def main() -> int:
     jp.add_argument("--workers", type=int, default=6, help="并发数")
     jp.add_argument("--no-meta", action="store_true", help="跳过摘要/关键词拉取（更快）")
 
+    ck_p = sub.add_parser("cookies", help="🍪 浏览器登录态 → Cookie 直抓串（登录一次，HTTP 直抓复用）")
+    ck_p.add_argument("--session", default="outputs/.session/session.json", help="storageState JSON 路径")
+    ck_p.add_argument("--domain", default="", help="按域名过滤，如 jd.com / dianping.com / weibo.com")
+    ck_p.add_argument("--out", default="", help="同时写入文件（如 /tmp/jd_cookie.txt）")
+
     dp_p = sub.add_parser("dianping", help="🌶️ 大众点评专用：Cookie 直抓搜索页列表（绕开验证码/csec）")
     dp_p.add_argument("--keyword", required=True, help="关键词，如 美食 / 烤肉")
     dp_p.add_argument("--city", type=int, default=2, help="城市 ID（默认 2=北京，上海=1）")
@@ -344,7 +349,39 @@ def main() -> int:
             print(f"  {s['status']} {s['name']:<6} {s['domain']:<22} {s['desc']}  [{s['difficulty']}]")
         return 0
 
-    if args.cmd == "journal":
+    if args.cmd == "cookies":
+        from .core import smart_decode  # noqa
+        import json as _json
+        from pathlib import Path as _P
+        sf = _P(args.session)
+        if not sf.exists():
+            print(f"❌ 会话文件不存在: {sf}", file=sys.stderr)
+            return 1
+        try:
+            st = _json.loads(sf.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"❌ 解析失败: {e}", file=sys.stderr)
+            return 1
+        cs = st.get("cookies", []) or []
+        dom = (args.domain or "").lower()
+        if dom:
+            cs = [c for c in cs if dom in str(c.get("domain", "")).lower()]
+        if not cs:
+            print(f"❌ 无匹配 Cookie（domain={dom or '全部'}）", file=sys.stderr)
+            return 1
+        pairs = []
+        for c in cs:
+            k, v = c.get("name", ""), c.get("value", "")
+            if k:
+                pairs.append(f"{k}={v}")
+        out = "; ".join(pairs)
+        print(out)
+        if args.out:
+            _P(args.out).write_text(out, encoding="utf-8")
+            print(f"✅ 已写入: {args.out}", file=sys.stderr)
+        print(f"（{len(pairs)} 个 cookie，域过滤={dom or '全部'}）", file=sys.stderr)
+        return 0
+
         from .journals import run as journal_run
         summary = journal_run(args.site, since_year=args.since, out_dir=args.out or None,
                               workers=args.workers, with_meta=not args.no_meta)

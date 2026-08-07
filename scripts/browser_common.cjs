@@ -71,7 +71,20 @@ const STEALTH_SCRIPT = `
     Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 5 });
     Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
     Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+    Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.' });
+    Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+    Object.defineProperty(navigator, 'appVersion', { get: () => '5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' });
+    Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' });
     window.chrome = window.chrome || { runtime: {} };
+    if (!window.chrome.runtime) window.chrome.runtime = {};
+    window.chrome.loadTimes = window.chrome.loadTimes || function () { return {}; };
+    // 自动化标记常见检测点
+    try { delete Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow'); } catch (e) {}
+    const _origToString = Function.prototype.toString;
+    Function.prototype.toString = function () {
+      if (this === window.chrome.runtime) return '[object Object]';
+      return _origToString.call(this);
+    };
     const origQuery = window.navigator.permissions && window.navigator.permissions.query;
     if (origQuery) {
       window.navigator.permissions.query = (p) =>

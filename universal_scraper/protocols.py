@@ -147,8 +147,12 @@ class BaseCaptchaSolver:
 class RateLimitedError(RuntimeError):
     """服务端限流（429 等）。retry_after: 服务端要求等待的秒数（可 0）。"""
 
-    def __init__(self, url: str = "", retry_after: float = 0.0, status: int = 429):
+    def __init__(self, url: str = "", retry_after: float = 0.0, status: int = 429, detail: str = ""):
         self.url = url
         self.retry_after = float(retry_after or 0)
         self.status = status
-        super().__init__(f"限流 {status}: {url} (retry_after={self.retry_after}s)")
+        self.detail = detail
+        _msg = f"限流 {status}: {url} (retry_after={self.retry_after}s)"
+        if detail:
+            _msg += f" | {detail}"
+        super().__init__(_msg)

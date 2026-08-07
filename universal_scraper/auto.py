@@ -57,7 +57,8 @@ v3 任务包 config.json 结构（字段含义）：
 - 日期范围：把用户说的"2025年1月1日到1月3日"转成 **北京时间** 的 Unix 秒，用 between 过滤（min=2025-01-01 00:00 CST，max=2025-01-04 00:00 CST）。
 - 翻页：HTML 用 extract_links，allow 建议写**锚定路径正则**（如 "^/page/\\d+/$"），引擎会按 URL 路径匹配，防止误吃 /tag/xxx/page/1/ 这类同构 URL；JSON 分页用 type=json_paged（records_path/strategy=page_param/page_param/page_size/max_pages/fields）。
 - 选择器要根据网站常见结构推断（.item/.list/table tr 等），宁可宽一点；字段 CSS 可直接写 ".text" 或 ".text::text"，两种都支持。
-- 需要登录的网站（大众点评/小红书/微博/淘宝等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
+- 需要登录的网站（大众点评/小红书/微博/淘宝/京东/知乎等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
+- **京东 URL 硬知识（必须遵守）**：京东店铺页真实格式是 https://mall.jd.com/index-<店铺数字ID>.html；商品页是 https://item.jd.com/<sku数字ID>.html；**绝对不要**把店铺名猜成 "<店铺名>sp.jd.com/list.html"（那是假地址，会 404）。用户只给店铺名没给链接时，start_urls 可以先用京东搜索或直接用已知商品链接，并在任务说明里注明"需先找到店铺/商品真实 URL"。京东搜索页(www.jd.com)、商品页、评论接口(club.jd.com)全都被强风控：公开 HTTP 接口已失效，必须 source.type=browser + 真实扫码登录。京东登录硬校验："login":{"enabled":true,"url":"https://www.jd.com/","wait_selector":".nickname","require_cookie":"pt_key|pt_pin"}——工具会检查登录 cookie 是否真的出现，没有 pt_key/pt_pin 就不会放行，避免"假登录通过"。
 - 验证码/整页验证（大众点评/美团等会跳到验证中心）：source.type=browser 并加 "headless": false 与
   "verify":{"enabled":true,"markers":["verify.meituan.com","验证中心","spiderindefence","安全验证","滑动验证","访问过于频繁"],
   "success_selector":"<列表行选择器，如 div[data-shop-id]>","max_wait_ms":600000}；
@@ -67,6 +68,8 @@ v3 任务包 config.json 结构（字段含义）：
   用户在弹窗里：先过滑块，再扫码/账号登录；工具自动继续并保存会话。
 - **大众点评列表页如被风控需要住宅代理**：只有用户明确提供了真实代理时才在 anti_bot.proxy 里填写；**不要写 "host:port" 之类的示例占位符**（会导致请求报错）。用户没给代理就不配置 proxy。
 - 图片验证码：anti_bot 加 "captcha":{"strategy":"auto"}（自动识别，失败则人工兜底）。
+- **CDP 直连真实浏览器（强风控站的王炸）**：如果用户说"已登录/用我自己的浏览器"，source.type 用 browser 并加 "cdp":"http://127.0.0.1:9222"（用户需先开 Chrome：退出 Chrome 后执行 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=9222 并登录目标站）。CDP 模式附着真实浏览器=真实指纹+真实登录态，京东/知乎/微博/小红书/抖音这类站最稳；不要配 login（用户浏览器已登录）。
+- Cloudflare/Turnstile 挑战：工具会自动尝试点击"我不是机器人"复选框并等待 cf_clearance，仍失败才转人工；无需额外配置。
 - 如果用户已提供登录 Cookie：source.type 用 http，source.headers 加 "Cookie": "<用户提供的Cookie>"，
   并加 rules/parsers 解析 SSR 页面（如大众点评搜索页 .shop-list li），不要用 browser（Cookie 直抓更快更稳）。
 - 只输出 JSON 对象本身。"""

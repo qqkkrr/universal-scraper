@@ -126,6 +126,37 @@ function waitAnswer(file, timeoutMs) {
   });
 }
 
+// Cloudflare/Turnstile 自动点击（对标 cloudflare-solver / FlareSolverr 思路）：
+// 检测 challenges.cloudflare.com / turnstile iframe，点掉"我不是机器人"复选框，
+// 成功后等待 cf_clearance cookie / 页面离开挑战页。失败静默（转人工）。
+async function trySolveCloudflare(page, context) {
+  const frames = page.frames();
+  for (const f of frames) {
+    const u = f.url() || "";
+    if (u.includes("challenges.cloudflare.com") || u.includes("turnstile") || u.includes("hcaptcha.com")) {
+      try {
+        const sel = "input[type=checkbox], .ctp-checkbox-label, .cb-c, #challenge-stage input, .h-captcha iframe";
+        const loc = f.locator(sel).first();
+        if (await loc.count()) {
+          await loc.click({ timeout: 4000 });
+          out({ type: "cf_click", message: "已自动点击 Cloudflare/Turnstile 验证框" });
+          return true;
+        }
+      } catch (e) {}
+      return false;
+    }
+  }
+  try {
+    const box = page.locator("iframe[src*='turnstile'], iframe[src*='challenges.cloudflare.com'], iframe[src*='hcaptcha.com']").first();
+    if (await box.count()) {
+      await box.click({ timeout: 3000 });
+      out({ type: "cf_click", message: "已自动点击 Cloudflare/Turnstile 验证框(页级)" });
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
 async function main() {
   const specFile = arg("spec");
   const outDir = arg("out");
@@ -145,6 +176,7 @@ async function main() {
   const scrollWait = parseInt(arg("scrollWait", "2000"), 10);
   const loginTimeout = parseInt(arg("loginTimeout", "600000"), 10);
   const profileDir = arg("profile", null);
+  const cdpUrl = arg("cdp", null);
   // 真实 Chrome（用户日常浏览器）比 Chrome for Testing 更接近真人，风控识别率低
   const CHROME_EXE = fs.existsSync(USER_CHROME) ? USER_CHROME : FULL_CHROME;
 
@@ -177,7 +209,15 @@ async function main() {
       // 注入 WebGL/Canvas 指纹噪声（patchright 同款思路的极简实现）
       ctxOpts.extraHTTPHeaders = { "Accept-Language": "zh-CN,zh;q=0.9" };
     }
-    if (profileDir) {
+    if (cdpUrl) {
+      // CDP 直连：附着到用户已开的真实 Chrome（--remote-debugging-port=9222）。
+      // 真实浏览器 = 真实指纹 + 真实登录态，是 MediaCrawler/DrissionPage CDP 模式的思路，
+      // 对京东/知乎/微博/小红书这类强风控站最稳。
+      out({ type: "cdp", message: "正在连接真实浏览器 CDP: " + cdpUrl });
+      browser = await chromium.connectOverCDP(cdpUrl);
+      context = browser.contexts()[0] || await browser.newContext();
+      page = await context.newPage();
+    } else if (profileDir) {
       // 持久档案模式：登录态保存在档案目录，登录一次永久复用（最接近真实浏览器）
       // headless 默认有头（登录需要），可显式 --headless 1 无头（登录态已存在时抓取用）
       fs.mkdirSync(profileDir, { recursive: true });
@@ -283,13 +323,26 @@ async function main() {
       gateSuccessSel = spec.verify.success_selector || gateSuccessSel;
       gateMaxWait = Math.max(gateMaxWait, parseInt(spec.verify.max_wait_ms || "600000", 10));
     }
+
+    // 登录硬校验：某些站点（京东）必须出现指定 cookie（pt_key/pt_pin）才算真正登录，
+    // 否则 wait_selector 命中（如 #ttbar-login 常驻节点）会造成"假登录通过"。
+    const requireCookie = (spec.login && spec.login.require_cookie) || null;
+    async function hasReqCookie(ctx) {
+      if (!requireCookie) return true;
+      try {
+        const cs = await ctx.cookies();
+        return cs.some(c => new RegExp(requireCookie).test(c.name || ""));
+      } catch (e) { return false; }
+    }
+
     if (spec.login && spec.login.enabled || spec.verify && spec.verify.enabled) {
       const loginTxt = ["扫码登录", "账号登录", "APP扫码", "二维码已失效", "手机号登录"];
       const pollMs = 2000;
       const deadline = Date.now() + gateMaxWait;
       let done = false;
       if (gateSuccessSel) {
-        try { await page.waitForSelector(gateSuccessSel, { timeout: 3000 }); done = true; } catch (e) {}
+        try { await page.waitForSelector(gateSuccessSel, { timeout: 3000 });
+              if (await hasReqCookie(context)) done = true; } catch (e) {}
       }
       let notifGate = false, notifLogin = false;
       if (!done) {
@@ -303,6 +356,13 @@ async function main() {
         const hitMarker = gateMarkers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
         const hitLogin = loginTxt.some(m => txt.includes(m))
           && !(u.includes("m.dianping.com") && !u.includes("/login"));  // 移动版首页不算登录页（登录后常跳这里）
+        // Cloudflare/Turnstile：先尝试自动点击（无需人工）
+        if (u.includes("challenges.cloudflare.com") || u.includes("turnstile") ||
+            u.includes("hcaptcha.com") || txt.toLowerCase().includes("just a moment") ||
+            txt.includes("验证") || txt.includes("安全")) {
+          await trySolveCloudflare(page, context).catch(() => {});
+          await sleep(800);
+        }
         if (hitMarker && !notifGate) {
           notifGate = true;
           await snap("verify");
@@ -316,20 +376,28 @@ async function main() {
           out({ type: "login_required", message: "检测到登录页：请在浏览器中扫码或账号登录，登录后自动继续" });
         }
         if (gateSuccessSel) {
-          try { await page.waitForSelector(gateSuccessSel, { timeout: 2000 }); done = true; break; } catch (e) {}
+          try { await page.waitForSelector(gateSuccessSel, { timeout: 2000 });
+                if (await hasReqCookie(context)) { done = true; break; } } catch (e) {}
         }
         // 通过条件：已离开验证页，且 ①出现商家特征（人均/条评价/点评）或 ②页面文本足够长（真实内容页）
         // 修复：商家列表页顶部常含"扫码登录"字样，不能仅凭登录字样卡住
+        // 修复2：需要 require_cookie 的站点（京东），即使页面看起来"通过"也必须出现登录 cookie，防假登录
         const txtLen = txt.length;
         const hasShop = txt.includes("人均") || txt.includes("条评价") || txt.includes("点评");
-        if (!hitMarker && (hasShop || txtLen > 2000)) { done = true; break; }
+        if (!hitMarker && (hasShop || txtLen > 2000) && await hasReqCookie(context)) { done = true; break; }
         await sleep(pollMs);
       }
       if (!done) {
         let _u = "", _tt = "";
         try { _u = page.url() || ""; _tt = await page.title(); } catch (e) {}
         await snap("timeout");
-        out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）。当前页面: " + _u + " | 标题: " + _tt + "。请确保在弹出的窗口中完成滑块验证和扫码/账号登录" });
+        let _cookieInfo = "";
+        if (requireCookie) {
+          const cs = await context.cookies().catch(() => []);
+          const names = cs.map(c => c.name).filter(n => new RegExp(requireCookie).test(n)).join(",");
+          _cookieInfo = " | 登录cookie(" + requireCookie + "): " + (names || "❌ 未出现——说明尚未真正登录");
+        }
+        out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）。当前页面: " + _u + " | 标题: " + _tt + _cookieInfo + "。请确保在弹出的窗口中完成滑块验证和扫码/账号登录" });
         process.exit(1);
       }
       // 登录/验证通过后，若被跳走（如移动版 dphome），强制回到目标页再抓
@@ -351,7 +419,12 @@ async function main() {
         await context.storageState({ path: storageState });
         out({ type: "verify_ok", storageState });
       }
-      out({ type: "verify_passed", message: "✅ 验证/登录通过，继续抓取" });
+      let _ck = "";
+      if (requireCookie) {
+        const cs = await context.cookies().catch(() => []);
+        _ck = "（登录cookie: " + cs.map(c => c.name).filter(n => new RegExp(requireCookie).test(n)).join(",") + "）";
+      }
+      out({ type: "verify_passed", message: "✅ 验证/登录通过" + _ck + "，继续抓取" });
     }
 
     if (spec.js_pre) await page.evaluate(spec.js_pre);

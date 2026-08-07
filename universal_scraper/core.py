@@ -58,23 +58,108 @@ UA_POOL = [
 
 
 def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
-    """按 Content-Type charset / BOM / <meta charset> 解码（GBK/GB2312 等中文站）。"""
+    """智能解码（对标 charset_normalizer / trafilatura 编码探测）：
+    按 BOM / Content-Type / <meta charset> 判断；声明编码解码质量差或为
+    latin-1 等"万能可解码"编码时，自动在 utf-8/gb18030/gbk/big5 等候选里
+    选"替换字符最少"的解码（修复 GBK 中文站乱码 / 错标 charset 的站）。"""
+    if not raw:
+        return ""
     enc = "utf-8"
-    ct = (headers or {}).get("content-type", "")
+    explicit = False
+    ct = (headers or {}).get("content-type", "") or (headers or {}).get("Content-Type", "")
     m = re.search(r"charset=([\w-]+)", ct, re.I)
     if m:
-        enc = m.group(1)
+        enc = m.group(1); explicit = True
     elif raw[:3] == b"\xef\xbb\xbf":
         enc = "utf-8-sig"
     else:
         head = raw[:2048].decode("utf-8", "ignore").lower()
         m2 = re.search(r"charset=[\"']?([\w-]+)", head)
         if m2:
-            enc = m2.group(1)
+            enc = m2.group(1); explicit = True
+
+    def _score(e):
+        try:
+            s2 = raw.decode(e, "replace")
+            return s2.count("\ufffd"), s2
+        except LookupError:
+            return 10 ** 9, None
+
+    # 候选打分：替换字符最少者胜（顺序决定同分时优先：utf-8 → gb18030 → gbk …）
+    best_err, best_s = 10 ** 9, None
+    for cand in ("utf-8", "gb18030", "gbk", "big5", "shift_jis", "latin-1"):
+        e, s2 = _score(cand)
+        if s2 is not None and e < best_err:
+            best_err, best_s = e, s2
+    # charset_normalizer 仅作为"额外候选"参与打分（不作为权威，防误判）
     try:
+        from charset_normalizer import from_bytes
+        _c = from_bytes(raw).best() if raw else None
+        if _c is not None and _c.encoding:
+            e, s2 = _score(_c.encoding)
+            if s2 is not None and e < best_err:
+                best_err, best_s = e, s2
+    except Exception:
+        pass
+
+    single_byte = (enc.lower() in ("latin-1", "latin1", "ascii", "iso-8859-1", "windows-1252", "cp1252")
+                   or enc.lower().startswith("iso-8859") or enc.lower().startswith("windows-125")
+                   or enc.lower().startswith("cp125"))
+    if not explicit:
+        return best_s if best_s is not None else raw.decode("utf-8", "replace")
+    if single_byte:
+        # latin-1 等"万能解码"：若候选能零错误解出（如实际是 UTF-8/GBK），优先用候选
+        if best_err == 0 and best_s is not None:
+            return best_s
         return raw.decode(enc, "replace")
-    except LookupError:
-        return raw.decode("utf-8", "replace")
+    try:
+        return raw.decode(enc, "strict")
+    except (UnicodeDecodeError, LookupError):
+        pass
+    decl_err, _ = _score(enc)
+    if best_s is not None and best_err < max(1, decl_err // 2):
+        return best_s
+    return raw.decode(enc, "replace")
+
+
+def smart_decode(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
+    """公开别名：智能解码（BOM/声明/候选打分）。"""
+    return _decode_body(raw, headers)
+
+
+def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optional[str] = None,
+               timeout: int = 60) -> Optional[bytes]:
+    """下载原始字节（curl_cffi TLS 伪装优先，回退 urllib+gzip）。失败返回 None。"""
+    hdrs = {"User-Agent": random.choice(UA_POOL), "Accept-Language": "zh-CN,zh;q=0.9"}
+    if headers:
+        hdrs.update(headers)
+    try:
+        import curl_cffi.requests as cffi
+        kw = {"headers": hdrs, "timeout": timeout, "impersonate": "chrome"}
+        if proxy:
+            kw["proxies"] = {"http": proxy, "https": proxy}
+        r = cffi.get(url, **kw)
+        if r.status_code < 400:
+            return r.content or None
+        return None
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request(url, headers=hdrs)
+        opener = urllib.request.build_opener()
+        if proxy:
+            opener.add_handler(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        with opener.open(req, timeout=timeout) as resp:
+            raw = resp.read()
+            enc = resp.headers.get("Content-Encoding", "").lower()
+            if enc == "gzip":
+                try:
+                    raw = gzip.decompress(raw)
+                except Exception:
+                    pass
+            return raw or None
+    except Exception:
+        return None
 
 
 @dataclass

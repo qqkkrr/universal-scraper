@@ -127,4 +127,39 @@ class Pipeline(BasePipeline):
             elif t == "split":
                 sep = step.get("sep", ",")
                 item[step["field"]] = [x.strip() for x in str(item.get(step["field"]) or "").split(sep) if x.strip()]
+            elif t == "download":
+                # 通用文件下载（PDF/图片/附件）：从 item 字段取 URL 下载到 dir，写回本地路径
+                field = step.get("field", "url")
+                out_field = step.get("out_field", "local_file")
+                out_dir = step.get("dir", "downloads")
+                u = str(item.get(field) or "").strip()
+                if not u.startswith(("http://", "https://")):
+                    item[out_field] = ""
+                    continue
+                try:
+                    from pathlib import Path as _P
+                    from ..core import fetch_bytes
+                    _d = _P(out_dir)
+                    _d.mkdir(parents=True, exist_ok=True)
+                    ext = step.get("ext", "")
+                    if not ext:
+                        from urllib.parse import urlparse as _up
+                        ext = _P(_up(u).path).suffix[:8] or ".bin"
+                    fname = step.get("name_template", "").format(**{k: str(v)[:60] for k, v in item.items()}) if step.get("name_template") else ""
+                    if not fname:
+                        import hashlib as _h
+                        fname = _h.md5(u.encode()).hexdigest()[:16] + ext
+                    fname = re.sub(r'[\\/:*?"<>|\r\n]+', "_", fname)
+                    fp = _d / fname
+                    min_size = int(step.get("min_size", 20))
+                    if not fp.exists() or fp.stat().st_size < min_size:
+                        raw = fetch_bytes(u, headers=step.get("headers"), proxy=step.get("proxy"), timeout=int(step.get("timeout", 60)))
+                        if raw:
+                            fp.write_bytes(raw)
+                    if fp.exists() and fp.stat().st_size >= min_size:
+                        item[out_field] = str(fp)
+                    else:
+                        item[out_field] = ""
+                except Exception:
+                    item[out_field] = ""
         return item

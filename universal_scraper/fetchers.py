@@ -14,8 +14,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from .core import HttpClient, log, die
-from .antibot import solve_captcha_file
+from .core import HttpClient, log, die, smart_decode
+from .antibot import solve_captcha_file, detect_block
+from .session import SessionPool
 from .selectors import jpath, css_text, xpath_text
 
 NODE = os.environ.get(
@@ -62,6 +63,18 @@ class HttpFetcher(BaseFetcher):
             from .proxy import ProxyPool
             self.proxy_pool = ProxyPool(anti.get("proxies"), anti.get("proxy_mode", "round_robin"))
         self._last_proxy = None
+        # HTTP 会话池（Crawlee SessionPool 思路）：按域名 Cookie/UA/代理，封禁自动换会话
+        sp_proxies = list(anti.get("proxies") or [])
+        if not sp_proxies and anti.get("proxy"):
+            sp_proxies = [anti["proxy"]]
+        self.sessions = SessionPool(proxies=sp_proxies or None,
+                                    max_per_domain=int(anti.get("session_pool_max", 3)),
+                                    rotate_on_errors=int(anti.get("session_rotate_on_errors", 2)),
+                                    proxy_mode=anti.get("proxy_mode", "round_robin"))
+        if self.proxy_pool is not None:
+            # 会话池的代理从 ProxyPool 动态获取，失败同步反馈给 ProxyPool
+            self.sessions._next_proxy = self.proxy_pool.next
+        self._cur_session = None
 
     def _pick_proxy(self):
         if self.proxy_pool is not None:
@@ -85,17 +98,46 @@ class HttpFetcher(BaseFetcher):
         if page_params:
             query.update(page_params)
         method = s.get("method", "GET")
-        proxy = self._pick_proxy()
-        kw = dict(params=query or None, headers=s.get("headers"), proxy=proxy)
+        # 会话池：取当前域会话（含 Cookie/UA/代理），封禁自动轮换
+        sess = self.sessions.acquire(url)
+        self._cur_session = sess
+        hdrs = dict(s.get("headers") or {})
+        hdrs.setdefault("User-Agent", sess.ua)
+        if sess.cookies:
+            hdrs["Cookie"] = "; ".join(f"{k}={v}" for k, v in sess.cookies.items())
+        kw = dict(params=query or None, headers=hdrs, proxy=sess.proxy)
         try:
             if method.upper() == "POST":
                 res = self.http.post(url, data=s.get("body"), json_data=s.get("json_body"), **kw)
             else:
                 res = self.http.get(url, **kw)
         except Exception:
+            self.sessions.report(sess, ok=False, blocked=True)
             self._report_proxy(False)
             raise
-        self._report_proxy(bool(res.get("ok")))
+        # 封禁识别（Crawlee block-detection 思路）：200 但被风控的页面也会被识破
+        ok = bool(res.get("ok"))
+        bd = detect_block(res.get("status", 0), res.get("text", ""), res.get("headers"), url)
+        blocked = bd["kind"] != "none"
+        self.sessions.report(sess, ok=ok, blocked=blocked)
+        self._report_proxy(ok and not blocked)
+        # 会话 Cookie 续存（Set-Cookie 由 HttpClient 收集后再这里同步）
+        if ok and res.get("headers"):
+            try:
+                setck = res["headers"].get("set-cookie", "") or res["headers"].get("Set-Cookie", "")
+                for part in setck.split(","):
+                    if "=" in part:
+                        k, v = part.split("=", 1)
+                        sess.cookies[k.strip()] = v.split(";")[0].strip()
+            except Exception:
+                pass
+        if blocked:
+            log(f"  检测到反爬拦截[{bd['kind']}] {bd['detail']}（{url[:100]}）", "WARN")
+            if self.anti.get("_block_stats") is not None:
+                self.anti["_block_stats"][bd["kind"]] = self.anti["_block_stats"].get(bd["kind"], 0) + 1
+            if bd["kind"] in ("cloudflare", "verify", "captcha", "rate_limit", "anti_bot", "429", "403"):
+                from .protocols import RateLimitedError
+                raise RateLimitedError(url, retry_after=None, detail=f"反爬拦截[{bd['kind']}] {bd['detail']}")
         return res
 
     def fetch_list(self, pagination: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -133,7 +175,7 @@ class HttpFetcher(BaseFetcher):
                 log(f"  请求失败: {resp.get('text','')[:200]}", "ERROR")
                 break
             body = resp.get("body", b"")
-            text = body.decode("utf-8", "replace")
+            text = smart_decode(body, resp.get("headers") or {})
 
             if stype == "http_json":
                 obj = resp.get("json")
@@ -340,6 +382,8 @@ class BrowserFetcher(BaseFetcher):
                    "--scrollWait", str(self.source.get("scroll_wait_ms", 2000)),
                    "--loginTimeout", str(self.source.get("login_timeout_ms", 600000)),
                    "--headless", "0" if self.source.get("headless") is False else "1"]
+            if self.source.get("cdp"):
+                cmd += ["--cdp", str(self.source["cdp"])]
             env = dict(os.environ); env["NODE_PATH"] = NODE_PATH
             pp = self.anti.get("_proxy_pool")
             if pp is not None and pp.size:

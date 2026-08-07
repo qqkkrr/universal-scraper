@@ -124,20 +124,55 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
 
 def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
                timeout: int = 20) -> Dict[str, Any]:
-    """GET URL 返回 HTML/JSON。成功 {ok, status, html, final_url}。"""
-    import urllib.request
+    """GET URL 返回 HTML/JSON（curl_cffi TLS 指纹伪装优先，回退 urllib）。
+    成功 {ok, status, html, final_url, headers}。"""
+    from .core import smart_decode
     headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/json,*/*",
-               "Accept-Language": "zh-CN,zh-Hans;q=0.9", "Accept-Encoding": "identity"}
+               "Accept-Language": "zh-CN,zh-Hans;q=0.9", "Accept-Encoding": "gzip, deflate"}
     if cookie:
         headers["Cookie"] = cookie
+    # 1) curl_cffi：伪装 Chrome TLS/JA3/HTTP2 指纹（反 403），安装 vendor 或 pip 后自动启用
+    try:
+        import curl_cffi.requests as cffi
+        kw = {"headers": headers, "timeout": timeout, "impersonate": "chrome"}
+        if proxy:
+            kw["proxies"] = {"http": proxy, "https": proxy}
+        resp = cffi.get(url, **kw)
+        raw = resp.content or b""
+        import gzip
+        enc = (resp.headers.get("Content-Encoding") or "").lower()
+        if enc == "gzip":
+            try:
+                raw = gzip.decompress(raw)
+            except Exception:
+                pass
+        text = smart_decode(raw, dict(resp.headers))
+        return {"ok": resp.status_code < 400, "status": resp.status_code, "html": text,
+                "final_url": str(resp.url), "headers": {k.lower(): v for k, v in resp.headers.items()}}
+    except Exception:
+        pass
+    # 2) urllib 回退
+    import urllib.request
+    import gzip
+    hdrs = dict(headers)
+    hdrs.pop("Accept-Encoding", None)
+    hdrs["Accept-Encoding"] = "identity"
     opener = urllib.request.build_opener()
     if proxy:
         opener.add_handler(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-    req = urllib.request.Request(url, headers=headers)
+    req = urllib.request.Request(url, headers=hdrs)
     try:
-        r = opener.open(req, timeout=timeout)
-        raw = r.read(1000000).decode("utf-8", "ignore")
-        return {"ok": True, "status": r.status, "html": raw, "final_url": r.geturl()}
+        with opener.open(req, timeout=timeout) as r:
+            raw = r.read(1000000)
+            enc = r.headers.get("Content-Encoding", "").lower()
+            if enc == "gzip":
+                try:
+                    raw = gzip.decompress(raw)
+                except Exception:
+                    pass
+            text = smart_decode(raw, {k.lower(): v for k, v in r.headers.items()})
+            return {"ok": True, "status": getattr(r, "status", 200), "html": text,
+                    "final_url": r.geturl(), "headers": {k.lower(): v for k, v in r.headers.items()}}
     except urllib.error.HTTPError as e:
         return {"ok": False, "status": e.code, "html": "", "final_url": url, "error": f"HTTP {e.code}"}
     except Exception as e:

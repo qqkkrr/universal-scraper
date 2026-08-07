@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""HTTP 会话池（对标 Crawlee SessionPool / Scrapy CookieJar）：
+- 按域名维护一组「会话」：每个会话 = Cookie 罐 + UA + 代理
+- 封禁/429/异常 → 会话错误计数 +1，连续出错自动换新会话（新 UA + 下一个代理）
+- 成功 → 恢复计数；同一会话 Cookie 连续复用（登录态不丢）
+"""
+from __future__ import annotations
+
+import random
+import threading
+import time
+from typing import Dict, List, Optional
+from urllib.parse import urlparse
+
+UA_POOL = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+]
+
+
+class HttpSession:
+    __slots__ = ("domain", "ua", "proxy", "cookies", "errors", "last_used", "id")
+
+    def __init__(self, domain: str, ua: str, proxy: Optional[str]):
+        self.domain = domain
+        self.ua = ua
+        self.proxy = proxy
+        self.cookies: Dict[str, str] = {}
+        self.errors = 0
+        self.last_used = 0.0
+        self.id = random.randint(100000, 999999)
+
+
+class SessionPool:
+    """按域名管理会话；rotate_on_errors 次失败后强制换新会话。"""
+
+    def __init__(self, proxies: Optional[List[str]] = None, ua_pool: Optional[List[str]] = None,
+                 max_per_domain: int = 3, rotate_on_errors: int = 2, proxy_mode: str = "round_robin"):
+        self.proxies = list(proxies or [])
+        self.ua_pool = list(ua_pool or UA_POOL)
+        self.max_per_domain = max_per_domain
+        self.rotate_on_errors = rotate_on_errors
+        self.proxy_mode = proxy_mode
+        self._pool: Dict[str, List[HttpSession]] = {}
+        self._idx: Dict[str, int] = {}
+        self._lock = threading.Lock()
+        self.stats = {"created": 0, "rotated": 0, "blocked": 0}
+
+    def _next_proxy(self) -> Optional[str]:
+        if not self.proxies:
+            return None
+        if self.proxy_mode == "random":
+            return random.choice(self.proxies)
+        # round_robin：按时间轮换
+        i = int(time.time() * 10) % len(self.proxies)
+        return self.proxies[i]
+
+    def acquire(self, url: str) -> HttpSession:
+        """取一个会话：域内轮换；全被污染则新建（新 UA/代理）。"""
+        dom = urlparse(url).netloc.lower()
+        with self._lock:
+            lst = self._pool.setdefault(dom, [])
+            idx = self._idx.get(dom, 0)
+            # 找一个可用（错误未超阈值）的会话
+            for _ in range(len(lst)):
+                s = lst[idx % len(lst)]
+                idx += 1
+                if s.errors < self.rotate_on_errors:
+                    self._idx[dom] = idx
+                    s.last_used = time.time()
+                    return s
+            # 全部污染或池空 → 新建（换 UA + 换代理）
+            if len(lst) >= self.max_per_domain:
+                # 重置最旧会话（Crawlee 思路：池满时回收最久未用的）
+                old = min(lst, key=lambda x: x.last_used)
+                lst.remove(old)
+                self.stats["rotated"] += 1
+            s = HttpSession(dom, random.choice(self.ua_pool), self._next_proxy())
+            lst.append(s)
+            self._idx[dom] = len(lst) - 1
+            self.stats["created"] += 1
+            return s
+
+    def report(self, session: HttpSession, ok: bool, blocked: bool = False) -> None:
+        """上报结果：ok=True 清零错误；blocked=True 立即污染并换新。"""
+        with self._lock:
+            if ok:
+                session.errors = 0
+            else:
+                session.errors += 1
+                if blocked:
+                    session.errors = self.rotate_on_errors  # 立即触发轮换
+                    self.stats["blocked"] += 1
+
+    def rotate(self, url: str) -> HttpSession:
+        """强制为 URL 所在域换新会话（如连续封禁）。"""
+        dom = urlparse(url).netloc.lower()
+        with self._lock:
+            s = HttpSession(dom, random.choice(self.ua_pool), self._next_proxy())
+            lst = self._pool.setdefault(dom, [])
+            if len(lst) >= self.max_per_domain:
+                old = min(lst, key=lambda x: x.last_used)
+                lst.remove(old)
+            lst.append(s)
+            self._idx[dom] = len(lst) - 1
+            self.stats["created"] += 1
+            self.stats["rotated"] += 1
+            return s
+
+    def summary(self) -> str:
+        with self._lock:
+            total = sum(len(v) for v in self._pool.values())
+            return f"会话 {total}（新建 {self.stats['created']}，轮换 {self.stats['rotated']}，封禁 {self.stats['blocked']}）"

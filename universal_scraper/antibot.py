@@ -235,3 +235,58 @@ def wait_for_answer_file(answer_file: Path, timeout: int = 300) -> Optional[str]
                 return ans
         time.sleep(2)
     return None
+
+
+# ---------------------------------------------------------------- 封禁检测（对标 Crawlee block-detection / cloudscraper）
+# 统一识别"HTTP 200 但实际被风控"的页面：Cloudflare 挑战、安全验证、登录墙、验证码、限流等，
+# 供 HttpClient/引擎在拿到响应后判断是否要 换代理 / 换 UA / 升级浏览器 / 重试。
+
+BLOCK_PATTERNS = [
+    ("cloudflare", re.compile(r"cf-challenge|cf_clearance|just a moment|cloudflare|__cf_chl|challenges\.cloudflare", re.I)),
+    ("verify", re.compile(r"验证中心|安全验证|滑动验证|点选验证|人机验证|拼图验证|spiderindefence|访问过于频繁|异常访问|请求过于频繁|操作频繁|安全检测", re.I)),
+    ("login", re.compile(r"请先登录|尚未登录|登录后访问|扫码登录|账号登录|立即登录|passport\.|/login\b|login\.aspx|欢迎登录", re.I)),
+    ("captcha", re.compile(r"captcha|图形验证|输入验证码|请输入验证码|verify_code|turnstile|recaptcha", re.I)),
+    ("rate_limit", re.compile(r"too many requests|rate limit|频率限制|访问太快|限流", re.I)),
+    ("anti_bot", re.compile(r"waf|风控|反爬|该ip|您的ip|被禁止|blocked|forbidden by|403 forbidden", re.I)),
+]
+
+# 这些状态码 + 内容特征可直接判为"封禁/需要升级"
+STATUS_BLOCK = {403: "403", 429: "429", 503: "503", 502: "502"}
+
+
+def detect_block(status: int = 200, text: str = "", headers: Optional[Dict[str, str]] = None,
+                 url: str = "") -> Dict[str, Any]:
+    """识别响应是否被反爬拦截。
+
+    返回 {"kind": "none"|"cloudflare"|"verify"|"login"|"captcha"|"rate_limit"|"anti_bot"|"403"|"429"|...,
+          "detail": 命中片段, "status": int}
+    kind != "none" 时调用方应：换代理/换 UA 重试，多次命中则升级浏览器模式。
+    """
+    h = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+    status = int(status or 0)
+    # 1) 状态码直接判
+    if status in STATUS_BLOCK:
+        return {"kind": STATUS_BLOCK[status], "detail": f"HTTP {status}", "status": status}
+    if status >= 400:
+        return {"kind": "http_error", "detail": f"HTTP {status}", "status": status}
+    # 2) 头部特征（Cloudflare 等）
+    for key in ("cf-ray", "cf-chl", "cf-cache-status"):
+        if key in h:
+            return {"kind": "cloudflare", "detail": f"header {key}", "status": status}
+    # 3) 正文特征（只在前 20KB 匹配，避免全文误判）
+    t = (text or "")[:20000].lower()
+    if not t:
+        return {"kind": "none", "detail": "", "status": status}
+    for kind, pat in BLOCK_PATTERNS:
+        m = pat.search(t)
+        if m:
+            frag = t[max(0, m.start() - 12):m.end() + 12].replace("\n", " ")[:60]
+            return {"kind": kind, "detail": frag, "status": status}
+    return {"kind": "none", "detail": "", "status": status}
+
+
+def block_summary(blocks: Dict[str, int]) -> str:
+    """把多次封禁统计转成人类可读摘要（WebUI/日志用）。"""
+    if not blocks:
+        return "无"
+    return ", ".join(f"{k}×{v}" for k, v in sorted(blocks.items(), key=lambda x: -x[1]))

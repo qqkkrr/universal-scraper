@@ -107,6 +107,7 @@ class EngineV3:
         self.out_dir = out_dir
         anti["session_dir"] = str(out_dir / ".session")
         anti["captcha_dir"] = str(out_dir / ".captcha")
+        anti["_block_stats"] = {}
         (out_dir / ".session").mkdir(parents=True, exist_ok=True)
         (out_dir / ".captcha").mkdir(parents=True, exist_ok=True)
         self.logger = Logger(log_file=log_file or (out_dir / f".run_{task.name}.log"))
@@ -389,8 +390,13 @@ class EngineV3:
         self._finalize()
         self._save_state()
         self.logger.info(f"完成: 抓取 {self.stats['fetched']} | 条目 {self.stats['items']} | 错误 {self.stats['errors']}")
+        blocks = dict(self.anti.get("_block_stats") or {})
+        if blocks:
+            from .antibot import block_summary
+            self.logger.info(f"反爬拦截统计: {block_summary(blocks)}")
         return {"name": self.task.name, "total": self.stats["items"],
-                "fetched": self.stats["fetched"], "errors": self.stats["errors"]}
+                "fetched": self.stats["fetched"], "errors": self.stats["errors"],
+                "block_stats": blocks}
 
     def _run_pool(self) -> None:
         """长驻 worker 池：固定 max_concurrency 线程，持续 pop→handle（比每批建池更快）。"""
