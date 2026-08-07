@@ -578,7 +578,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
             break
         try:
-            result = _box.get("r")
+            result = _box.get("r") or {}   # 线程内 run_task 抛错时兜底，避免二次崩溃
             last_result = result
             last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
         except Exception as e:
@@ -769,7 +769,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
             break
         try:
-            result = _box.get("r")
+            result = _box.get("r") or {}   # 线程内 run_task 抛错时兜底，避免二次崩溃
             last_result = result
             last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
         except Exception as e:

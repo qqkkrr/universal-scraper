@@ -14,7 +14,7 @@ CAPTCHA_STRATEGIES = {"auto", "ddddocr", "opencv_slider", "2captcha", "nopecha",
 # ---------------------------------------------------------------- 共享常量（v2/v3 一套，杜绝 API 分裂）
 # 与 modules/pipelines.py / modules/parsers.py 实际实现对齐
 ALL_PIPELINE_TYPES = {"filter", "dedup", "dedup_content", "cast", "add", "validate",
-                      "rename", "default", "template", "split", "download"}
+                      "rename", "default", "template", "split", "download", "parse_date"}
 ALL_ACTION_TYPES = {"click", "type", "write", "fill", "press", "select", "wait",
                     "wait_time", "wait_for_selector", "waitfor", "scroll",
                     "exec", "js", "execute_javascript", "screenshot", "noop"}
