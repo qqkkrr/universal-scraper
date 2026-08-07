@@ -1,0 +1,49 @@
+{
+  "name": "xhs_comments",
+  "vars": {
+    "note_id": "REPLACE_WITH_NOTE_ID",
+    "note_url": "https://www.xiaohongshu.com/explore/REPLACE_WITH_NOTE_ID"
+  },
+  "source": {
+    "type": "browser",
+    "url": "{{note_url}}",
+    "headless": false,
+    "login": {
+      "enabled": true,
+      "url": "https://www.xiaohongshu.com",
+      "wait_selector": "a[href*='/user/profile']",
+      "timeout_ms": 600000,
+      "prompt": "请在打开的浏览器中扫码/手机号登录小红书，登录完成后本任务自动继续"
+    },
+    "scroll_count": 30,
+    "scroll_wait_ms": 1800,
+    "record_from": "capture",
+    "capture": [
+      { "name": "comments",     "url_pattern": "/api/sns/web/v2/comment/page",     "records_path": "data.comments" },
+      { "name": "sub_comments", "url_pattern": "/api/sns/web/v2/comment/sub/page", "records_path": "data.comments" }
+    ]
+  },
+  "pagination": { "strategy": "none", "max_pages": 1 },
+  "record": {
+    "fields": {
+      "id": { "from": "id" },
+      "content": { "from": "content" },
+      "like_count": { "from": "like_count" },
+      "user": { "from": "user_info.nickname" },
+      "user_id": { "from": "user_info.user_id" },
+      "create_time": { "from": "create_time" },
+      "ip_location": { "from": "ip_location" },
+      "note_id": { "from": "note_id" },
+      "reply_count": { "from": "sub_comment_count" },
+      "level": { "from": "comment_type" },
+      "url": { "constant": "{{note_url}}" }
+    }
+  },
+  "pipeline": [
+    { "type": "filter", "field": "content", "op": "not_contains", "value": "" },
+    { "type": "dedup", "key": ["id", "note_id"] }
+  ],
+  "detail": { "enabled": false },
+  "output": { "dir": "outputs", "base_name": "xhs_comments_{{note_id}}" },
+  "anti_bot": { "min_interval": 0.5, "captcha": { "strategy": "auto" } }
+}

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>万能爬虫工具 · 可视化版</title>
+<style>
+  :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--txt:#e2e8f0;--muted:#94a3b8;--acc:#38bdf8;--ok:#4ade80;--err:#f87171}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}
+  header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;background:#111c33}
+  header h1{font-size:20px;font-weight:700}
+  header .tag{background:var(--acc);color:#082f49;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700}
+  nav{display:flex;gap:4px;padding:10px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  nav button{background:transparent;border:1px solid var(--line);color:var(--muted);padding:8px 16px;border-radius:8px;cursor:pointer;font-size:14px}
+  nav button.active{background:var(--acc);color:#082f49;border-color:var(--acc);font-weight:700}
+  main{padding:20px 24px;max-width:1100px;margin:0 auto}
+  .tab{display:none}
+  .tab.active{display:block}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input,select,textarea{width:100%;padding:9px 12px;background:#0f172a;border:1px solid var(--line);border-radius:8px;color:var(--txt);font-size:14px}
+  input:focus,select:focus{outline:none;border-color:var(--acc)}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:200px}
+  button.primary{background:var(--acc);color:#082f49;border:none;padding:10px 22px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;margin-top:14px}
+  button.primary:disabled{opacity:.5;cursor:wait}
+  pre{background:#0b1220;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12px;line-height:1.5;max-height:400px;white-space:pre-wrap;word-break:break-all}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  th{background:#0f172a;color:var(--acc)}
+  .ok{color:var(--ok);font-weight:700}
+  .err{color:var(--err);font-weight:700}
+  .muted{color:var(--muted);font-size:13px}
+  .stats{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:8px}
+  .stats b{font-size:22px;color:var(--acc)}
+  .hint{font-size:13px;color:var(--muted);margin-top:6px}
+</style>
+</head>
+<body>
+<header><h1>🕷️ 万能爬虫工具</h1><span class="tag">可视化版 v1</span><span class="muted" id="server"></span></header>
+<nav>
+  <button data-tab="auto" class="active">🤖 自动抓取</button>
+  <button data-tab="fetch">⚡ 快速抓取</button>
+  <button data-tab="run">▶️ 运行任务</button>
+  <button data-tab="result">📊 查看结果</button>
+  <button data-tab="tasks">📁 任务列表</button>
+  <button data-tab="help">❓ 帮助</button>
+</nav>
+<main>
+
+<div class="tab active" id="tab-auto">
+  <div class="card">
+    <label>用一句话描述你的任务（AI 自动生成配置并运行）</label>
+    <textarea id="a_desc" rows="4" placeholder="例如：抓取 https://quotes.toscrape.com/ 的名言、作者和标签，翻 2 页；或：抓取 https://books.toscrape.com/ 的书名和价格"></textarea>
+    <div class="row">
+      <div><label>最多条数（可选）</label><input id="a_limit" type="number" min="1" placeholder="留空 = 不限"></div>
+    </div>
+    <button class="primary" onclick="doAuto()" id="a_btn">🤖 开始自动抓取</button>
+    <div class="hint">需要登录/验证码的网站（如小红书）AI 会生成 browser 配置，运行时会弹出浏览器让你登录。</div>
+  </div>
+  <div id="a_out" class="card" style="display:none"></div>
+</div>
+
+<div class="tab" id="tab-fetch">
+  <div class="card">
+    <label>网址（URL）</label>
+    <input id="f_url" placeholder="https://example.com/">
+    <div class="row">
+      <div><label>抓取方式</label>
+        <select id="f_mode"><option value="http">普通网页</option><option value="browser">浏览器渲染（JS 页面）</option><option value="article">自动提取正文</option><option value="table">提取表格</option></select>
+      </div>
+      <div><label>CSS 选择器（可选，提取指定区域）</label>
+        <input id="f_selector" placeholder="如 .content 或 h1">
+      </div>
+    </div>
+    <button class="primary" onclick="doFetch()" id="f_btn">🚀 抓取</button>
+    <div class="hint">第一次上手建议：先抓 https://quotes.toscrape.com/ 试试。</div>
+  </div>
+  <div id="f_out" class="card" style="display:none"></div>
+</div>
+
+<div class="tab" id="tab-run">
+  <div class="card">
+    <label>选择任务（tasks/ 与 real_tasks/ 里的任务包）</label>
+    <select id="r_task"></select>
+    <div id="r_cfg" class="card" style="background:#0f172a;margin-top:12px"></div>
+    <div class="row">
+      <div><label>最多抓取条数（可选）</label><input id="r_limit" placeholder="留空 = 不限" type="number" min="1"></div>
+      <div><label>变量覆盖（可选，如 keyword=数据中心）</label><input id="r_var" placeholder="key=value"></div>
+    </div>
+    <button class="primary" onclick="doRun()" id="r_btn">▶️ 运行任务</button>
+  </div>
+  <div id="r_out" class="card" style="display:none"></div>
+</div>
+
+<div class="tab" id="tab-result">
+  <div class="card">
+    <label>选择结果文件（outputs/*.json）</label>
+    <select id="s_file"></select>
+    <button class="primary" onclick="loadResult()">📊 查看</button>
+  </div>
+  <div id="s_out" class="card" style="display:none"></div>
+</div>
+
+<div class="tab" id="tab-tasks">
+  <div class="card"><div id="t_list" class="muted">加载中...</div></div>
+</div>
+
+<div class="tab" id="tab-help">
+  <div class="card">
+    <h3 style="margin-bottom:10px">使用说明（3 步）</h3>
+    <p class="muted" style="line-height:1.8">
+      1️⃣ <b>快速抓取</b>：贴一个网址 → 选方式 → 点"抓取"，立即看到内容。<br>
+      2️⃣ <b>运行任务</b>：选一个现成任务（如 real_json_posts）→ 点"运行"，得到结构化数据。<br>
+      3️⃣ <b>查看结果</b>：结果以表格显示，可导出 JSON/CSV/Excel（文件在 outputs/ 文件夹）。<br><br>
+      📖 详细教程见工具文件夹里的 <b>使用说明书.md</b>。<br>
+      ⚠️ 注意：抓取他人网站请遵守 robots.txt 与当地法律，控制频率。
+    </p>
+  </div>
+</div>
+
+</main>
+<script>
+const $=s=>document.querySelector(s);
+$('#server').textContent='服务已启动';
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); $('#tab-'+b.dataset.tab).classList.add('active');
+});
+
+async function api(path, opts){
+  const r=await fetch(path, opts);
+  return r.json();
+}
+
+// 快速抓取
+async function doAuto(){
+  const desc=$('#a_desc').value.trim(); if(!desc){alert('请先描述任务');return;}
+  $('#a_btn').disabled=true; $('#a_btn').textContent='🤖 AI 生成配置并运行中（可能 1-2 分钟）...';
+  const d=await api('/api/auto',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({description:desc, limit:$('#a_limit').value||null})});
+  $('#a_btn').disabled=false; $('#a_btn').textContent='🤖 开始自动抓取';
+  const out=$('#a_out'); out.style.display='block';
+  let html='';
+  if(d.error){ html+=`<pre class="err">${escapeHtml(d.error)}</pre>`; }
+  else {
+    html+=`<div class="stats"><div>条目 <b>${d.result&&d.result.total}</b></div><div>抓取 <b>${d.result&&d.result.fetched}</b></div><div>错误 <b>${d.result&&d.result.errors}</b></div></div>`;
+    if(d.messages && d.messages.length) html+=`<h4 class="muted" style="margin:8px 0">执行过程</h4><pre>${escapeHtml(d.messages.join('\n'))}</pre>`;
+    if(d.sample && d.sample.length) html+=`<h4 class="muted" style="margin:8px 0">数据预览（前 5 条）</h4>`+renderTable(d.sample);
+    if(d.files && Object.keys(d.files).length) html+=`<h4 class="muted" style="margin:8px 0">导出文件</h4><pre>${escapeHtml(JSON.stringify(d.files,null,2))}</pre>`;
+  }
+  out.innerHTML=html;
+}
+
+async function doFetch(){
+  const url=$('#f_url').value.trim(); if(!url){alert('请先输入网址');return;}
+  $('#f_btn').disabled=true; $('#f_btn').textContent='抓取中...';
+  const mode=$('#f_mode').value;
+  const p=new URLSearchParams({url});
+  if(mode==='browser')p.set('browser','1');
+  if(mode==='article')p.set('article','1');
+  if(mode==='table')p.set('table','1');
+  if($('#f_selector').value.trim())p.set('selector',$('#f_selector').value.trim());
+  const d=await api('/api/fetch?'+p.toString());
+  $('#f_btn').disabled=false; $('#f_btn').textContent='🚀 抓取';
+  const out=$('#f_out'); out.style.display='block';
+  let html=`<div class="stats"><div>状态 <b>${d.status}</b></div><div>链接 <b>${(d.links||[]).length}</b></div></div>`;
+  if(d.error){ html+=`<pre class="err">${d.error}</pre>`; }
+  else {
+    if(d.selector) html+=`<pre>${escapeHtml(d.selector.slice(0,3000))}</pre>`;
+    if(d.article) html+=`<pre>${escapeHtml(d.article.slice(0,3000))}</pre>`;
+    if(d.markdown) html+=`<pre>${escapeHtml(d.markdown.slice(0,3000))}</pre>`;
+    if(d.tables){
+      d.tables.forEach((t,i)=>{ html+=`<h4 class="muted" style="margin:8px 0">表格 ${i+1}</h4>`+renderTable(t); });
+    }
+    if(d.links && d.links.length){ html+=`<h4 class="muted" style="margin:8px 0">外链 (${d.links.length})</h4><pre>${escapeHtml(d.links.join('\n'))}</pre>`; }
+  }
+  out.innerHTML=html;
+}
+
+// 任务列表
+async function loadTasks(){
+  const d=await api('/api/tasks');
+  const sel=$('#r_task');
+  sel.innerHTML='';
+  d.forEach(t=>{
+    const o=document.createElement('option'); o.value=t.path; o.textContent=`${t.name}（${t.type}）`; sel.appendChild(o);
+  });
+  sel.onchange=showCfg; showCfg();
+  $('#t_list').innerHTML=d.map(t=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>${t.name}</b> <span class="muted">${t.type} · ${(t.start_urls||[]).join(', ').slice(0,90)}</span></div>`).join('');
+}
+async function showCfg(){
+  const d=await api('/api/task?path='+encodeURIComponent($('#r_task').value));
+  $('#r_cfg').innerHTML=`<pre>${escapeHtml(JSON.stringify(d.cfg||{},null,2).slice(0,1200))}</pre>`;
+}
+
+// 运行任务
+async function doRun(){
+  const task=$('#r_task').value; if(!task){alert('请先选择任务');return;}
+  $('#r_btn').disabled=true; $('#r_btn').textContent='运行中...';
+  const d=await api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({task, limit:$('#r_limit').value, vars:$('#r_var').value})});
+  $('#r_btn').disabled=false; $('#r_btn').textContent='▶️ 运行任务';
+  const out=$('#r_out'); out.style.display='block';
+  let html=`<div class="stats"><div>条目 <b>${d.total}</b></div><div>抓取 <b>${d.fetched}</b></div><div>错误 <b>${d.errors}</b></div></div>`;
+  if(d.error) html+=`<pre class="err">${escapeHtml(d.error)}</pre>`;
+  if(d.log) html+=`<h4 class="muted" style="margin:8px 0">运行日志</h4><pre>${escapeHtml(d.log.slice(-2500))}</pre>`;
+  if(d.sample && d.sample.length) html+=`<h4 class="muted" style="margin:8px 0">数据预览（前 5 条）</h4>`+renderTable(d.sample);
+  out.innerHTML=html;
+}
+
+// 结果文件
+async function loadResults(){
+  const d=await api('/api/results');
+  const sel=$('#s_file'); sel.innerHTML='';
+  (d||[]).forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;sel.appendChild(o);});
+}
+async function loadResult(){
+  const name=$('#s_file').value; if(!name)return;
+  const d=await api('/api/result?name='+encodeURIComponent(name));
+  const out=$('#s_out'); out.style.display='block';
+  if(d.error){out.innerHTML=`<pre class="err">${escapeHtml(d.error)}</pre>`;return;}
+  out.innerHTML=`<div class="stats"><div>共 <b>${d.rows.length}</b> 条</div></div>`+renderTable(d.rows.slice(0,200));
+}
+
+function renderTable(rows){
+  if(!rows || !rows.length) return '<div class="muted">暂无数据</div>';
+  const keys=Object.keys(rows[0]).slice(0,12);
+  let h='<table><thead><tr>'+keys.map(k=>`<th>${escapeHtml(k)}</th>`).join('')+'</tr></thead><tbody>';
+  rows.forEach(r=>{ h+='<tr>'+keys.map(k=>`<td title="${escapeHtml(String(r[k]??''))}">${escapeHtml(String(r[k]??'').slice(0,120))}</td>`).join('')+'</tr>'; });
+  return h+'</tbody></table>';
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+loadTasks(); loadResults();
+</script>
+</body>
+</html>

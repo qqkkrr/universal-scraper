@@ -1,0 +1,9 @@
+Django==5.0.7
+DrissionPage==4.1.0.17
+PyMySQL==1.1.1
+python-dotenv==1.0.1
+Requests==2.32.3
+djangorestframework
+apscheduler==3.11.0
+redis
+invoke

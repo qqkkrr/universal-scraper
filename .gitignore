@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+outputs/
+vendor/
+tasks/
+.challenges_tmp/
+*.egg-info/
+build/
+dist/
+challenges/learnspider/static/
+challenges/learnspider/*.sql
+challenges/learnspider/db.sqlite3
+challenges/learnspider/__pycache__/

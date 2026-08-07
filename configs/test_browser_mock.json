@@ -1,0 +1,29 @@
+{
+  "name": "test_browser_mock",
+  "source": {
+    "type": "browser",
+    "url": "file:///tmp/capmock/mock.html",
+    "wait": { "selector": "#captcha", "timeout": 10000 },
+    "row_css": "li.item",
+    "fields": {
+      "title": { "css": "span.t" },
+      "date": { "css": "span.p" }
+    },
+    "pagination": { "type": "click", "selector": "#next", "wait_ms": 800 },
+    "captcha": {
+      "detect_selector": "#captcha",
+      "image_selector": "#capimg",
+      "input_selector": "#code",
+      "submit_selector": "#submit"
+    }
+  },
+  "pagination": { "strategy": "none", "max_pages": 5 },
+  "record": { "fields": { "title": { "from": "title" }, "date": { "from": "date" } } },
+  "pipeline": [],
+  "detail": { "enabled": false },
+  "output": { "dir": "outputs", "base_name": "test_browser_mock" },
+  "anti_bot": {
+    "min_interval": 0.2,
+    "captcha": { "strategy": "config", "answer": "1234" }
+  }
+}

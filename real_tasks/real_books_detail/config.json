@@ -1,0 +1,57 @@
+{
+  "name": "real_books_detail",
+  "start_urls": [
+    "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
+  ],
+  "queue": {
+    "max_depth": 1,
+    "max_requests": 30,
+    "max_concurrency": 2
+  },
+  "source": {
+    "type": "http"
+  },
+  "rules": [
+    {
+      "match": "contains",
+      "pattern": "/",
+      "parser": "js"
+    }
+  ],
+  "parsers": {
+    "js": {
+      "type": "html",
+      "fields": {
+        "title": {
+          "css": "h1"
+        },
+        "price": {
+          "css": "p.price_color"
+        },
+        "desc": {
+          "css": "article.product_page p",
+          "limit": 1000
+        }
+      }
+    }
+  },
+  "pipelines": [
+    {
+      "type": "filter",
+      "field": "title",
+      "op": "non_empty"
+    }
+  ],
+  "storage": {
+    "type": "jsonl",
+    "name": "real_books_detail"
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "real_books_detail"
+  },
+  "anti_bot": {
+    "min_interval": 0.3,
+    "max_retries": 2
+  }
+}

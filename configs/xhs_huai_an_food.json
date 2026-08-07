@@ -1,0 +1,96 @@
+{
+  "name": "xhs_huai_an_food",
+  "vars": {
+    "keyword": "#淮安美食",
+    "date_min": 1735660800,
+    "date_max": 1735920000
+  },
+  "source": {
+    "type": "browser",
+    "url": "https://www.xiaohongshu.com/search_result?keyword=%23%E6%B7%AE%E5%AE%89%E7%BE%8E%E9%A3%9F",
+    "headless": false,
+    "login": {
+      "enabled": true,
+      "url": "https://www.xiaohongshu.com",
+      "wait_selector": "a[href*='/user/profile']",
+      "timeout_ms": 600000,
+      "prompt": "请在打开的浏览器中扫码/手机号登录小红书，登录完成后本任务自动继续"
+    },
+    "scroll_count": 60,
+    "scroll_wait_ms": 1800,
+    "record_from": "capture",
+    "capture": [
+      {
+        "name": "search_notes",
+        "url_pattern": "/api/sns/web/v1/search/notes",
+        "records_path": "data.items"
+      },
+      {
+        "name": "search_notes_v2",
+        "url_pattern": "/api/sns/web/v2/search/notes",
+        "records_path": "data.items"
+      }
+    ]
+  },
+  "pagination": {
+    "strategy": "none",
+    "max_pages": 1
+  },
+  "record": {
+    "fields": {
+      "id": {
+        "from": "id"
+      },
+      "title": {
+        "from": "display_title"
+      },
+      "type": {
+        "from": "type"
+      },
+      "time": {
+        "from": "time"
+      },
+      "user": {
+        "from": "user.nickname"
+      },
+      "liked_count": {
+        "from": "liked_count"
+      },
+      "url": {
+        "template": "https://www.xiaohongshu.com/explore/{id}"
+      }
+    }
+  },
+  "pipeline": [
+    {
+      "type": "filter",
+      "field": "id",
+      "op": "non_empty"
+    },
+    {
+      "type": "filter",
+      "field": "time",
+      "op": "between",
+      "min": 1735660800,
+      "max": 1735920000
+    },
+    {
+      "type": "dedup",
+      "key": "id"
+    }
+  ],
+  "detail": {
+    "enabled": false
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "xhs_huai_an_food"
+  },
+  "anti_bot": {
+    "min_interval": 0.5,
+    "captcha": {
+      "strategy": "auto"
+    },
+    "session_name": "xhs_huai_an"
+  }
+}

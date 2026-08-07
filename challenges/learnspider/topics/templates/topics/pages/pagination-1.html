@@ -1,0 +1,81 @@
+{% extends "topics/base.html" %}
+{% load static %}
+{% block title %}
+翻页网页
+{% endblock %}
+{% block question %}
+<h1>您好🦆, 爬虫er~👋</h1>
+    <h3>
+   这是需要翻页的网页🫣
+    </h3>
+    它与上一道题目没太大区别对吧，只是多加了一个循环。<br>
+    请问：第一百页返回的内容是什么？【一个json格式的答案】
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+        <h1 class="mb-4">翻页内容</h1>
+        <div id="content">
+            <!-- 动态内容将插入到这里 -->
+        </div>
+        <nav aria-label="Page navigation">
+            <ul class="pagination justify-content-center">
+                <li class="page-item">
+                    <a class="page-link" href="#" id="prev-page">上一页</a>
+                </li>
+                <li class="page-item">
+                    <span class="page-link" id="current-page">1</span>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="#" id="next-page">下一页</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+
+    <script>
+        let currentPage = 1;
+
+        function fetchData(page) {
+            $.ajax({
+                url: `/api/pagination1/${page}/`, // API 接口
+                type: 'GET',
+                success: function(response) {
+                    // 假设 API 返回的数据格式为：{ "data": "xxx" }
+                    const data = response.data;
+
+                    // 更新内容
+                    $('#content').html(`<div class="card"><div class="card-body">${data}</div></div>`);
+
+                    // 更新当前页码显示
+                    $('#current-page').text(page);
+                },
+                error: function() {
+                    $('#content').html('<div class="alert alert-danger" role="alert">内容加载失败</div>');
+                }
+            });
+        }
+
+        $(document).ready(function() {
+            // 初始化加载第一页内容
+            fetchData(currentPage);
+
+            // 上一页按钮点击事件
+            $('#prev-page').click(function(e) {
+                e.preventDefault();
+                if (currentPage > 1) {
+                    currentPage--;
+                    fetchData(currentPage);
+                }
+            });
+
+            // 下一页按钮点击事件
+            $('#next-page').click(function(e) {
+                e.preventDefault();
+                currentPage++;
+                fetchData(currentPage);
+            });
+        });
+    </script>
+{% endblock %}

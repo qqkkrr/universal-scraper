@@ -1,0 +1,558 @@
+{
+ "88": {
+  "id": 88,
+  "title": "对爬虫祛魅2",
+  "url": "http://127.0.0.1:8001/page/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "82": {
+  "id": 82,
+  "title": "防重放",
+  "url": "http://127.0.0.1:8001/page/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "81": {
+  "id": 81,
+  "title": "cookie反爬-max",
+  "url": "http://127.0.0.1:8001/page/cookie-max",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "80": {
+  "id": 80,
+  "title": "初见cookie反爬",
+  "url": "http://127.0.0.1:8001/page/hello-cookie",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "79": {
+  "id": 79,
+  "title": "cookie反爬-pro",
+  "url": "http://127.0.0.1:8001/view/request-twice",
+  "official_answer": "cookie反爬-pro",
+  "answer": "cookie反爬-pro",
+  "method": "rule:request-twice",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "78": {
+  "id": 78,
+  "title": "奇怪的响应码",
+  "url": "http://127.0.0.1:8001/page/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "77": {
+  "id": 77,
+  "title": "获取值",
+  "url": "http://127.0.0.1:8001/page/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "76": {
+  "id": 76,
+  "title": "跳转",
+  "url": "http://127.0.0.1:8001/page/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "75": {
+  "id": 75,
+  "title": "赋值",
+  "url": "http://127.0.0.1:8001/page/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "74": {
+  "id": 74,
+  "title": "初识时间戳",
+  "url": "http://127.0.0.1:8001/page/0/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "73": {
+  "id": 73,
+  "title": "零宽字符",
+  "url": "http://127.0.0.1:8001/page/0/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "72": {
+  "id": 72,
+  "title": "各种pro",
+  "url": "http://127.0.0.1:8001/page/0/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "71": {
+  "id": 71,
+  "title": "控制台检测",
+  "url": "http://127.0.0.1:8001/page/check-devtools",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "70": {
+  "id": 70,
+  "title": "初见混淆",
+  "url": "http://127.0.0.1:8001/page/hello-ob",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "69": {
+  "id": 69,
+  "title": "数据解析",
+  "url": "http://127.0.0.1:8001/page/json-parse",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "68": {
+  "id": 68,
+  "title": "域名校验",
+  "url": "http://127.0.0.1:8001/page/check-domain",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "67": {
+  "id": 67,
+  "title": "网页重定向",
+  "url": "http://127.0.0.1:8001/page/redirect",
+  "official_answer": "301",
+  "answer": "301",
+  "method": "rule:重定向状态码",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "66": {
+  "id": 66,
+  "title": "无头浏览器",
+  "url": "http://127.0.0.1:8001/page/1/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "65": {
+  "id": 65,
+  "title": "开发者工具",
+  "url": "http://127.0.0.1:8001/page/devtools",
+  "official_answer": "开发者工具",
+  "answer": "开发者工具",
+  "method": "llm",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "64": {
+  "id": 64,
+  "title": "雪碧图",
+  "url": "http://127.0.0.1:8001/page/css-sprite",
+  "official_answer": "background-position",
+  "answer": "background-position",
+  "method": "rule:雪碧图",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "63": {
+  "id": 63,
+  "title": "svg反爬",
+  "url": "http://127.0.0.1:8001/page/svg",
+  "official_answer": "svg",
+  "answer": "svg",
+  "method": "llm",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "62": {
+  "id": 62,
+  "title": "杂牌军写的前端代码",
+  "url": "http://127.0.0.1:8001/page/h1-6",
+  "official_answer": "杂牌军写的前端代码",
+  "answer": "杂牌军写的前端代码",
+  "method": "llm",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "61": {
+  "id": 61,
+  "title": "xpath盲区",
+  "url": "http://127.0.0.1:8001/page/xpath-blind-area",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "60": {
+  "id": 60,
+  "title": "跨行表格",
+  "url": "http://127.0.0.1:8001/page/rowspan-table",
+  "official_answer": "rowspan",
+  "answer": "rowspan",
+  "method": "llm",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "59": {
+  "id": 59,
+  "title": "表格键值对获取",
+  "url": "http://127.0.0.1:8001/page/table-key-value",
+  "official_answer": "{\"key\": \"value\"}",
+  "answer": "{\"key\": \"value\"}",
+  "method": "rule:键值表",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "58": {
+  "id": 58,
+  "title": "协程，不是携程奥😁",
+  "url": "http://127.0.0.1:8001/page/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "57": {
+  "id": 57,
+  "title": "升级版表格求和",
+  "url": "http://127.0.0.1:8001/page/table-pro",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "56": {
+  "id": 56,
+  "title": "代理ip",
+  "url": "http://127.0.0.1:8001/page/proxy",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "55": {
+  "id": 55,
+  "title": "全\"菊\"搜索",
+  "url": "http://127.0.0.1:8001/page/search",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "54": {
+  "id": 54,
+  "title": "翻页网页2",
+  "url": "http://127.0.0.1:8001/page/pagination-2",
+  "official_answer": "2",
+  "answer": "2",
+  "method": "rule:接口次数",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "53": {
+  "id": 53,
+  "title": "翻页网页",
+  "url": "http://127.0.0.1:8001/page/pagination-1",
+  "official_answer": "{\"data\": \"这是第666页的内容。\"}",
+  "answer": "{\"data\": \"这是第666页的内容。\"}",
+  "method": "rule:翻页api(pagination1/100)",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "52": {
+  "id": 52,
+  "title": "何为动态网页",
+  "url": "http://127.0.0.1:8001/page/ajax",
+  "official_answer": "Fetch/XHR",
+  "answer": "Fetch/XHR",
+  "method": "llm",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "51": {
+  "id": 51,
+  "title": "色图收集者",
+  "url": "http://127.0.0.1:8001/page/lsp-spider",
+  "official_answer": "我只是爱学习",
+  "answer": "我只是爱学习",
+  "method": "llm",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "50": {
+  "id": 50,
+  "title": "新闻收集者",
+  "url": "http://127.0.0.1:8001/page/news",
+  "official_answer": "成功了！",
+  "answer": "成功了！",
+  "method": "rule:请回答",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "49": {
+  "id": 49,
+  "title": "表格求和",
+  "url": "http://127.0.0.1:8001/view/table",
+  "official_answer": "666666",
+  "answer": "666666",
+  "method": "rule:求和",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "48": {
+  "id": 48,
+  "title": "网页编码",
+  "url": "http://127.0.0.1:8001/view/encode",
+  "official_answer": "解决了",
+  "answer": "解决了",
+  "method": "rule:请回答",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "47": {
+  "id": 47,
+  "title": "UA检测",
+  "url": "http://127.0.0.1:8001/view/ua",
+  "official_answer": "获取到了",
+  "answer": "获取到了",
+  "method": "rule:请回答",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "46": {
+  "id": 46,
+  "title": "Hello，爬虫！",
+  "url": "http://127.0.0.1:8001/view/hello-spider",
+  "official_answer": "666",
+  "answer": "666",
+  "method": "rule:计数(Hello, Spider~)",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "91": {
+  "id": 91,
+  "title": "自动化问卷填写",
+  "url": "http://127.0.0.1:8001/page/wenjuan",
+  "official_answer": "自动化",
+  "answer": "自动化",
+  "method": "rule:问卷",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "86": {
+  "id": 86,
+  "title": "题目介绍",
+  "url": "http://127.0.0.1:8001/page/intro",
+  "official_answer": "灵活变通",
+  "answer": "灵活变通",
+  "method": "rule:请回答",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "84": {
+  "id": 84,
+  "title": "爬虫学习路线",
+  "url": "http://127.0.0.1:8001/page/spider-roadmap",
+  "official_answer": "DrissionPage",
+  "answer": "DrissionPage",
+  "method": "rule:dp全称",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "87": {
+  "id": 87,
+  "title": "爬虫买课指南",
+  "url": "http://127.0.0.1:8001/page/course-buying-guide",
+  "official_answer": "有点感觉了",
+  "answer": "有点感觉了",
+  "method": "rule:请回答",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "85": {
+  "id": 85,
+  "title": "爬虫学习指南",
+  "url": "http://127.0.0.1:8001/page/spider-guide",
+  "official_answer": "谷歌浏览器",
+  "answer": "谷歌浏览器",
+  "method": "llm",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "83": {
+  "id": 83,
+  "title": "对爬虫祛魅",
+  "url": "http://127.0.0.1:8001/page/easy-spider",
+  "official_answer": "不害怕！！！",
+  "answer": "不害怕！！！",
+  "method": "rule:请回答",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "90": {
+  "id": 90,
+  "title": "私密博客",
+  "url": null,
+  "official_answer": "",
+  "status": "no_url"
+ },
+ "92": {
+  "id": 92,
+  "title": "我~无法被选中！",
+  "url": "http://127.0.0.1:8001/page/",
+  "official_answer": "",
+  "status": "missing_page",
+  "http_status": "ERR:HTTPError"
+ },
+ "93": {
+  "id": 93,
+  "title": "翻页表格",
+  "url": "http://127.0.0.1:8001/page/pagination-table",
+  "official_answer": "1",
+  "answer": "1",
+  "method": "rule:翻页表格",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "94": {
+  "id": 94,
+  "title": "爬虫项目指南",
+  "url": null,
+  "official_answer": "",
+  "status": "no_url"
+ },
+ "95": {
+  "id": 95,
+  "title": "数据采集系统的通用设计思路",
+  "url": null,
+  "official_answer": "",
+  "status": "no_url"
+ },
+ "96": {
+  "id": 96,
+  "title": "网站数据采集分析思路",
+  "url": null,
+  "official_answer": "",
+  "status": "no_url"
+ },
+ "89": {
+  "id": 89,
+  "title": "数据采集思路总结",
+  "url": null,
+  "official_answer": "",
+  "status": "no_url"
+ },
+ "97": {
+  "id": 97,
+  "title": "监听WebSocket数据",
+  "url": null,
+  "official_answer": null,
+  "status": "no_url"
+ },
+ "98": {
+  "id": 98,
+  "title": "监听接口数据包",
+  "url": null,
+  "official_answer": null,
+  "status": "no_url"
+ },
+ "99": {
+  "id": 99,
+  "title": "认识DrissionPage",
+  "url": null,
+  "official_answer": null,
+  "status": "no_url"
+ },
+ "100": {
+  "id": 100,
+  "title": "GET请求",
+  "url": "http://127.0.0.1:8001/page/hello-get",
+  "official_answer": "了解",
+  "answer": "了解",
+  "method": "rule:请回答",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "101": {
+  "id": 101,
+  "title": "POST请求-JSON请求体",
+  "url": "http://127.0.0.1:8001/page/hello-post-json",
+  "official_answer": "了解",
+  "answer": "了解",
+  "method": "rule:请回答",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ },
+ "102": {
+  "id": 102,
+  "title": "POST请求-表单请求体",
+  "url": "http://127.0.0.1:8001/page/hello-post-form",
+  "official_answer": "了解",
+  "answer": "了解",
+  "method": "rule:请回答",
+  "verified": true,
+  "verify_detail": {
+   "correct": true
+  }
+ }
+}

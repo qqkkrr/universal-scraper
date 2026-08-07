@@ -1,0 +1,21 @@
+{
+  "name": "test_resume",
+  "source": {
+    "type": "http_html",
+    "url": "http://127.0.0.1:8923/page1.html",
+    "row_css": "tr.item",
+    "fields": { "title": { "css": "td.t" }, "url": { "css": "a.dl", "attr": "href" } },
+    "base_url": "http://127.0.0.1:8923"
+  },
+  "pagination": { "strategy": "none" },
+  "record": { "fields": { "title": {"from": "title"}, "url": {"from": "url"} } },
+  "pipeline": [],
+  "detail": {
+    "enabled": true,
+    "url_field": "url",
+    "extract": [ { "name": "detail_body", "type": "regex", "pattern": "data-(\\w+)-\\d+", "group": 1 } ],
+    "concurrency": 2, "interval": 0.1, "checkpoint_every": 1
+  },
+  "output": { "dir": "outputs", "base_name": "test_resume" },
+  "anti_bot": { "min_interval": 0.1, "http_backend": "requests" }
+}
