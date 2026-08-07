@@ -430,6 +430,7 @@ class BrowserFetcher(BaseFetcher):
                 msg = obj.get("message") or ""
                 if t == "done":
                     finished = True
+                    self._notify(f"✅ done pages={obj.get('pages')} html_len={len(html)}")
                     break  # 收到 done 即结束（不再等 EOF——桥的 browser.close 可能挂住）
                 if t in ("login", "verify_required", "login_required"):
                     self._notify(f"⚠️ {msg}")
@@ -441,7 +442,10 @@ class BrowserFetcher(BaseFetcher):
                     self._notify(f"🔎 门卫诊断: url={obj.get('url','')} text_len={obj.get('text_len')} text={str(obj.get('text',''))[:180]}")
                 elif t == "page":
                     f = obj.get("file")
-                    if f and Path(f).exists():
+                    _exists = bool(f) and Path(f).exists()
+                    _size = Path(f).stat().st_size if _exists else 0
+                    self._notify(f"📄 页面 {obj.get('page')} exists={_exists} size={_size}")
+                    if _exists:
                         html = Path(f).read_text(encoding="utf-8", errors="replace")
                 elif t == "stopped":
                     proc.terminate()
