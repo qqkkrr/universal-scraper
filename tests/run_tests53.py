@@ -65,6 +65,31 @@ def main():
     check("渲染页兜底出条目", fb.get("total", 0) >= 1 and fb.get("items", [{}])[0].get("标题") == "产品经理",
           str(fb.get("items"))[:80])
 
+    print("== 多链接行字段去噪（裸 a::text / a::attr 不再拼成脏值）==")
+    from universal_scraper.modules.parsers import ConfigParser as _CP
+    ss = _CP._smart_single
+    check("text 多链接取首个", ss("d\nf", "text") == "d", repr(ss("d\nf", "text")))
+    check("attr 多 URL 取首个", ss("/detail/1.html /file.bin", "attr") == "/detail/1.html",
+          repr(ss("/detail/1.html /file.bin", "attr")))
+    check("描述类多段落保留", ss("第一段\n第二段比较长，包含标点。", "text").startswith("第一段\n第二段"),
+          repr(ss("第一段\n第二段比较长，包含标点。", "text")))
+    html2 = ("<html><body>" +
+             "<div class='item'><span class='t'>dl-1</span><a class='u' href='/detail/1.html'>d</a>" +
+             "<a class='f' href='/file.bin'>f</a></div>" +
+             "<div class='item'><span class='t'>dl-2</span><a class='u' href='/detail/1.html'>d</a>" +
+             "<a class='f' href='/file.bin'>f</a></div></body></html>")
+    resp2 = Response(request=Request(url="https://x/list"), status=200, text=html2, url="https://x/list")
+    p2 = _CP({"type": "html", "row_css": ".item",
+              "fields": {"title": {"css": "a::text"}, "href": {"css": "a::attr(href)"}}}, {})
+    r2 = p2.parse(resp2, None)
+    ok2 = len(r2.items) == 2 and r2.items[0]["title"] == "d" and r2.items[0]["href"] == "/detail/1.html"
+    check("裸a解析端到端去噪", ok2, str(r2.items)[:120])
+    pm = _CP({"type": "html", "row_css": ".item",
+              "fields": {"hrefs": {"css": "a::attr(href)", "multiple": True}}}, {})
+    rm = pm.parse(resp2, None)
+    check("multiple 保留全部", rm.items and rm.items[0]["hrefs"] == "/detail/1.html /file.bin",
+          str(rm.items)[:120])
+
     print()
     print(f"===== 结果: {len(PASS)}/{len(PASS)+len(FAIL)} 通过 =====")
     if FAIL:

@@ -71,23 +71,52 @@ class ConfigParser(BaseParser):
 
     @staticmethod
     def _css_value(el_html: str, fspec: Dict[str, Any], limit: int = 0) -> str:
-        """取字段值：优先显式 attr；兼容 css 里的 ::attr(name) 写法（如 .p1 a::attr(href)）。"""
+        """取字段值：优先显式 attr；兼容 css 里的 ::attr(name) 写法（如 .p1 a::attr(href)）。
+        默认按单值字段处理：多元素拼接明显是"同一行多个链接/标签"时自动只留第一个，
+        避免 title 变成 'd\nf'、href 变成 '/a /b'。字段显式 multiple/join 时保留全部。"""
         from ..selectors import css_attr, css_text, xpath_text, regex_extract
+        multi = bool(fspec.get("multiple") or fspec.get("join"))
         css = fspec.get("css") or ""
         if fspec.get("attr"):
-            return css_attr(el_html, css, fspec["attr"], fspec.get("limit", limit))
+            v = css_attr(el_html, css, fspec["attr"], fspec.get("limit", limit))
+            return v if multi else ConfigParser._smart_single(v, "attr")
         if "::attr(" in css:
             import re as _re
             m = _re.search(r"::attr\(([^)]*)\)", css)
             attr = m.group(1).strip().strip("'\"") if m else "href"
-            return css_attr(el_html, css, attr, fspec.get("limit", limit))
+            v = css_attr(el_html, css, attr, fspec.get("limit", limit))
+            return v if multi else ConfigParser._smart_single(v, "attr")
         if fspec.get("xpath"):
-            return xpath_text(el_html, fspec["xpath"], fspec.get("limit", limit))
+            v = xpath_text(el_html, fspec["xpath"], fspec.get("limit", limit))
+            return v if multi else ConfigParser._smart_single(v, "text")
         if css:
-            return css_text(el_html, css, fspec.get("limit", limit))
+            v = css_text(el_html, css, fspec.get("limit", limit))
+            return v if multi else ConfigParser._smart_single(v, "text")
         if fspec.get("regex"):
             return regex_extract(el_html, fspec["regex"], fspec.get("group", 0))
         return ""
+
+    @staticmethod
+    def _smart_single(v: str, kind: str = "text") -> str:
+        """多元素拼接结果去噪（仅在字段未声明 multiple/join 时启用）：
+        - attr：多个 URL/路径拼成 '/a /b' → 取第一个像 URL 的
+        - text：多个短链接文本拼成 'd\nf' → 取第一个；描述类多段落（长/含标点）保留全文
+        """
+        if not v:
+            return v
+        if kind == "attr" and " " in v:
+            toks = [t for t in v.split() if t]
+            url_like = [t for t in toks if re.match(r"^(https?://|/|#|mailto:|tel:|\./|\.\./)", t)]
+            if len(url_like) >= 2 or (len(toks) > 1 and len(url_like) == len(toks)):
+                return url_like[0]
+            return v
+        if kind == "text" and "\n" in v:
+            parts = [re.sub(r"\s+", " ", x).strip() for x in v.split("\n") if x.strip()]
+            if len(parts) >= 2 and all(len(x) <= 80 and not re.search(r"[。！？；;，]", x)
+                                       and " " not in x for x in parts):
+                return parts[0]
+            return v
+        return v
 
 
     def _html_rows(self, html: str, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
