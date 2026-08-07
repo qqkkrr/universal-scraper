@@ -39,6 +39,10 @@ def main():
     print("== stopJob 拼接正确 ==")
     check("stopJob 拼接", "stopJob(\\'" in js and "+esc(d.id)+" in js)
 
+    print("== 计划配置可编辑 ==")
+    check("可编辑配置框", "a_config_edit" in html)
+    check("确认时读取编辑值", "JSON.parse(editEl.value)" in js and "cfg=JSON.parse(editEl.value)" in js)
+
     print()
     print(f"===== 结果: {len(PASS)}/{len(PASS)+len(FAIL)} 通过 =====")
     if FAIL:
