@@ -82,6 +82,24 @@ def _job_error(job, err: str):
         job["messages"].append(f"❌ 失败：{err}")
 
 
+def run_journal_job(job: dict, site: str, since: int, out: str, workers: int, with_meta: bool):
+    try:
+        from .journals import run as journal_run
+        summary = journal_run(site, since_year=since, out_dir=out or None,
+                              workers=workers, with_meta=with_meta,
+                              log=lambda m: _job_log(job, m))
+        if summary.get("error"):
+            _job_error(job, summary["error"])
+            return
+        _job_done(job, {"total": summary.get("pdf_ok", 0), "fetched": summary.get("articles_total", 0),
+                        "errors": summary.get("pdf_fail", 0),
+                        "files": {"pdf_dir": summary.get("pdf_dir", ""), "csv": summary.get("csv", ""),
+                                  "index": summary.get("index", "")}},
+                  f"🎉 {summary.get('journal','')} 完成：{summary.get('pdf_ok')}/{summary.get('articles_total')} 篇 PDF（{summary.get('total_mb')} MB），输出 {summary.get('out_dir','')}")
+    except Exception as e:
+        _job_error(job, f"{type(e).__name__}: {e}")
+
+
 def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie="",
                   config=None, name="", task_dir=""):
     try:
@@ -305,6 +323,17 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception as e:
                         self._json({"ok": False, "message": f"❌ 测试失败：{type(e).__name__}"})
 
+            elif u.path == "/api/journal/start":
+                site = str(body.get("site", "sytyxb")).strip() or "sytyxb"
+                since = int(body.get("since") or 2024)
+                out = str(body.get("out", "")).strip()
+                workers = max(1, min(int(body.get("workers") or 6), 32))
+                with_meta = bool(body.get("with_meta", True))
+                job = _new_job("journal", f"期刊下载：{site}（{since} 起）")
+                threading.Thread(target=run_journal_job,
+                                 args=(job, site, since, out, workers, with_meta),
+                                 daemon=True).start()
+                self._json({"job": job["id"]})
             elif u.path == "/api/paste/start":
                 url = str(body.get("url", "")).strip()
                 if not url.startswith(("http://", "https://")):

@@ -427,6 +427,19 @@ class BrowserFetcher(BaseFetcher):
             # 记录来源 = 网络捕获（SPA 签名接口，如小红书评论）
             if self.source.get("record_from") == "capture":
                 records = self._records_from_capture(out_dir)
+            # 登录态自动导出 Cookie 串（浏览器登录一次 → HTTP Cookie 直抓复用）
+            try:
+                if Path(storage_state).exists():
+                    import json as _json
+                    _st = _json.loads(Path(storage_state).read_text(encoding="utf-8"))
+                    _cs = _st.get("cookies", []) or []
+                    _pairs = [f"{c.get('name','')}={c.get('value','')}" for c in _cs if c.get("name")]
+                    if _pairs:
+                        _ct = Path(storage_state).with_suffix(".cookie.txt")
+                        _ct.write_text("; ".join(_pairs), encoding="utf-8")
+                        log(f"🍪 登录态已导出 Cookie 串: {_ct}（{len(_pairs)} 个，可用 --cookie 直抓复用）")
+            except Exception:
+                pass
             return records
 
     def _extract(self, html: str) -> List[Dict[str, Any]]:

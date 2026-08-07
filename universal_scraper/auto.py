@@ -590,15 +590,25 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
 
         if round_i < rounds:
             log(f"⚠️ 第 {round_i} 轮 0 条/报错，AI 正在自修复...")
+            _blocks = (result or {}).get("block_stats") or {}
+            _bhint = ""
+            if _blocks:
+                from .antibot import block_summary
+                _bhint = (f"\n反爬拦截统计: {block_summary(_blocks)}。"
+                          f"若含 cloudflare/verify/captcha/429/403：必须换路线——"
+                          f"①source.type 改 browser + login/verify 弹窗人工过验证；"
+                          f"②或建议用户用 CDP 直连已登录浏览器(加 \"cdp\":\"http://127.0.0.1:9222\")；"
+                          f"③有真实代理时用 anti_bot.proxy。不要继续用 http 硬刚。")
             fix_messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": (
                     f"任务：{description}\n"
                     f"上次配置：{json.dumps(cfg, ensure_ascii=False)}\n"
                     f"运行结果：{json.dumps(result, ensure_ascii=False)}\n"
+                    f"{_bhint}\n"
                     f"{_page_context(cfg.get('start_urls', [''])[0]) if cfg.get('start_urls') else ''}\n"
                     f"运行日志（末尾）：\n{last_log[-2000:]}\n\n"
-                    f"请修正配置（选择器/网址/解析方式等），只输出修正后的完整 config.json。"
+                    f"请修正配置（选择器/网址/解析方式/是否升级浏览器等），只输出修正后的完整 config.json。"
                 )},
             ]
             try:

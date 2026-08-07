@@ -868,3 +868,40 @@ Emscripten/混合模式/DTMF/Digest/综合 CTF。
 本轮工具增强：stealth 伪装 navigator.mimeTypes/chrome.runtime.id/Navigator.prototype.webdriver 原型链、
 browser_agent css 提取 count 守卫（消除 30s 卡顿）、msgpack 依赖、手写 wasm(LEB128)、
 AES/PBKDF2/HMAC/DH/TOTP/Digest/SAML 等协议能力。
+
+## 第三十一轮：GitHub 权威方案吸收（第二十二轮强化批次）
+
+研究并吸收 2024–2026 GitHub 顶级爬虫方案（Crawlee / botasaurus / curl_cffi /
+cloudflare-solver / MediaCrawler / DrissionPage / BrowserCluster / Scrapling /
+crawl4ai / Firecrawl），落地 8 项能力 + 20 项新测试（`tests/run_tests33.py` 20/20）：
+
+1. **智能编码探测**（对标 trafilatura/charset_normalizer）：BOM/Content-Type/meta +
+   候选编码打分（utf-8/gb18030/gbk/big5/shift_jis/latin-1）+ charset_normalizer 兜底。
+   修复 GBK 中文站乱码、错标 charset 的站（新浪/老门户等）。
+2. **封禁识别器** `detect_block`（对标 Crawlee block-detection）：识别 Cloudflare 挑战/
+   安全验证/登录墙/验证码/限流/403/429——HTTP 200 但被风控的页面也能识破。
+3. **HTTP 会话池** `session.py`（对标 Crawlee SessionPool）：按域名维护 Cookie/UA/代理，
+   封禁自动换会话（新 UA + 新代理），成功恢复；浏览器登录态自动导出 Cookie 串复用。
+4. **CDP 直连真实浏览器**（对标 MediaCrawler/DrissionPage CDP 模式）：
+   `source.type=browser` + `"cdp":"http://127.0.0.1:9222"`，附着用户已登录的真实 Chrome，
+   真实指纹+真实登录态，京东/知乎/微博/小红书/抖音强风控站最稳。
+5. **Cloudflare/Turnstile 自动点击**（对标 cloudflare-solver）：检测 challenges.cloudflare
+   iframe 自动点"我不是机器人"，失败才转人工。
+6. **curl_cffi TLS 指纹伪装接入精配** `sites.fetch_html`：伪装 Chrome TLS/JA3/HTTP2，
+   反 403；`fetch_bytes` 通用下载（gzip 自动解压）。
+7. **文件下载管线**：`pipelines: [{"type":"download","field":"pdf","dir":"downloads"}]`，
+   通用下载 PDF/图片/附件（断点续传、重命名模板）。
+8. **WebUI 期刊下载页签 + `us cookies` 命令**：浏览器登录态一键转 Cookie 直抓串；
+   WebUI 直接下载期刊全文（沈阳体育学院学报已验证 279/279 篇）。
+
+```bash
+# 期刊一键下载（沈阳体育学院学报 2024 至今）
+python3 -m universal_scraper.cli journal --site sytyxb --since 2024 --out ~/Desktop/沈阳体育学院学报知识库
+# 浏览器登录态 → Cookie 串（登录一次，HTTP 直抓复用）
+python3 -m universal_scraper.cli cookies --session outputs/.session/session.json --domain jd.com
+# CDP 直连（先开 Chrome：退出后执行）
+# /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=9222
+```
+
+AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429/403）时，
+自动建议改为 browser+登录/验证，或 CDP 直连已登录浏览器，不再用 HTTP 硬刚。

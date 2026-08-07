@@ -53,6 +53,7 @@
 <nav>
   <button data-tab="auto" class="active">🤖 一句话任务</button>
   <button data-tab="paste">📋 贴网页爬虫</button>
+  <button data-tab="journal">📚 期刊下载</button>
 </nav>
 <main>
 
@@ -152,6 +153,23 @@
 </div>
 
 <div class="card" style="margin-top:18px">
+<!-- ============ 期刊下载 ============ -->
+<div class="tab" id="tab-journal">
+  <h3>📚 期刊论文批量下载（magtech 系统通用）</h3>
+  <div class="card">
+    <label>期刊站点</label>
+    <input id="j_site" value="sytyxb" placeholder="sytyxb=沈阳体育学院学报；其它 magtech 期刊可扩展">
+    <label>起始年份</label><input id="j_since" type="number" value="2024" min="1990" max="2026">
+    <label>输出目录（默认桌面/沈阳体育学院学报知识库）</label>
+    <input id="j_out" value="/Users/kairanqin/Desktop/沈阳体育学院学报知识库">
+    <label>并发数（1-32）</label><input id="j_workers" type="number" value="8" min="1" max="32">
+    <div class="ck"><input id="j_meta" type="checkbox" checked><span>拉取摘要/关键词元数据（更完整的知识库索引）</span></div>
+    <button class="primary" onclick="startJournal()" id="j_btn">🚀 下载全部 PDF</button>
+    <div class="muted" style="margin-top:8px">流程：自动发现期次 → 文章列表（标题/作者/DOI）→ 摘要/关键词 → PDF 直链 → 全量下载；断点续传，中断后重跑自动跳过已下载。</div>
+  </div>
+  <div id="j_progress" style="display:none"></div>
+</div>
+
   <h4>📂 最近任务（点一下可重新查看）</h4>
   <ul class="recent" id="recent"><li class="muted">暂无</li></ul>
 </div>
@@ -279,6 +297,16 @@ async function startPaste(){
   $('#p_progress').innerHTML='<div class="card"><h4>🚀 已提交，等待启动...</h4></div>';
   $('#p_progress').style.display='block';
 }
+async function startJournal(){
+  const payload={site:$('#j_site').value.trim()||'sytyxb',
+    since:parseInt($('#j_since').value)||2024,
+    out:$('#j_out').value.trim(),
+    workers:parseInt($('#j_workers').value)||8,
+    with_meta:$('#j_meta').checked};
+  startJob('/api/journal/start',payload,$('#j_btn'),$('#j_progress'));
+  $('#j_progress').innerHTML='<div class="card"><h4>🚀 已提交，开始下载...</h4></div>';
+  $('#j_progress').style.display='block';
+}
 async function loadRecent(){
   try{
     const d=await api('/api/jobs');
@@ -287,7 +315,8 @@ async function loadRecent(){
     d.forEach(j=>{
       const li=document.createElement('li');
       const st=j.status==='done'?'✅':j.status==='error'?'❌':'⏳';
-      li.textContent=`${st} [${j.kind==='auto'?'一句话':'贴网页'}] ${j.title} — ${j.summary||j.status}`;
+      const kn=j.kind==='auto'?'一句话':j.kind==='journal'?'期刊下载':'贴网页';
+      li.textContent=`${st} [${kn}] ${j.title} — ${j.summary||j.status}`;
       li.onclick=()=>{ const box=document.createElement('div'); box.style.display='block';
         document.querySelector('#tab-auto').appendChild(box);
         pollJob(j.id,box); };
