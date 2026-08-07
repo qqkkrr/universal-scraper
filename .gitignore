@@ -13,3 +13,5 @@ challenges/learnspider/static/
 challenges/learnspider/*.sql
 challenges/learnspider/db.sqlite3
 challenges/learnspider/__pycache__/
+challenges/results.json
+challenges2/results.json
