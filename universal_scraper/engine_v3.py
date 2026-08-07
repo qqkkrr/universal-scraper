@@ -334,6 +334,17 @@ class EngineV3:
 
     # ---- 主循环 ----
     def run(self) -> Dict[str, Any]:
+        # 任务运行锁：同名任务并发直接报错（先锁再跑，finally 必释放）
+        _lock = _acquire_run_lock(Path(self.task.root))
+        try:
+            return self._run_locked()
+        finally:
+            try:
+                _lock.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _run_locked(self) -> Dict[str, Any]:
         # 桥/一次性取数：不走队列，直接 fetch_all → 流水线 → 存储
         if hasattr(self.fetcher, "fetch_all"):
             return self._run_fetch_all()
@@ -602,6 +613,35 @@ class EngineV3:
         if rows:
             paths = export_rows(rows, self.out_dir, base)
             self.logger.info("导出: " + ", ".join(f"{k}={v.name}" for k, v in paths.items()))
+
+
+def _acquire_run_lock(task_dir: Path) -> Optional[Path]:
+    """对任务目录加运行锁（O_EXCL + PID）：同名任务并发时第二个直接报错，防文件互踩。
+    进程崩溃后锁文件残留：读 PID 判断进程是否存活，死了就接管。"""
+    import os
+    lock = Path(task_dir) / ".running.lock"
+    try:
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return lock
+    except FileExistsError:
+        try:
+            pid = int((lock.read_text(encoding="utf-8") or "").strip())
+            os.kill(pid, 0)  # 存活则抛 PermissionError/成功
+            raise RuntimeError(f"任务目录正在被另一个任务使用（{lock}，pid={pid}）")
+        except (ProcessLookupError, ValueError):
+            try:
+                lock.unlink()
+            except Exception:
+                pass
+            return _acquire_run_lock(task_dir)
+        except PermissionError:
+            raise RuntimeError(f"任务目录正在被另一个任务使用（{lock}）")
+        except RuntimeError:
+            raise
+        except Exception:
+            raise RuntimeError(f"任务目录正在被另一个任务使用（{lock}）")
 
 
 def run_task(task_path: Path, overrides=None, limit=None, resume=False,

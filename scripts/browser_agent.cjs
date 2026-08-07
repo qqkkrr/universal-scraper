@@ -9,6 +9,7 @@
  *     --stealth 1 --network 1 --cookies 1 --viewport '{"width":1280,"height":800}'
  *
  * 输出 JSONL：{type:"result", ...} / {type:"log", ...} / {type:"error", ...}
+ * ⚠️ 仅测试专用（tests/learnspider_solver.py），产品取数请走 modules/fetchers 或 quick。
  */
 const fs = require("node:fs");
 const { chromium } = (() => {
@@ -118,10 +119,11 @@ async function main() {
             entry.body = (await res.text()).slice(0, 20000);
           }
         } catch (e) {}
-        netEvents.push(entry);
+        if (netEvents.length < 200) netEvents.push(entry);  // 网络收集上限，防结果爆炸
       });
       page.on("websocket", (ws) => {
         ws.on("framereceived", (ev) => {
+          if (wsFrames.length >= 500) return;  // WS 帧收集上限
           try { wsFrames.push(JSON.parse(ev.payload)); } catch (e) { wsFrames.push(String(ev.payload).slice(0, 500)); }
         });
       });

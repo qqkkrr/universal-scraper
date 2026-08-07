@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import json
 import sys
 from pathlib import Path
@@ -48,7 +49,8 @@ class Task:
         if not fp.exists():
             self.modules[filename] = None
             return None
-        spec = importlib.util.spec_from_file_location(f"task_{self.name}_{filename[:-3]}", fp)
+        _base = re.sub(r"\W", "_", self.root.name)  # 用目录名（不用 config.name），防非法字符/同名并发
+        spec = importlib.util.spec_from_file_location(f"task_{_base}_{filename[:-3]}", fp)
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
