@@ -133,6 +133,9 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
   if (captchaDir) fs.mkdirSync(captchaDir, { recursive: true });
   const storageState = arg("storageState", null);
+  const debugDir = arg("debugDir", null);
+  if (debugDir) fs.mkdirSync(debugDir, { recursive: true });
+  const snap = async (tag) => { if (debugDir) { try { await page.screenshot({ path: path.join(debugDir, tag + "_" + Date.now() + ".png") }); } catch (e) {} } };
   const scrollCount = parseInt(arg("scrollCount", "0"), 10);
   const scrollWait = parseInt(arg("scrollWait", "2000"), 10);
   const loginTimeout = parseInt(arg("loginTimeout", "600000"), 10);
@@ -256,11 +259,13 @@ async function main() {
         const hitLogin = loginTxt.some(m => txt.includes(m));
         if (hitMarker && !notifGate) {
           notifGate = true;
+          await snap("verify");
           try { await page.bringToFront(); } catch (e) {}
           out({ type: "verify_required", message: "检测到验证码/验证页：请在浏览器中完成滑块/点选验证，完成后自动继续" });
         }
         if (hitLogin && !notifLogin) {
           notifLogin = true;
+          await snap("login");
           try { await page.bringToFront(); } catch (e) {}
           out({ type: "login_required", message: "检测到登录页：请在浏览器中扫码或账号登录，登录后自动继续" });
         }
@@ -272,7 +277,10 @@ async function main() {
         await sleep(pollMs);
       }
       if (!done) {
-        out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）：请确保在弹出的窗口中完成滑块验证和扫码/账号登录" });
+        let _u = "", _tt = "";
+        try { _u = page.url() || ""; _tt = await page.title(); } catch (e) {}
+        await snap("timeout");
+        out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）。当前页面: " + _u + " | 标题: " + _tt + "。请确保在弹出的窗口中完成滑块验证和扫码/账号登录" });
         process.exit(1);
       }
       if (storageState) {

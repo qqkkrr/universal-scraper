@@ -333,7 +333,8 @@ class BrowserFetcher(BaseFetcher):
                    "--headless", "0",
                    "--storageState", str(ss),
                    "--scrollCount", str(self.config.get("scroll_count", 0)),
-                   "--scrollWait", str(self.config.get("scroll_wait_ms", 2000))]
+                   "--scrollWait", str(self.config.get("scroll_wait_ms", 2000)),
+                   "--debugDir", str(Path(self.scripts_dir).parent / "outputs" / ".debug")]
             env = {**os.environ, "NODE_PATH": _NODE_PATH}
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, encoding="utf-8", env=env)
