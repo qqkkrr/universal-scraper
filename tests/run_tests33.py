@@ -216,6 +216,14 @@ def main():
     r = box.get("r") or {}
     check("stop signal result", "total" in r, str(r)[:120])
 
+    print("== 免费代理解析 ==")
+    from universal_scraper.proxy_fetch import _parse
+    pj = json.dumps({"data": [{"ip": "1.2.3.4", "port": "8080", "protocols": ["http"]},
+                              {"ip": "5.6.7.8", "port": "3128", "protocols": ["https"]}]})
+    ps = _parse(pj)
+    check("proxy parse json", "http://1.2.3.4:8080" in ps and "http://5.6.7.8:3128" in ps, str(ps))
+    check("proxy parse text", "http://9.9.9.9:80" in _parse("9.9.9.9:80"), str(_parse("9.9.9.9:80")))
+
     print("== 期刊期次解析 ==")
     from universal_scraper.journals import parse_issue_html
     sample = '''

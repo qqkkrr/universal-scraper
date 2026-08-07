@@ -180,6 +180,11 @@ def main() -> int:
     jp.add_argument("--workers", type=int, default=6, help="并发数")
     jp.add_argument("--no-meta", action="store_true", help="跳过摘要/关键词拉取（更快）")
 
+    pr_p = sub.add_parser("proxy", help="🔄 免费代理池自动构建（抓取+验证+入库）")
+    pr_p.add_argument("--refresh", action="store_true", help="抓取公开源代理并验证")
+    pr_p.add_argument("--out", default="outputs/proxies.txt", help="输出文件")
+    pr_p.add_argument("--workers", type=int, default=30)
+
     ck_p = sub.add_parser("cookies", help="🍪 浏览器登录态 → Cookie 直抓串（登录一次，HTTP 直抓复用）")
     ck_p.add_argument("--session", default="outputs/.session/session.json", help="storageState JSON 路径")
     ck_p.add_argument("--domain", default="", help="按域名过滤，如 jd.com / dianping.com / weibo.com")
@@ -349,6 +354,12 @@ def main() -> int:
             print(f"  {s['status']} {s['name']:<6} {s['domain']:<22} {s['desc']}  [{s['difficulty']}]")
         return 0
 
+    if args.cmd == "proxy":
+        from .proxy_fetch import refresh as _pf_refresh
+        r = _pf_refresh(out=args.out, workers=args.workers)
+        print(json.dumps(r, ensure_ascii=False))
+        return 0 if r.get("ok", 0) > 0 else 1
+
     if args.cmd == "cookies":
         from .core import smart_decode  # noqa
         import json as _json
@@ -382,6 +393,7 @@ def main() -> int:
         print(f"（{len(pairs)} 个 cookie，域过滤={dom or '全部'}）", file=sys.stderr)
         return 0
 
+    if args.cmd == "journal":
         from .journals import run as journal_run
         summary = journal_run(args.site, since_year=args.since, out_dir=args.out or None,
                               workers=args.workers, with_meta=not args.no_meta)
@@ -390,6 +402,7 @@ def main() -> int:
             return 1
         return 0
 
+    if args.cmd == "dianping":
         from .dianping import run
         cookie = args.cookie
         if args.cookie_file:

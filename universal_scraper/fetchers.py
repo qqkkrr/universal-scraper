@@ -65,6 +65,14 @@ class HttpFetcher(BaseFetcher):
         self._last_proxy = None
         # HTTP 会话池（Crawlee SessionPool 思路）：按域名 Cookie/UA/代理，封禁自动换会话
         sp_proxies = list(anti.get("proxies") or [])
+        if not sp_proxies and anti.get("proxies_file"):
+            try:
+                pf = Path(anti["proxies_file"]).expanduser()
+                if pf.exists():
+                    sp_proxies = [ln.strip() for ln in pf.read_text(encoding="utf-8").splitlines() if ln.strip() and ":" in ln]
+                    log(f"🔄 已加载代理文件 {pf}: {len(sp_proxies)} 个")
+            except Exception as e:
+                log(f"⚠️ 代理文件加载失败: {e}")
         if not sp_proxies and anti.get("proxy"):
             sp_proxies = [anti["proxy"]]
         self.sessions = SessionPool(proxies=sp_proxies or None,

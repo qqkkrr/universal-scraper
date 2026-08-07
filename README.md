@@ -905,3 +905,9 @@ python3 -m universal_scraper.cli cookies --session outputs/.session/session.json
 
 AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429/403）时，
 自动建议改为 browser+登录/验证，或 CDP 直连已登录浏览器，不再用 HTTP 硬刚。
+
+第三十一轮补充（免费代理 + 一键停止 + 多指纹轮换）：
+- `us proxy --refresh`：从公开源（geonode 等）抓免费代理并验证入库（免费代理大多已失效，
+  仅应急；强风控站请用付费住宅代理）。任务配置 anti_bot.proxies_file 指向代理文件即可自动轮换。
+- WebUI 一键停止：执行中任务出现 ⏹ 停止任务 按钮（写 .stop 标志，引擎优雅保存检查点退出）。
+- curl_cffi 指纹轮换：`impersonate: "auto"` 时每次请求随机 Chrome/Edge/Safari/Firefox TLS 指纹。
