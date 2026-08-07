@@ -22,7 +22,7 @@ def main():
     cjs = (ROOT / "scripts" / "browser_generic.cjs").read_text(encoding="utf-8")
     print("== 登录门卫文本截断 ==")
     check("轮询取 5000 字符", "innerText.slice(0, 5000)" in cjs)
-    check("不再取 500 字符", "innerText.slice(0, 500)" not in cjs)
+    check("500 截断仅剩登录预检测 1 处", cjs.count("innerText.slice(0, 500)") == 1, str(cjs.count("innerText.slice(0, 500)")))
     check("兜底阈值仍 >2000", "txtLen > 2000" in cjs)
 
     print()
