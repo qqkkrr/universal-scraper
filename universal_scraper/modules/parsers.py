@@ -97,6 +97,10 @@ class ConfigParser(BaseParser):
         else:
             from ..selectors import css_elements, _lxml_html_tostring
             els = css_elements(html, cfg.get("row_css") or "body")
+        if not els and cfg.get("row_css"):
+            # 自愈兜底：配置的选择器没匹配到（AI 猜错 class 等），
+            # 自动找页面里重复最多的 li/div/tr（真实列表行）做通用提取，避免"能抓却0条"
+            els = self._self_heal_rows(html)
         out = []
         for el in els:
             el_html = el if isinstance(el, str) else _lxml_html_tostring(el)
@@ -108,6 +112,48 @@ class ConfigParser(BaseParser):
                     row[name] = el_html
             out.append(row)
         return out
+
+    def _self_heal_rows(self, html: str) -> List[Any]:
+        """通用兜底：统计 li/div/tr 里出现最多的 class，取该重复块作为列表行。"""
+        from collections import Counter
+        try:
+            from lxml import html as _lh
+            doc = _lh.fromstring(html)
+        except Exception:
+            return []
+        counts = Counter()
+        for tag in ("li", "div", "tr"):
+            for el in doc.cssselect(tag):
+                cls = (el.get("class") or "").strip()
+                if cls:
+                    counts[(tag, cls)] += 1
+        best = None
+        best_n = 0
+        for (tag, cls), n in counts.items():
+            if n >= 3 and n > best_n:
+                # 该重复块里至少要有链接，才像列表行
+                try:
+                    if doc.cssselect(f"{tag}.{cls} a[href]"):
+                        best, best_n = (tag, cls), n
+                except Exception:
+                    pass
+        if best is None:
+            return []
+        tag, cls = best
+        els = doc.cssselect(f"{tag}.{cls}")
+        # 去重（嵌套重复块只取最外层）
+        out = []
+        for el in els:
+            txt = (el.text_content() or "").strip()
+            a = el.cssselect("a[href]")
+            link = a[0].get("href", "") if a else ""
+            title = (a[0].text_content() or "").strip() if a else (txt[:80])
+            if not title and not link:
+                continue
+            if any(el is not o and el in o.iter() for o in out):
+                continue
+            out.append(el)
+        return out[:200]
 
     def _map_html(self, html: str, fields: Dict[str, Any]) -> Dict[str, Any]:
         from ..selectors import css_text, css_attr, xpath_text

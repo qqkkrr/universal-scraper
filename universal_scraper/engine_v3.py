@@ -158,7 +158,7 @@ class EngineV3:
         self.max_concurrency = int(queue_cfg.get("max_concurrency", 4))
         self.rules = self.config.get("rules", [])
 
-        self.stats = {"fetched": 0, "items": 0, "errors": 0}
+        self.stats = {"fetched": 0, "items": 0, "errors": 0, "skipped": 0}
         self.resume = resume
         self.state_file = out_dir / f".state_{task.name}.json"
         self.pending_file = out_dir / f".pending_{task.name}.json"
@@ -170,6 +170,7 @@ class EngineV3:
         out_cfg = self.config.get("output", {}) or {}
         self._spool_threshold = int(out_cfg.get("spool_threshold", 50000))
         self._spooling = False
+        self._last_page_saved = False
         self._spool_start = 0
         self._spool_path: Optional[Path] = None
         try:
@@ -253,6 +254,13 @@ class EngineV3:
             pname = self.route_parser(resp.url or req.url)
             parser = self.get_parser(pname)
             result = parser.parse(resp, self.ctx)
+            # 0 条且是真实内容页：保存渲染后的页面（供 LLM 兜底抽取，登录/JS 页必须用渲染结果）
+            if not result.items and len(resp.text or "") > 2000 and not self._last_page_saved:
+                try:
+                    (Path(self.task.root) / "last_page.html").write_text(resp.text, encoding="utf-8")
+                    self._last_page_saved = True
+                except Exception:
+                    pass
             # 入队新请求（递归）：follow=false 规则 + robots.txt 过滤
             for new_req in result.requests:
                 if not new_req.depth:
@@ -301,6 +309,13 @@ class EngineV3:
                 if req.key() in self._retries:
                     del self._retries[req.key()]  # 清理，防长任务内存累计
         except Exception as e:
+            from .protocols import PermanentFetchError
+            if isinstance(e, PermanentFetchError):
+                # 永久性 HTTP 错误（404/410…）：跳过不计错、不重试（重试无意义，还会拖慢任务）
+                with self._lock:
+                    self.stats["skipped"] += 1
+                self.logger.warn(f"跳过（{e.status} 永久失败）: {req.url}")
+                return
             with self._lock:
                 self.stats["errors"] += 1
                 attempts = self._retries.get(req.key(), 0) + 1
@@ -423,6 +438,11 @@ class EngineV3:
                 except Exception as e:
                     self.logger.warn(f"中断时存储关闭失败: {e}")
                 self._finalize()
+                if self._seen_store is not None:
+                    try:
+                        self._seen_store.flush()
+                    except Exception:
+                        pass
                 self._save_state()
             except Exception as e:
                 self.logger.warn(f"中断保存失败: {e}")
@@ -436,6 +456,12 @@ class EngineV3:
                     mw.flush()
                 except Exception:
                     pass
+        # 增量去重批量写：任务结束必须 flush，否则 <flush_every 条的小任务已见记录不落盘
+        if self._seen_store is not None:
+            try:
+                self._seen_store.flush()
+            except Exception:
+                pass
         if hasattr(self.fetcher, "close"):
             try:
                 self.fetcher.close()
@@ -444,8 +470,17 @@ class EngineV3:
         self._finalize()
         self._save_state()
         _done_msg = f"完成: 抓取 {self.stats['fetched']} | 条目 {self.stats['items']} | 错误 {self.stats['errors']}"
+        if self.stats.get("skipped"):
+            _done_msg += f" | 跳过 {self.stats['skipped']}"
         self.logger.info(_done_msg)
         self._notify(_done_msg)
+        _drops = dict(getattr(self.pipeline, "dropped", {}) or {})
+        _skips = dict(getattr(self.pipeline, "skipped", {}) or {})
+        if _drops or _skips:
+            _pd = "；".join(f"{k}={v}" for k, v in list(_drops.items()) + list(_skips.items()))
+            _pm = f"流水线统计: {_pd}"
+            self.logger.info(_pm)
+            self._notify(_pm)
         blocks = dict(self.anti.get("_block_stats") or {})
         if blocks:
             from .antibot import block_summary
@@ -454,7 +489,9 @@ class EngineV3:
             self._notify(_bs)
         return {"name": self.task.name, "total": self.stats["items"],
                 "fetched": self.stats["fetched"], "errors": self.stats["errors"],
-                "block_stats": blocks}
+                "skipped": self.stats.get("skipped", 0),
+                "block_stats": blocks,
+                "pipeline_drops": _drops, "pipeline_skips": _skips}
 
     def _run_pool(self) -> None:
         """长驻 worker 池：固定 max_concurrency 线程，持续 pop→handle（比每批建池更快）。"""

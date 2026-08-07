@@ -29,6 +29,8 @@ class Pipeline(BasePipeline):
     def __init__(self, config, task_vars):
         super().__init__(config, task_vars)
         self.steps = config or []
+        self.dropped = {}
+        self.skipped = {}
 
     def process(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         for step in self.steps:
@@ -47,14 +49,20 @@ class Pipeline(BasePipeline):
                 if op == "regex" and not re.search(step.get("pattern", ""), val):
                     return None
                 if op == "between":
+                    raw = item.get(field)
+                    if raw in (None, ""):
+                        self.skipped[f"filter:{field}:日期缺失"] = self.skipped.get(f"filter:{field}:日期缺失", 0) + 1
+                        continue
                     try:
-                        v = float(str(item.get(field)).replace(",", ""))
+                        v = float(str(raw).replace(",", ""))
                         lo = float(step.get("min", float("-inf")))
                         hi = float(step.get("max", float("inf")))
                         if not (lo <= v < hi):
+                            self.dropped[f"filter:{field}:区间外"] = self.dropped.get(f"filter:{field}:区间外", 0) + 1
                             return None
                     except (ValueError, TypeError):
-                        return None
+                        self.skipped[f"filter:{field}:无法解析"] = self.skipped.get(f"filter:{field}:无法解析", 0) + 1
+                        continue
             elif t == "dedup":
                 key = step.get("key", "id")
                 if key == "content_hash":
@@ -158,11 +166,11 @@ class Pipeline(BasePipeline):
                                              tzinfo=_dt.timezone(_dt.timedelta(hours=8)))
                         else:
                             d = None
-                    if d is not None:
-                        ts = int(d.timestamp())
                 except Exception:
-                    ts = 0
-                item[out_f] = ts
+                    d = None
+                if d is not None:
+                    item[out_f] = int(d.timestamp())
+                # 解析失败/无日期：不写字段（保持缺失，让 between 跳过而不是全丢）
             elif t == "split":
                 sep = step.get("sep", ",")
                 item[step["field"]] = [x.strip() for x in str(item.get(step["field"]) or "").split(sep) if x.strip()]

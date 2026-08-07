@@ -108,6 +108,11 @@ def _validate_and_fix(cfg: dict) -> dict:
     cfg.setdefault("pipelines", [])
     if not cfg.get("rules"):
         cfg["rules"] = [{"match": "contains", "pattern": "/", "parser": "default"}]
+    # 浏览器任务默认滚动（懒加载站不滚动=0条）：未显式配置时给 4 次
+    if (cfg.get("source") or {}).get("type") == "browser":
+        _src = cfg["source"]
+        _src.setdefault("scroll_count", 4)
+        _src.setdefault("scroll_wait_ms", 800)
     cfg.setdefault("parsers", {})
     # source.type 规范化
     st = cfg["source"].get("type", "http")
@@ -314,20 +319,26 @@ def _page_context(url: str, max_chars: int = 2500) -> str:
     return ""
 
 
-def _llm_fallback_extract(description: str, cfg: dict, log) -> dict:
-    """CSS/规则解析失败时，用 LLM 直接从页面 Markdown 抽取与任务匹配的条目（ScrapeGraphAI 路线，
-    拓宽能力边界：选择器写不对/页面结构怪也能出数据）。仅当页面有内容且未被拦截时启用。"""
-    import urllib.request
+def _llm_fallback_extract(description: str, cfg: dict, log,
+                         rendered_html: Optional[str] = None,
+                         rendered_url: str = "") -> dict:
+    """CSS/规则解析失败时，用 LLM 直接从页面 Markdown 抽取与任务匹配的条目（ScrapeGraphAI 路线）。
+    rendered_html：引擎在浏览器抓取后保存的"渲染完成"页面（登录/JS 页必须用它，裸 HTML 会拿到验证页）。"""
     import hashlib
     urls = cfg.get("start_urls") or []
     if not urls:
         return {"items": [], "total": 0, "files": {}}
     url = urls[0]
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        raw = urllib.request.urlopen(req, timeout=8).read(200000).decode("utf-8", "ignore")
-    except Exception:
-        return {"items": [], "total": 0, "files": {}}
+    raw = ""
+    if rendered_html:
+        raw = rendered_html
+    else:
+        import urllib.request
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            raw = urllib.request.urlopen(req, timeout=8).read(200000).decode("utf-8", "ignore")
+        except Exception:
+            return {"items": [], "total": 0, "files": {}}
     head = raw[:3000]
     if any(k in head for k in _AUTH_HINTS):
         log("⛔ 页面被登录/验证码拦截，LLM 兜底跳过（先解决登录）")
@@ -656,7 +667,17 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     # 常规解析未命中但页面有内容 → LLM 直接抽取兜底（扩能力边界）
     if not (total > 0 and real):
         log("🧠 常规解析未命中，尝试 LLM 直接抽取（兜底）...")
-        fb = _llm_fallback_extract(description, cfg, log)
+        _rendered = ""
+        _rurl = ""
+        try:
+            _lp = Path(task_dir) / "last_page.html"
+            if _lp.exists() and _lp.stat().st_size > 2000:
+                _rendered = _lp.read_text(encoding="utf-8", errors="replace")
+                _rurl = (cfg.get("start_urls") or [""])[0]
+        except Exception:
+            pass
+        fb = _llm_fallback_extract(description, cfg, log,
+                                   rendered_html=_rendered or None, rendered_url=_rurl)
         if fb.get("items"):
             sample = fb["items"][:5]
             files = fb["files"]
@@ -846,7 +867,17 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
 
     if not (total > 0 and real):
         log("🧠 常规解析未命中，尝试 LLM 直接抽取（兜底）...")
-        fb = _llm_fallback_extract(description, config, log)
+        _rendered = ""
+        _rurl = ""
+        try:
+            _lp = Path(task_dir) / "last_page.html"
+            if _lp.exists() and _lp.stat().st_size > 2000:
+                _rendered = _lp.read_text(encoding="utf-8", errors="replace")
+                _rurl = (config.get("start_urls") or [""])[0]
+        except Exception:
+            pass
+        fb = _llm_fallback_extract(description, config, log,
+                                   rendered_html=_rendered or None, rendered_url=_rurl)
         if fb.get("items"):
             sample = fb["items"][:5]
             files = fb["files"]

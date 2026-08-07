@@ -70,7 +70,7 @@ def main():
     print("== #3/#4 WebUI 前端 ==")
     html_src = (ROOT / "webui" / "index.html").read_text(encoding="utf-8")
     check("api() 有 JSON 兜底", "响应解析失败" in html_src and "try { return await r.json(); }" in html_src)
-    check("stop 按钮带 jobId", "stopJob('${esc(d.id)}')" in html_src)
+    check("stop 按钮带 jobId", "stopJob(\\'" in html_src and "+esc(d.id)+" in html_src)
     check("stopJob 接受 jobId", "async function stopJob(jobId)" in html_src)
 
     print("== #1 engine 无 _custom_parsers 死代码 ==")

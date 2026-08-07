@@ -114,21 +114,29 @@ class HttpFetcher(BaseFetcher):
         ok = bool(res.get("ok"))
         bd = detect_block(res.get("status", 0), res.get("text", ""), res.get("headers"), url)
         # login 登录墙是"预期状态"不是会话污染：只提示不轮换（否则需要登录的 API 每次换会话丢 cookie）
-        blocked = bd["kind"] != "none" and bd["kind"] != "login"
+        # http_error（4xx/5xx 通用错误）也不是"反爬拦截"：交给下方按 4xx 永久跳过 / 5xx 重试处理
+        blocked = bd["kind"] not in ("none", "login", "http_error")
         self.sessions.report(sess, ok=ok and not blocked, blocked=blocked)
         if blocked:
             if self.anti.get("_block_stats") is not None:
                 self.anti["_block_stats"][bd["kind"]] = self.anti["_block_stats"].get(bd["kind"], 0) + 1
             from ..protocols import RateLimitedError
-            raise RateLimitedError(req.url, retry_after=0, status=res.get("status", 403),
+            status = res.get("status", 0)
+            # 429 必须带上服务端 Retry-After（秒或 HTTP-date），引擎才能按它精确调度
+            ra = self._retry_after(res.get("headers") or {}) if status == 429 else 0.0
+            raise RateLimitedError(req.url, retry_after=ra, status=status or 403,
                                    detail=f"反爬拦截[{bd['kind']}] {bd['detail']}")
         # 请求失败：抛错交给引擎队列重试（客户端内部重试耗尽后不再静默吞掉）
         if not ok:
             status = res.get("status", 0)
-            from ..protocols import RateLimitedError
+            from ..protocols import RateLimitedError, PermanentFetchError
             if status == 429:
                 ra = self._retry_after(res.get("headers") or {})
                 raise RateLimitedError(req.url, retry_after=ra, status=429)
+            # 4xx 客户端错误（除 403 反爬/408 超时/429 限流）是永久性失败：重试无意义，引擎跳过不计错
+            if 400 <= status < 500:
+                raise PermanentFetchError(req.url, status=status,
+                                          detail=str(res.get("text", ""))[:200])
             raise RuntimeError(f"HTTP {status}: {str(res.get('text', ''))[:200]}")
         body = res.get("body", b"")
         text = res.get("text", "")

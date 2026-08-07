@@ -106,8 +106,9 @@ def main():
     # 2. fetch --proxy 参数（localhost 直连仍成功）
     print("[2/15] fetch --proxy 参数不崩")
     p = run_cli(["fetch", f"{base}/p1.html", "--proxy", "http://127.0.0.1:1"])
-    ok = p.returncode == 0 and "page 1" in p.stdout
-    check("u2_proxy_arg", ok, f"rc={p.returncode}")
+    # 死代理必须失败并报错（不能静默直连成功）；能干净报错即通过
+    ok = p.returncode != 0 and ("❌" in p.stderr or "失败" in p.stderr or "错误" in p.stderr)
+    check("u2_proxy_arg", ok, f"rc={p.returncode} stderr={p.stderr[:60]}")
 
     # 3. source.headers + cookies + query 三合一（/cookies 校验 cookie）
     print("[3/15] source.headers + cookies + query 三合一")

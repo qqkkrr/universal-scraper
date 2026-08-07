@@ -245,7 +245,7 @@ def download_files(rows, dl_cfg, anti, out_dir: Path, logger: Optional[Logger] =
         if not url:
             return 0
         try:
-            resp = http.get(url, max_size=size_limit)
+            resp = http.get(url, max_size=size_limit + 1)  # +1 才能检出"超限被截断"
             if not resp.get("ok"):
                 return 0
             body = resp.get("body", b"")

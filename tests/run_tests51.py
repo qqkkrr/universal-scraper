@@ -23,7 +23,7 @@ def main():
     print("== 登录门卫文本截断 ==")
     check("轮询取 5000 字符", "innerText.slice(0, 5000)" in cjs)
     check("500 截断仅剩登录预检测 1 处", cjs.count("innerText.slice(0, 500)") == 1, str(cjs.count("innerText.slice(0, 500)")))
-    check("兜底阈值仍 >2000", "txtLen > 2000" in cjs)
+    check("兜底阈值 800", "txtLen > 800" in cjs)
 
     print()
     print(f"===== 结果: {len(PASS)}/{len(PASS)+len(FAIL)} 通过 =====")

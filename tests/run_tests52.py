@@ -29,16 +29,14 @@ def main():
     now = 1785945600  # 2026-08-06 00:00 CST
     pipe = Pipeline([{"type": "parse_date", "field": "publish_date", "out": "ts", "now": now}], {})
     cases = {"2026-08-06": 1785945600, "今天": 1785945600, "昨天": 1785859200,
-             "1天前": 1785859200, "3小时前": 1785934800, "未知文案": 0}
+             "1天前": 1785859200, "3小时前": 1785934800, "未知文案": None}
     for v, want in cases.items():
         got = pipe.process({"publish_date": v}).get("ts")
         check(f"parse_date {v}", got == want, f"got={got} want={want}")
 
-    print("== Boss直聘配置 ==")
-    import json
-    cfg = json.loads((ROOT / "tasks" / "auto_ecec9025c2" / "config.json").read_text(encoding="utf-8"))
-    check("配置带滚动", cfg.get("source", {}).get("scroll_count", 0) >= 1)
-    check("配置日期管线", any(p.get("type") == "parse_date" for p in cfg.get("pipelines", [])))
+    print("== parse_date 注册 ==")
+    import universal_scraper.config as cfg_mod
+    check("parse_date 在流水线白名单", "parse_date" in cfg_mod.ALL_PIPELINE_TYPES)
 
     print()
     print(f"===== 结果: {len(PASS)}/{len(PASS)+len(FAIL)} 通过 =====")

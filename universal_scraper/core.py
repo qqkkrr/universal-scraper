@@ -650,6 +650,7 @@ class RequestsClient:
         elif "User-Agent" not in h:
             h["User-Agent"] = DEFAULT_UA
 
+        last_status = 0
         for attempt in range(1, self.max_retries + 1):
             self._throttle()
             try:
@@ -658,6 +659,19 @@ class RequestsClient:
                 if proxy:
                     kw["proxies"] = {"http": proxy, "https": proxy}
                 resp = self.session.request(method.upper(), url, **kw)
+                if resp.status_code == 429:
+                    _t = smart_decode(raw if 'raw' in dir() else resp.content, {k.lower(): v for k, v in resp.headers.items()})
+                    return {"ok": False, "status": 429, "body": resp.content, "text": _t,
+                            "json": None, "url": resp.url,
+                            "headers": {k.lower(): v for k, v in resp.headers.items()},
+                            "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None)}
+                if resp.status_code in (403, 500, 502, 503, 504):
+                    last_err = f"HTTP {resp.status_code}"
+                    last_status = resp.status_code
+                    wait = self.backoff_base ** attempt + random.uniform(0, 1)
+                    log(f"  请求失败 {resp.status_code}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
+                    time.sleep(wait)
+                    continue
                 if max_size:
                     chunks = []
                     total = 0
@@ -669,11 +683,12 @@ class RequestsClient:
                     raw = b"".join(chunks)[:max_size]
                 else:
                     raw = resp.content
-                if resp.status_code in (429, 403, 500, 502, 503, 504):
-                    wait = self.backoff_base ** attempt + random.uniform(0, 1)
-                    log(f"  请求失败 {resp.status_code}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
-                    time.sleep(wait)
-                    continue
+                if resp.status_code >= 400 and not (allow_html_404 and resp.status_code == 404):
+                    _t = smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()})
+                    return {"ok": False, "status": resp.status_code, "body": raw, "text": _t,
+                            "json": None, "url": resp.url,
+                            "headers": {k.lower(): v for k, v in resp.headers.items()},
+                            "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None)}
                 parsed = None
                 ctype = resp.headers.get("Content-Type", "")
                 if "json" in ctype or raw[:1] in (b"{", b"["):
@@ -691,7 +706,7 @@ class RequestsClient:
                 wait = self.backoff_base ** attempt
                 log(f"  网络异常: {e}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
                 time.sleep(wait)
-        return {"ok": False, "status": 0, "body": b"", "text": "requests 请求失败", "json": None, "url": url,
+        return {"ok": False, "status": last_status, "body": b"", "text": "requests 请求失败", "json": None, "url": url,
                 "headers": {}}
 
     def get(self, url: str, **kw) -> Dict[str, Any]:
@@ -773,6 +788,7 @@ class CurlCffiClient:
         if self.cookies:
             kw["cookies"] = self.cookies
         last_err = ""
+        last_status = 0
         for attempt in range(1, self.max_retries + 1):
             self._throttle()
             try:
@@ -790,11 +806,27 @@ class CurlCffiClient:
                     raw = b"".join(chunks)[:max_size]
                 else:
                     raw = resp.content
-                if resp.status_code in (429, 403, 500, 502, 503, 504):
+                if resp.status_code == 429:
+                    # 429 不内部重试：立即交回，让引擎按 Retry-After 调度（保留状态码）
+                    _t = smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()})
+                    return {"ok": False, "status": 429, "body": raw, "text": _t,
+                            "json": None, "url": str(resp.url),
+                            "headers": {k.lower(): v for k, v in resp.headers.items()},
+                            "raw_headers": resp.headers}
+                if resp.status_code in (403, 500, 502, 503, 504):
+                    last_err = f"HTTP {resp.status_code}"
+                    last_status = resp.status_code
                     wait = self.backoff_base ** attempt + random.uniform(0, 1)
                     log(f"  curl_cffi 请求失败 {resp.status_code}，{wait:.1f}s 后重试", "WARN")
                     time.sleep(wait)
                     continue
+                if resp.status_code >= 400 and not (allow_html_404 and resp.status_code == 404):
+                    # 非 2xx/3xx 视为失败（404 仅在 allow_html_404 时接受）——与 urllib 后端一致
+                    _t = smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()})
+                    return {"ok": False, "status": resp.status_code, "body": raw, "text": _t,
+                            "json": None, "url": str(resp.url),
+                            "headers": {k.lower(): v for k, v in resp.headers.items()},
+                            "raw_headers": resp.headers}
                 parsed = None
                 # 一律从 raw 解析 JSON：stream 模式下 resp.json() 读不到已消费的流
                 if "json" in resp.headers.get("Content-Type", "") or raw[:1] in (b"{", b"["):
@@ -814,7 +846,7 @@ class CurlCffiClient:
                 wait = self.backoff_base ** attempt
                 log(f"  curl_cffi 网络异常: {e}，{wait:.1f}s 后重试", "WARN")
                 time.sleep(wait)
-        return {"ok": False, "status": 0, "body": b"", "text": last_err,
+        return {"ok": False, "status": last_status, "body": b"", "text": last_err,
                 "json": None, "url": url, "headers": {}}
 
     @property

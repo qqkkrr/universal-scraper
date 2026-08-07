@@ -144,6 +144,19 @@ class BaseCaptchaSolver:
         raise NotImplementedError
 
 
+class PermanentFetchError(RuntimeError):
+    """永久性 HTTP 错误（404/410 等客户端错误）：重试无意义，引擎应跳过而非计错。"""
+
+    def __init__(self, url: str = "", status: int = 404, detail: str = ""):
+        self.url = url
+        self.status = int(status)
+        self.detail = detail
+        _msg = f"永久错误 {status}: {url}"
+        if detail:
+            _msg += f" | {detail}"
+        super().__init__(_msg)
+
+
 class RateLimitedError(RuntimeError):
     """服务端限流（429 等）。retry_after: 服务端要求等待的秒数（可 0）。"""
 
