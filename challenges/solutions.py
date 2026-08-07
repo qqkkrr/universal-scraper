@@ -128,85 +128,89 @@ def s7():
     return r2["extracted"].get("out")
 
 
-# ---------- 8: 图形验证码 OCR（PIL 模板匹配） ----------
+# ---------- 8: 图形验证码 OCR（PIL 模板匹配，最多重试 4 次抗抖动） ----------
 @solve(8)
 def s8():
     from PIL import Image, ImageDraw, ImageFont
     import urllib.request
-    r = browser_extract(f"{BASE}/c/8", [{"name": "cid", "js": "document.querySelector('#cap').src.split('cid=')[1]"}], wait_ms=400)
-    cid = r["extracted"].get("cid")
-    if not cid:
-        return None
-    img = Image.open(io.BytesIO(urllib.request.urlopen(f"{BASE}/c/8/img?cid={cid}", timeout=10).read())) \
-        .convert("L")
-    import numpy as np
-    arr = np.array(img) < 128
-    h, w = arr.shape
-    # 4-邻域连通域标记（BFS），去掉小噪点
-    visited = np.zeros_like(arr)
-    comps = []
-    from collections import deque
-    for y in range(h):
-        for x in range(w):
-            if arr[y, x] and not visited[y, x]:
-                q = deque([(y, x)]); visited[y, x] = 1; cells = []
-                while q:
-                    cy, cx = q.popleft(); cells.append((cx, cy))
-                    for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                        ny, nx = cy + dy, cx + dx
-                        if 0 <= ny < h and 0 <= nx < w and arr[ny, nx] and not visited[ny, nx]:
-                            visited[ny, nx] = 1; q.append((ny, nx))
-                if len(cells) >= 6:  # 面积阈值去噪
-                    comps.append(cells)
-    comps.sort(key=lambda c: min(x for x, _ in c))
-    if len(comps) != 4:
-        # 若连通域不足（粘连），退化为列投影 4 等分
-        comps = [[(i * w // 4 + j, 10 + y) for j in range(w // 4) for y in range(h)
-                  if arr[y, min(i * w // 4 + j, w - 1)]] for i in range(4)]
-        comps = [c for c in comps if c]
 
-    cands = "abcdefghjkmnpqrstuvwxyz23456789"
-    font = ImageFont.load_default(size=30)
-
-    def to_bits(im):
-        a = np.array(im.convert("L")) < 128
-        ys, xs = np.where(a)
-        if len(ys) == 0:
+    def attempt():
+        r = browser_extract(f"{BASE}/c/8", [{"name": "cid", "js": "document.querySelector('#cap').src.split('cid=')[1]"}], wait_ms=400)
+        cid = r["extracted"].get("cid")
+        if not cid:
             return None
-        a = a[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
-        from PIL import Image as _I
-        im = _I.fromarray((a * 255).astype("uint8")).resize((16, 16))
-        im = im.point(lambda v: 0 if v < 128 else 255)
-        return [[1 if im.getpixel((x, y)) < 128 else 0 for x in range(16)] for y in range(16)]
+        img = Image.open(io.BytesIO(urllib.request.urlopen(f"{BASE}/c/8/img?cid={cid}", timeout=10).read())).convert("L")
+        import numpy as np
+        arr = np.array(img) < 128
+        h, w = arr.shape
+        visited = np.zeros_like(arr)
+        comps = []
+        from collections import deque
+        for y in range(h):
+            for x in range(w):
+                if arr[y, x] and not visited[y, x]:
+                    q = deque([(y, x)]); visited[y, x] = 1; cells = []
+                    while q:
+                        cy, cx = q.popleft(); cells.append((cx, cy))
+                        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                            ny, nx = cy + dy, cx + dx
+                            if 0 <= ny < h and 0 <= nx < w and arr[ny, nx] and not visited[ny, nx]:
+                                visited[ny, nx] = 1; q.append((ny, nx))
+                    if len(cells) >= 6:
+                        comps.append(cells)
+        comps.sort(key=lambda c: min(x for x, _ in c))
+        if len(comps) != 4:
+            comps = [[(i * w // 4 + j, 10 + y) for j in range(w // 4) for y in range(h)
+                      if arr[y, min(i * w // 4 + j, w - 1)]] for i in range(4)]
+            comps = [c for c in comps if c]
+        cands = "abcdefghjkmnpqrstuvwxyz23456789"
+        font = ImageFont.load_default(size=30)
 
-    def comp_to_img(cells):
-        xs = [x for x, _ in cells]; ys = [y for _, y in cells]
-        x0, x1, y0, y1 = min(xs), max(xs) + 1, min(ys), max(ys) + 1
-        im = Image.new("L", (x1 - x0, y1 - y0), 255)
-        d = ImageDraw.Draw(im)
-        for x, y in cells:
-            d.point((x - x0, y - y0), fill=0)
-        return im
+        def to_bits(im):
+            a = np.array(im.convert("L")) < 128
+            ys, xs = np.where(a)
+            if len(ys) == 0:
+                return None
+            a = a[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+            from PIL import Image as _I
+            im = _I.fromarray((a * 255).astype("uint8")).resize((16, 16))
+            im = im.point(lambda v: 0 if v < 128 else 255)
+            return [[1 if im.getpixel((x, y)) < 128 else 0 for x in range(16)] for y in range(16)]
 
-    result = ""
-    for cells in comps:
-        cell = comp_to_img(cells)
-        cb = to_bits(cell)
-        best, bestc = 1e9, "?"
-        for ch in cands:
-            t = Image.new("L", (44, 44), 255)
-            ImageDraw.Draw(t).text((4, 4), ch, fill=0, font=font)
-            tb = to_bits(t)
-            if tb is None or cb is None:
-                continue
-            diff = sum(tb[y][x] != cb[y][x] for y in range(16) for x in range(16))
-            if diff < best:
-                best, bestc = diff, ch
-        result += bestc
-    req = urllib.request.Request(f"{BASE}/c/8/check", data=json.dumps({"code": result, "cid": cid}).encode(),
-                                 headers={"Content-Type": "application/json"})
-    resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
-    return resp.get("result")
+        def comp_to_img(cells):
+            xs = [x for x, _ in cells]; ys = [y for _, y in cells]
+            x0, x1, y0, y1 = min(xs), max(xs) + 1, min(ys), max(ys) + 1
+            im = Image.new("L", (x1 - x0, y1 - y0), 255)
+            d = ImageDraw.Draw(im)
+            for x, y in cells:
+                d.point((x - x0, y - y0), fill=0)
+            return im
+
+        result = ""
+        for cells in comps:
+            cell = comp_to_img(cells)
+            cb = to_bits(cell)
+            best, bestc = 1e9, "?"
+            for ch in cands:
+                t = Image.new("L", (44, 44), 255)
+                ImageDraw.Draw(t).text((4, 4), ch, fill=0, font=font)
+                tb = to_bits(t)
+                if tb is None or cb is None:
+                    continue
+                diff = sum(tb[y][x] != cb[y][x] for y in range(16) for x in range(16))
+                if diff < best:
+                    best, bestc = diff, ch
+            result += bestc
+        req = urllib.request.Request(f"{BASE}/c/8/check", data=json.dumps({"code": result, "cid": cid}).encode(),
+                                     headers={"Content-Type": "application/json"})
+        resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        return resp.get("result")
+
+    for _ in range(4):
+        res = attempt()
+        if res == "OCR_OK_8":
+            return res
+    return res
 
 
 # ---------- 9: 字体反爬（fontTools cmap） ----------

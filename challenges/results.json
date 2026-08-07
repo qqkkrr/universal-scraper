@@ -3,43 +3,43 @@
   "status": "pass",
   "expected": "CF_TOKEN_426ok1",
   "answer": "CF_TOKEN_426ok1",
-  "time": 6.6
+  "time": 4.9
  },
  "2": {
   "status": "pass",
   "expected": "TURNSTILE_test_abcd",
   "answer": "TURNSTILE_test_abcd",
-  "time": 2.2
+  "time": 2.4
  },
  "3": {
   "status": "pass",
   "expected": "SLIDE_OK_3",
   "answer": "SLIDE_OK_3",
-  "time": 5.3
+  "time": 5.5
  },
  "4": {
   "status": "pass",
   "expected": "SIGN_dingxiang",
   "answer": "SIGN_dingxiang",
-  "time": 2.0
+  "time": 2.4
  },
  "5": {
   "status": "pass",
   "expected": "SID_abc123def456",
   "answer": "SID_abc123def456",
-  "time": 5.0
+  "time": 5.5
  },
  "6": {
   "status": "pass",
   "expected": "RECAPTCHA_abc123",
   "answer": "RECAPTCHA_abc123",
-  "time": 2.0
+  "time": 2.2
  },
  "7": {
   "status": "pass",
   "expected": "TRACE_5c2",
   "answer": "TRACE_5c2",
-  "time": 4.8
+  "time": 5.1
  },
  "8": {
   "status": "pass",
@@ -51,7 +51,7 @@
   "status": "pass",
   "expected": "87321",
   "answer": "87321",
-  "time": 0.1
+  "time": 0.0
  },
  "10": {
   "status": "pass",
@@ -63,7 +63,7 @@
   "status": "pass",
   "expected": "99.50",
   "answer": "99.50",
-  "time": 1.7
+  "time": 2.0
  },
  "12": {
   "status": "pass",
@@ -93,19 +93,19 @@
   "status": "pass",
   "expected": "ORDER_20250116",
   "answer": "ORDER_20250116",
-  "time": 2.0
+  "time": 1.9
  },
  "17": {
   "status": "pass",
   "expected": "PAGE3_ITEM_77",
   "answer": "PAGE3_ITEM_77",
-  "time": 2.4
+  "time": 2.7
  },
  "18": {
   "status": "pass",
   "expected": "PROTO_42",
   "answer": "PROTO_42",
-  "time": 10.1
+  "time": 10.0
  },
  "19": {
   "status": "pass",
@@ -135,19 +135,19 @@
   "status": "pass",
   "expected": "COUNT_9",
   "answer": "COUNT_9",
-  "time": 2.1
+  "time": 2.0
  },
  "24": {
   "status": "pass",
   "expected": "SW_SECRET_24",
   "answer": "SW_SECRET_24",
-  "time": 7.9
+  "time": 7.8
  },
  "25": {
   "status": "pass",
   "expected": "WASM_42",
   "answer": "WASM_42",
-  "time": 2.4
+  "time": 2.3
  },
  "26": {
   "status": "pass",
@@ -159,7 +159,7 @@
   "status": "pass",
   "expected": "TLS_CHROME_27",
   "answer": "TLS_CHROME_27",
-  "time": 0.1
+  "time": 0.0
  },
  "28": {
   "status": "pass",
@@ -171,43 +171,43 @@
   "status": "pass",
   "expected": "EVAL_KEY_29",
   "answer": "EVAL_KEY_29",
-  "time": 2.3
+  "time": 2.0
  },
  "30": {
   "status": "pass",
   "expected": "DBG_TOKEN_30",
   "answer": "DBG_TOKEN_30",
-  "time": 2.0
+  "time": 1.9
  },
  "31": {
   "status": "pass",
   "expected": "SHADOW_PRICE_31",
   "answer": "SHADOW_PRICE_31",
-  "time": 2.6
+  "time": 2.0
  },
  "32": {
   "status": "pass",
   "expected": "CLASSMAP_32",
   "answer": "CLASSMAP_32",
-  "time": 2.3
+  "time": 2.1
  },
  "33": {
   "status": "pass",
   "expected": "SCROLL_TOKEN_33",
   "answer": "SCROLL_TOKEN_33",
-  "time": 3.5
+  "time": 3.4
  },
  "34": {
   "status": "pass",
   "expected": "PUZZLE_OK_34",
   "answer": "PUZZLE_OK_34",
-  "time": 5.5
+  "time": 5.2
  },
  "35": {
   "status": "pass",
   "expected": "COORD_OK_35",
   "answer": "COORD_OK_35",
-  "time": 2.2
+  "time": 2.3
  },
  "36": {
   "status": "pass",
@@ -225,7 +225,7 @@
   "status": "pass",
   "expected": "CSP_DATA_38",
   "answer": "CSP_DATA_38",
-  "time": 2.1
+  "time": 1.7
  },
  "39": {
   "status": "pass",
@@ -243,7 +243,7 @@
   "status": "pass",
   "expected": "JSL_OK_41",
   "answer": "JSL_OK_41",
-  "time": 2.0
+  "time": 2.1
  },
  "42": {
   "status": "pass",
@@ -255,7 +255,7 @@
   "status": "pass",
   "expected": "99.50",
   "answer": "99.50",
-  "time": 2.1
+  "time": 1.9
  },
  "44": {
   "status": "pass",
@@ -297,13 +297,13 @@
   "status": "pass",
   "expected": "AUTH_PASS_50",
   "answer": "AUTH_PASS_50",
-  "time": 4.3
+  "time": 4.1
  },
  "51": {
   "status": "pass",
   "expected": "WS_SESSION_77ab",
   "answer": "WS_SESSION_77ab",
-  "time": 2.4
+  "time": 2.3
  },
  "52": {
   "status": "pass",
@@ -321,7 +321,7 @@
   "status": "pass",
   "expected": "HCAPTCHA_54",
   "answer": "HCAPTCHA_54",
-  "time": 1.7
+  "time": 2.0
  },
  "55": {
   "status": "pass",
@@ -339,7 +339,7 @@
   "status": "pass",
   "expected": "SVGPATH_OK_57",
   "answer": "SVGPATH_OK_57",
-  "time": 1.8
+  "time": 2.1
  },
  "58": {
   "status": "pass",
@@ -351,7 +351,7 @@
   "status": "pass",
   "expected": "WEBGL_59",
   "answer": "WEBGL_59",
-  "time": 2.8
+  "time": 2.6
  },
  "60": {
   "status": "pass",
@@ -381,7 +381,7 @@
   "status": "pass",
   "expected": "GT4_TOKEN_64",
   "answer": "GT4_TOKEN_64",
-  "time": 2.0
+  "time": 1.9
  },
  "65": {
   "status": "pass",
@@ -393,19 +393,19 @@
   "status": "pass",
   "expected": "DC_KEY_66",
   "answer": "DC_KEY_66",
-  "time": 4.4
+  "time": 4.5
  },
  "67": {
   "status": "pass",
   "expected": "ORIENT_67",
   "answer": "ORIENT_67",
-  "time": 1.8
+  "time": 1.9
  },
  "68": {
   "status": "pass",
   "expected": "ENC_UUID_68",
   "answer": "ENC_UUID_68",
-  "time": 2.4
+  "time": 2.3
  },
  "69": {
   "status": "pass",
@@ -459,7 +459,7 @@
   "status": "pass",
   "expected": "HUMAN_KEY_77",
   "answer": "HUMAN_KEY_77",
-  "time": 5.4
+  "time": 5.2
  },
  "78": {
   "status": "pass",
@@ -477,7 +477,7 @@
   "status": "pass",
   "expected": "NC_OK_80",
   "answer": "NC_OK_80",
-  "time": 5.3
+  "time": 5.4
  },
  "81": {
   "status": "pass",
@@ -513,7 +513,7 @@
   "status": "pass",
   "expected": "CF_TS_86",
   "answer": "CF_TS_86",
-  "time": 2.0
+  "time": 1.7
  },
  "87": {
   "status": "pass",
@@ -525,7 +525,7 @@
   "status": "pass",
   "expected": "UUID_88",
   "answer": "UUID_88",
-  "time": 1.7
+  "time": 2.0
  },
  "89": {
   "status": "pass",
@@ -543,7 +543,7 @@
   "status": "pass",
   "expected": "FONT_FP_91",
   "answer": "FONT_FP_91",
-  "time": 2.0
+  "time": 1.8
  },
  "92": {
   "status": "pass",
@@ -555,19 +555,19 @@
   "status": "pass",
   "expected": "MIX_93",
   "answer": "MIX_93",
-  "time": 2.2
+  "time": 2.0
  },
  "94": {
   "status": "pass",
   "expected": "DTMF_94",
   "answer": "DTMF_94",
-  "time": 4.1
+  "time": 3.6
  },
  "95": {
   "status": "pass",
   "expected": "PROD_95",
   "answer": "PROD_95",
-  "time": 2.6
+  "time": 2.4
  },
  "96": {
   "status": "pass",
@@ -585,7 +585,7 @@
   "status": "pass",
   "expected": "WS_TOKEN_9f3a",
   "answer": "WS_TOKEN_9f3a",
-  "time": 2.5
+  "time": 2.3
  },
  "99": {
   "status": "pass",
