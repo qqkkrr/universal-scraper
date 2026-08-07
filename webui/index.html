@@ -228,7 +228,7 @@ function clearJobTimer(jobId){
   if(t){ clearInterval(t); timers.delete(jobId); }
 }
 function renderProgress(box,d){
-  let html='<div class="card"><h4>⏳ 执行中 <span class="spin"></span> <button class="primary" style="margin:0;background:#dc2626;background-image:none;padding:4px 10px;font-size:12px" onclick="stopJob('${esc(d.id)}')">⏹ 停止任务</button></h4>'
+  let html='<div class="card"><h4>⏳ 执行中 <span class="spin"></span> <button class="primary" style="margin:0;background:#dc2626;background-image:none;padding:4px 10px;font-size:12px" onclick="stopJob(\'+esc(d.id)+\')">⏹ 停止任务</button></h4>'
     + '<div class="banner warn" style="padding:10px 12px;font-size:13px;margin-bottom:10px">👀 如果弹出了浏览器窗口，请在弹出的窗口里完成【验证+登录】——先拖滑块/点验证，再扫码或账号登录；完成后工具自动继续，无需任何代码</div>'
     + '<pre>'+esc((d.messages||[]).join('\n'))+'</pre></div>';
   box.innerHTML=html; box.style.display='block';
