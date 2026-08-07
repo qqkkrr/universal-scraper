@@ -191,98 +191,95 @@ async function main() {
       }
     });
 
-    // 登录流程（Level 4 人机结合）：没有会话→登录；有会话但目标页仍要求登录→重新登录
+    // ===== 人工门卫（统一处理：登录 + 整页验证码，大众点评/美团等） =====
+    // 1) 是否需要登录：无会话 → 需要；有会话但目标页仍显示登录 → 重新登录
     let needLogin = false;
     if (spec.login && spec.login.enabled) {
       needLogin = !(storageState && fs.existsSync(storageState));
       if (!needLogin) {
-        // 有旧会话也要快速验证是否真的已登录（大众点评：只过验证未登录的会话会停在登录页）
         try {
           await page.goto(spec.url, { timeout: 45000, waitUntil: "domcontentloaded" });
           await sleep(2500);
           let _t2 = "";
           try { _t2 = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 500) : "")); } catch (e) {}
-          if (_t2.includes("扫码登录") || _t2.includes("账号登录") || _t2.includes("二维码已失效")) {
-            needLogin = true;
-          }
+          if (_t2.includes("扫码登录") || _t2.includes("账号登录") || _t2.includes("二维码已失效")) needLogin = true;
         } catch (e) { needLogin = true; }
       }
-    }
-    if (spec.login && spec.login.enabled && needLogin) {
-      out({ type: "login", message: `请在弹出的浏览器中登录: ${spec.login.url || spec.url}` });
-      await page.goto(spec.login.url || spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
-      if (spec.login.auto_js) {
-        await page.evaluate(spec.login.auto_js);
-        // 模拟登录成功后的页面刷新（真实登录会跳转/刷新）
+      if (needLogin) {
+        out({ type: "login", message: `请在弹出的浏览器中登录: ${spec.login.url || spec.url}` });
         await page.goto(spec.login.url || spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
-      }
-      const waitSel = spec.login.wait_selector;
-      const loginMarkers = ["/login", "login.dianping", "passport.", "account.meituan", "扫码登录", "账号登录"];
-      const loginDeadline = Date.now() + loginTimeout;
-      let loggedIn = false;
-      try {
-        if (waitSel) {
-          await page.waitForSelector(waitSel, { timeout: 30000 });
-          loggedIn = true;
+        if (spec.login.auto_js) {
+          await page.evaluate(spec.login.auto_js);
+          await page.goto(spec.login.url || spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
         }
-      } catch (e) {}
-      // 兜底：wait_selector 猜不中时，等 URL 离开登录页（登录成功后站点会跳回目标页）
-      while (!loggedIn && Date.now() < loginDeadline) {
-        const u = page.url() || "";
-        let txt = "";
-        try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 300) : "")); } catch (e) {}
-        const stillLogin = loginMarkers.some(m => u.includes(m) || txt.includes(m));
-        if (!stillLogin) { loggedIn = true; break; }
-        await sleep(2000);
+      } else {
+        await page.goto(spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
       }
-      if (!loggedIn) {
-        out({ type: "error", message: "登录等待超时（" + Math.round(loginTimeout / 1000) + "s）：请确保在弹出的窗口中完成扫码/账号登录" });
-        process.exit(1);
-      }
-      if (storageState) {
-        await context.storageState({ path: storageState });
-        out({ type: "login_ok", storageState });
-      }
-      await page.goto(spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
     } else {
       await page.goto(spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
     }
 
-    // 人工验证流程（Level 4：大众点评/美团等整页跳转验证码 —— 弹出浏览器等真人过验证）
+    // 2) 人工等待循环：验证码页 / 登录页 → 直到目标页出现
+    const gateMarkers = [
+      "verify.", "验证中心", "安全验证", "spiderindefence", "滑动验证", "访问过于频繁", "异常访问",
+      "/login", "login.", "passport.", "account.meituan"
+    ];
+    let gateSuccessSel = null;
+    let gateMaxWait = 600000;
+    if (spec.login && spec.login.enabled) {
+      gateSuccessSel = spec.login.wait_selector || gateSuccessSel;
+      gateMaxWait = Math.max(gateMaxWait, loginTimeout);
+    }
     if (spec.verify && spec.verify.enabled) {
-      const markers = spec.verify.markers || ["verify.", "验证中心", "安全验证", "spiderindefence", "滑动验证", "访问过于频繁", "异常访问"];
-      const successSel = spec.verify.success_selector || null;
-      const maxWait = parseInt(spec.verify.max_wait_ms || "600000", 10);
-      const pollMs = parseInt(spec.verify.poll_ms || "2000", 10);
-      const deadline = Date.now() + maxWait;
+      for (const m of (spec.verify.markers || [])) gateMarkers.push(m);
+      gateSuccessSel = spec.verify.success_selector || gateSuccessSel;
+      gateMaxWait = Math.max(gateMaxWait, parseInt(spec.verify.max_wait_ms || "600000", 10));
+    }
+    if (spec.login && spec.login.enabled || spec.verify && spec.verify.enabled) {
+      const loginTxt = ["扫码登录", "账号登录", "APP扫码", "二维码已失效", "手机号登录"];
+      const pollMs = 2000;
+      const deadline = Date.now() + gateMaxWait;
       let done = false;
-      if (successSel) {
-        try { await page.waitForSelector(successSel, { timeout: 3000 }); done = true; } catch (e) {}
+      if (gateSuccessSel) {
+        try { await page.waitForSelector(gateSuccessSel, { timeout: 3000 }); done = true; } catch (e) {}
       }
+      let notifGate = false, notifLogin = false;
       if (!done) {
         try { await page.bringToFront(); } catch (e) {}
-        out({ type: "verify_required", message: "检测到网站验证码/验证页：请在弹出的浏览器窗口（标题通常为 Google Chrome for Testing）中完成人工验证——拖动滑块或点击按钮，完成后自动继续。最长等待 " + Math.round(maxWait / 1000) + " 秒" });
+        out({ type: "verify_required", message: "检测到网站验证码/登录要求：请在弹出的浏览器窗口（标题通常为 Google Chrome for Testing）中完成 ①滑块/点选验证 ②扫码或账号登录，完成后自动继续。最长等待 " + Math.round(gateMaxWait / 1000) + " 秒" });
       }
       while (!done && Date.now() < deadline) {
         const u = page.url() || "";
         let txt = "";
-        try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 400) : "")); } catch (e) {}
-        const hitMarker = markers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
-        if (successSel) {
-          try { await page.waitForSelector(successSel, { timeout: 2000 }); done = true; break; } catch (e) {}
+        try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 500) : "")); } catch (e) {}
+        const hitMarker = gateMarkers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
+        const hitLogin = loginTxt.some(m => txt.includes(m));
+        if (hitMarker && !notifGate) {
+          notifGate = true;
+          try { await page.bringToFront(); } catch (e) {}
+          out({ type: "verify_required", message: "检测到验证码/验证页：请在浏览器中完成滑块/点选验证，完成后自动继续" });
         }
-        if (!hitMarker) { done = true; break; }  // 已离开验证页 = 验证通过，立即继续（选择器交给解析层）
+        if (hitLogin && !notifLogin) {
+          notifLogin = true;
+          try { await page.bringToFront(); } catch (e) {}
+          out({ type: "login_required", message: "检测到登录页：请在浏览器中扫码或账号登录，登录后自动继续" });
+        }
+        let selOk = true;
+        if (gateSuccessSel) {
+          try { await page.waitForSelector(gateSuccessSel, { timeout: 2000 }); done = true; break; } catch (e) { selOk = false; }
+        }
+        if (selOk && !hitMarker && !hitLogin) { done = true; break; }
         await sleep(pollMs);
       }
       if (!done) {
-        out({ type: "error", message: "人工验证超时（" + Math.round(maxWait / 1000) + "s），未检测到验证通过" });
+        out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）：请确保在弹出的窗口中完成滑块验证和扫码/账号登录" });
         process.exit(1);
       }
       if (storageState) {
-        try { await context.storageState({ path: storageState }); } catch (e) {}
+        await context.storageState({ path: storageState });
         out({ type: "verify_ok", storageState });
       }
-      out({ type: "verify_passed", message: "✅ 验证通过，继续抓取" });
+      out({ type: "verify_passed", message: "✅ 验证/登录通过，继续抓取" });
     }
 
     if (spec.js_pre) await page.evaluate(spec.js_pre);

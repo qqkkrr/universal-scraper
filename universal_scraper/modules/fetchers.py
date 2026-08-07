@@ -349,7 +349,7 @@ class BrowserFetcher(BaseFetcher):
                     continue
                 t = obj.get("type")
                 msg = obj.get("message") or ""
-                if t in ("login", "verify_required"):
+                if t in ("login", "verify_required", "login_required"):
                     print(f"⚠️ {msg}", flush=True)
                 elif t in ("login_ok", "verify_ok"):
                     print(f"✅ 会话已保存: {obj.get('storageState', '')}", flush=True)
