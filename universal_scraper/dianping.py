@@ -57,6 +57,8 @@ def fetch_search_page(keyword: str, city: int = 2, cookie: str = "",
 
 def parse_search_html(html: str, limit: int = 10) -> List[Dict[str, Any]]:
     """解析 .shop-list li → 前 limit 家商家。"""
+    if not html or not html.strip():
+        return []
     from lxml import html as lhtml
     doc = lhtml.fromstring(html)
     lis = doc.cssselect(".shop-list li")

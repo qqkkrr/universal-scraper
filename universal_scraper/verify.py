@@ -56,9 +56,13 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
             except Exception:
                 pass
 
-    # 2. 字段完整率
+    # 2. 字段完整率（字段取前 200 行的并集，避免只看第一行漏掉后续新字段）
     if rows:
-        fields = [k for k in rows[0] if k not in META]
+        fields = []
+        for r in rows[:200]:
+            for k in r:
+                if k not in META and k not in fields:
+                    fields.append(k)
         fields = fields[:12]
         for f in fields:
             n_ok = sum(1 for r in rows if _norm(r.get(f)))

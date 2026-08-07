@@ -179,6 +179,10 @@ async function main() {
   const cdpUrl = arg("cdp", null);
   const stopFile = arg("stopFile", null);
   const stopRequested = () => stopFile && fs.existsSync(stopFile);
+  // 安全正则：非法 pattern 不抛异常（配置可能来自 LLM），返回 null 表示"永不匹配"
+  function safeRe(pattern) {
+    try { return new RegExp(pattern); } catch (e) { return null; }
+  }
   // 真实 Chrome（用户日常浏览器）比 Chrome for Testing 更接近真人，风控识别率低
   const CHROME_EXE = fs.existsSync(USER_CHROME) ? USER_CHROME : FULL_CHROME;
 
@@ -237,7 +241,7 @@ async function main() {
     }
     // 控制台/页面错误捕获（诊断"页面为什么没加载数据"的关键）
     // 节流：每类最多输出 50 条，防止 JS 重页面刷爆协议流
-    const diagBudget = { console: 50, pageerror: 50, reqfailed: 50 };
+    const diagBudget = { console: 50, pageerror: 50, reqfailed: 50, http4xx: 50 };
     let diagTruncated = false;
     const noteTruncated = () => {
       if (!diagTruncated) {
@@ -271,11 +275,16 @@ async function main() {
     page.on("response", async (res) => {
       const u = res.url();
       if (res.status() >= 400) {
-        out({ type: "http_4xx", status: res.status(), url: u.slice(0, 260) });
+        if (diagBudget.http4xx-- > 0) out({ type: "http_4xx", status: res.status(), url: u.slice(0, 260) });
+        else noteTruncated();
       }
       for (const c of captures) {
         const pat = c.url_pattern || "";
-        const hit = pat.startsWith("/") ? u.includes(pat) : new RegExp(pat).test(u);
+        let patRe = null;
+        if (!pat.startsWith("/")) {
+          try { patRe = new RegExp(pat); } catch (e) { patRe = null; }
+        }
+        const hit = pat.startsWith("/") ? u.includes(pat) : (patRe ? patRe.test(u) : false);
         if (!hit) continue;
         const ct = res.headers()["content-type"] || "";
         const key = c.name || pat;
@@ -363,7 +372,7 @@ async function main() {
       if (!requireCookie) return true;
       try {
         const cs = await ctx.cookies();
-        return cs.some(c => new RegExp(requireCookie).test(c.name || ""));
+        return cs.some(c => (safeRe(requireCookie) || /a^/).test(c.name || ""));
       } catch (e) { return false; }
     }
 
@@ -430,7 +439,7 @@ async function main() {
         let _cookieInfo = "";
         if (requireCookie) {
           const cs = await context.cookies().catch(() => []);
-          const names = cs.map(c => c.name).filter(n => new RegExp(requireCookie).test(n)).join(",");
+          const names = cs.map(c => c.name).filter(n => (safeRe(requireCookie) || /a^/).test(n)).join(",");
           _cookieInfo = " | 登录cookie(" + requireCookie + "): " + (names || "❌ 未出现——说明尚未真正登录");
         }
         out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）。当前页面: " + _u + " | 标题: " + _tt + _cookieInfo + "。请确保在弹出的窗口中完成滑块验证和扫码/账号登录" });
@@ -458,7 +467,7 @@ async function main() {
       let _ck = "";
       if (requireCookie) {
         const cs = await context.cookies().catch(() => []);
-        _ck = "（登录cookie: " + cs.map(c => c.name).filter(n => new RegExp(requireCookie).test(n)).join(",") + "）";
+        _ck = "（登录cookie: " + cs.map(c => c.name).filter(n => (safeRe(requireCookie) || /a^/).test(n)).join(",") + "）";
       }
       out({ type: "verify_passed", message: "✅ 验证/登录通过" + _ck + "，继续抓取" });
     }
