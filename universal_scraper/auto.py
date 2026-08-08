@@ -603,6 +603,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             log_cb(msg)
 
     cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
+    # 统一命名：storage/output 一律用 auto 任务名（否则引擎写 items/xxx.jsonl 与
+    # auto 读 sample 的 items/auto_xxx.jsonl 不一致，复核/抽样会被旧数据污染）
+    cfg["name"] = name
+    cfg.setdefault("storage", {})["name"] = name
+    cfg.setdefault("output", {})["base_name"] = name
 
     last_result = {}
     last_log = ""
@@ -612,6 +617,13 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         (task_dir / "modules").mkdir(parents=True, exist_ok=True)
         (task_dir / "config.json").write_text(
             json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 每轮运行前清空旧 items（同名任务多次跑会 append 累积，污染抽样/复核）
+        _items_dir = ROOT / "outputs" / "items"
+        _items_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            (_items_dir / f"{name}.jsonl").unlink(missing_ok=True)
+        except Exception:
+            pass
 
         # 运行（带超时保护：单轮最多 round_timeout 秒，超时强制终止并停止重试，绝不无限转圈）
         import os as _os
@@ -656,7 +668,9 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         items_path = ROOT / "outputs" / "items" / f"{name}.jsonl"
         sample = []
         if items_path.exists():
-            for line in items_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            # 从文件末尾读（最新写入在末尾），最多回看 500 行取最新 5 条
+            _lines = items_path.read_text(encoding="utf-8", errors="replace").splitlines()[-500:]
+            for line in reversed(_lines):
                 if line.strip():
                     try:
                         sample.append(json.loads(line))
@@ -664,6 +678,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                         pass
                 if len(sample) >= 5:
                     break
+            sample.reverse()
 
         # 成功判定：必须有"真实字段"（至少一个非 _url/_parser/_ts 的字段非空），
         # 防止 AI 生成空 fields 导致 total>0 但全是空壳
@@ -811,7 +826,17 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
 
     td = _P(task_dir)
     (td / "modules").mkdir(parents=True, exist_ok=True)
+    # 统一命名：storage/output 与运行器 name 一致（避免 items 文件名错位污染抽样/复核）
+    config["name"] = name
+    config.setdefault("storage", {})["name"] = name
+    config.setdefault("output", {})["base_name"] = name
     (td / "config.json").write_text(_json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    _items_dir = ROOT / "outputs" / "items"
+    _items_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        (_items_dir / f"{name}.jsonl").unlink(missing_ok=True)
+    except Exception:
+        pass
 
     last_result = {}
     last_log = ""
@@ -857,7 +882,9 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         items_path = ROOT / "outputs" / "items" / f"{name}.jsonl"
         sample = []
         if items_path.exists():
-            for line in items_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            # 从文件末尾读（最新写入在末尾），最多回看 500 行取最新 5 条
+            _lines = items_path.read_text(encoding="utf-8", errors="replace").splitlines()[-500:]
+            for line in reversed(_lines):
                 if line.strip():
                     try:
                         sample.append(_json.loads(line))
@@ -865,6 +892,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                         pass
                     if len(sample) >= 5:
                         break
+            sample.reverse()
         META = ("_url", "_parser", "_ts", "_id")
         real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
         if result.get("total", 0) > 0 and real:
