@@ -254,8 +254,8 @@ class EngineV3:
             pname = self.route_parser(resp.url or req.url)
             parser = self.get_parser(pname)
             result = parser.parse(resp, self.ctx)
-            # 0 条且是真实内容页：保存渲染后的页面（供 LLM 兜底抽取，登录/JS 页必须用渲染结果）
-            if not result.items and len(resp.text or "") > 2000 and not self._last_page_saved:
+            # 真实内容页：保存渲染后的页面（供 LLM 兜底/自修复选择器，登录/JS 页必须用渲染结果）
+            if len(resp.text or "") > 2000 and not self._last_page_saved:
                 try:
                     (Path(self.task.root) / "last_page.html").write_text(resp.text, encoding="utf-8")
                     self._last_page_saved = True

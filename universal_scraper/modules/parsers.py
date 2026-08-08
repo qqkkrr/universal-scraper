@@ -7,6 +7,10 @@ from typing import Any, Dict, List
 
 from ..protocols import BaseParser, ParseResult, Response, ParseContext, Request
 from ..selectors import jpath, css_text, css_attr, xpath_text, apply_extractor, regex_extract
+try:
+    from lxml.html import HtmlElement as _lxml_el
+except Exception:  # pragma: no cover
+    _lxml_el = None
 from ..queue import extract_links
 
 
@@ -126,21 +130,79 @@ class ConfigParser(BaseParser):
         else:
             from ..selectors import css_elements, _lxml_html_tostring
             els = css_elements(html, cfg.get("row_css") or "body")
+        self._self_healing = False
         if not els and cfg.get("row_css"):
             # 自愈兜底：配置的选择器没匹配到（AI 猜错 class 等），
             # 自动找页面里重复最多的 li/div/tr（真实列表行）做通用提取，避免"能抓却0条"
             els = self._self_heal_rows(html)
+            self._self_healing = bool(els)
         out = []
         for el in els:
             el_html = el if isinstance(el, str) else _lxml_html_tostring(el)
             row = {}
             for name, fspec in (cfg.get("fields", {}) or {}).items():
                 if isinstance(fspec, dict):
-                    row[name] = self._css_value(el_html, fspec)
+                    v = self._css_value(el_html, fspec)
+                    # 自愈模式：配置选择器没匹配时按字段名猜（仅当该字段全部为空才猜，避免覆盖）
+                    if not v and isinstance(el, _lxml_el) and self._self_healing:
+                        v = self._guess_field(el, name)
+                    row[name] = v
                 else:
                     row[name] = el_html
             out.append(row)
         return out
+
+    # 字段名 → 常见 class 关键词（自愈时按字段名猜选择器，让猜错 row_css 也能拿到字段值）
+    _FIELD_HINTS = {
+        "title": ["job-name", "job_title", "position", "post", "subject", "heading", "title", "name"],
+        "name": ["job-name", "job_title", "position", "post", "subject", "heading", "title", "name"],
+        "salary": ["salary", "job-salary", "pay", "wage", "money", "price", "compensation"],
+        "price": ["salary", "job-salary", "pay", "wage", "money", "price", "compensation"],
+        "company": ["company-name", "boss-name", "corp-name", "shop-name", "merchant", "brand",
+                  "company", "corp", "enterprise"],
+        "location": ["company-location", "job-area", "job-location", "location", "area",
+                  "address", "city", "region", "district", "place"],
+        "area": ["company-location", "job-area", "job-location", "location", "area",
+                 "address", "city", "region", "district", "place"],
+        "address": ["company-location", "job-area", "job-location", "location", "area",
+                    "address", "city", "region", "district", "place"],
+        "tags": ["tag-list", "tag", "label", "skill", "keyword", "badge"],
+        "tag": ["tag-list", "tag", "label", "skill", "keyword", "badge"],
+        "date": ["date", "time", "pub", "update", "create", "release", "deadline", "publish"],
+        "author": ["author", "user", "people", "publisher", "boss-name", "username"],
+        "desc": ["desc", "description", "intro", "summary", "content", "detail", "text"],
+        "text": ["desc", "description", "intro", "summary", "content", "detail", "text"],
+        "link": ["job-name", "title", "name", "detail"],
+        "url": ["job-name", "title", "name", "detail"],
+    }
+
+    def _guess_field(self, el, name: str) -> str:
+        """字段名驱动的选择器猜测：在自愈行元素里按常见 class 关键词找字段值。"""
+        key = re.sub(r"[^a-z]", "", (name or "").lower())
+        if key in ("link", "url", "href"):
+            a = el.cssselect("a[href]")
+            return a[0].get("href", "").strip() if a else ""
+        hints = self._FIELD_HINTS.get(key) or []
+        # 精确类名（带连字符的完整类名）优先，泛词（company/tag 等）最后，避免 company 误命中 company-location
+        precise = [h for h in hints if "-" in h]
+        generic = [h for h in hints if "-" not in h]
+        for kw in precise + generic:
+            for node in el.iter():
+                cls = (node.get("class") or "").lower().replace("_", "-")
+                if kw not in cls:
+                    continue
+                if node.tag in ("ul", "ol") and node.cssselect("li"):
+                    parts = [re.sub(r"\s+", " ", (li.text_content() or "").strip())
+                             for li in node.cssselect("li")]
+                    parts = [x for x in parts if x]
+                    if parts:
+                        return "、".join(parts[:6])
+                if node.tag in ("a", "span", "div", "li", "p", "h1", "h2", "h3", "h4",
+                                "strong", "em", "td", "dt", "dd", "b", "i"):
+                    t = re.sub(r"\s+", " ", (node.text_content() or "").strip())
+                    if t:
+                        return t
+        return ""
 
     def _self_heal_rows(self, html: str) -> List[Any]:
         """通用兜底：统计 li/div/tr 里出现最多的 class，取该重复块作为列表行。"""

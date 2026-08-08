@@ -90,6 +90,30 @@ def main():
     check("multiple 保留全部", rm.items and rm.items[0]["hrefs"] == "/detail/1.html /file.bin",
           str(rm.items)[:120])
 
+    print("== 自愈字段猜测（row_css 猜错也能补全字段值）==")
+    html3 = ("<html><body>" +
+             "".join(f'<li class="job-card-box"><a class="job-name" href="/job_detail/{i}.html">产品经理{i}</a>'
+                     f'<span class="job-salary">10-{i}K</span><ul class="tag-list"><li>经验不限</li><li>本科</li></ul>'
+                     f'<span class="company-location"> 北京·朝阳区 </span>'
+                     f'<a class="boss-info"><span class="boss-name">公司{i}</span></a></li>' for i in range(3)) +
+             "</body></html>")
+    resp3 = Response(request=Request(url="https://x/list"), status=200, text=html3, url="https://x/list")
+    p3 = _CP({"type": "html", "row_css": ".wrong-row",
+              "fields": {"title": {"css": ".nope::text"}, "area": {"css": ".nope2::text"},
+                         "salary": {"css": ".nope3::text"}, "tags": {"css": ".nope4::text"},
+                         "company": {"css": ".nope5::text"},
+                         "link": {"css": ".nope6::attr(href)"}}}, {})
+    r3 = p3.parse(resp3, None)
+    ok3 = (len(r3.items) == 3 and r3.items[0]["title"] == "产品经理0"
+           and r3.items[0]["salary"] == "10-0K" and r3.items[0]["company"] == "公司0"
+           and r3.items[0]["area"] == "北京·朝阳区" and r3.items[0]["tags"] == "经验不限、本科"
+           and r3.items[0]["link"] == "/job_detail/0.html")
+    check("字段猜测补全", ok3, str(r3.items[0])[:160] if r3.items else "no items")
+    print("== 字体反爬检测 ==")
+    from universal_scraper.auto import _font_obfuscation_hint
+    h = _font_obfuscation_hint([{"salary": "\ue039\ue031K", "title": "pm"}])
+    check("PUA 字符提示", "salary" in h and "字体反爬" in h, h[:80])
+
     print()
     print(f"===== 结果: {len(PASS)}/{len(PASS)+len(FAIL)} 通过 =====")
     if FAIL:

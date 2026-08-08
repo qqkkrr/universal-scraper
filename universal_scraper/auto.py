@@ -221,6 +221,30 @@ _AUTH_HINTS = ("验证码", "滑动验证", "安全验证", "人机验证", "访
               "请登录", "登录后", "请输入手机号", "微信扫码登录", "app 扫码登录")
 
 
+def dom_class_stats(html: str, top: int = 12, min_n: int = 3) -> list:
+    """统计页面里出现次数最多的 class（真实 DOM 高频类名），喂给 LLM 写对选择器。"""
+    from collections import Counter
+    try:
+        from lxml import html as _lh
+        doc = _lh.fromstring(html)
+    except Exception:
+        return []
+    cnt = Counter()
+    for el in doc.iter():
+        cls = (el.get("class") or "").strip()
+        if cls:
+            for c in cls.split():
+                cnt[c] += 1
+    return [f"{c}×{n}" for c, n in cnt.most_common(top) if n >= min_n]
+
+
+def _class_stats_text(html: str) -> str:
+    st = dom_class_stats(html)
+    if st:
+        return "\n页面实际高频 class（写选择器时直接用这些）：" + ", ".join(st)
+    return ""
+
+
 def _probe_summary(url: str, max_chars: int = 2500) -> str:
     """探测入口页结构摘要（8s 短超时 + 磁盘缓存 1 小时，大幅提速重复任务）。"""
     import os as _os
@@ -256,6 +280,9 @@ def _probe_summary(url: str, max_chars: int = 2500) -> str:
             summary = md
             if links:
                 summary += "\n\n页面链接：\n" + "\n".join(links)
+            _cst = _class_stats_text(raw.decode("utf-8", "ignore"))
+            if _cst:
+                summary += _cst
         except Exception:
             summary = ""
     summary = (summary or "").strip()[:max_chars]
@@ -270,6 +297,34 @@ def _probe_summary(url: str, max_chars: int = 2500) -> str:
         except Exception:
             pass
     return summary
+
+
+def _font_obfuscation_hint(sample) -> str:
+    """检测字体反爬：字段值含私有区字符(\ue000-\uf8ff)说明数字/文字被自定义字体混淆。"""
+    if not sample:
+        return ""
+    hits = []
+    for it in sample:
+        for k, v in (it or {}).items():
+            if k.startswith("_"):
+                continue
+            if any("\ue000" <= ch <= "\uf8ff" for ch in str(v or "")):
+                if k not in hits:
+                    hits.append(k)
+    if hits:
+        return "｜⚠️ 字段 " + "、".join(hits) + " 疑似字体反爬加密（数字/文字被自定义字体混淆，需解码字体映射才能还原）"
+    return ""
+
+
+def _rendered_class_hint(task_dir) -> str:
+    """自修复时把引擎保存的渲染页高频 class 喂给 LLM（登录/JS 页裸抓拿不到真实 DOM）。"""
+    try:
+        lp = Path(task_dir) / "last_page.html"
+        if lp.exists() and lp.stat().st_size > 2000:
+            return _class_stats_text(lp.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        pass
+    return ""
 
 
 def _diagnose_failure(urls, result, log) -> str:
@@ -640,6 +695,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     f"运行结果：{json.dumps(result, ensure_ascii=False)}\n"
                     f"{_bhint}\n"
                     f"{_page_context(cfg.get('start_urls', [''])[0]) if cfg.get('start_urls') else ''}\n"
+                    f"{_rendered_class_hint(task_dir)}\n"
                     f"运行日志（末尾）：\n{last_log[-2000:]}\n\n"
                     f"请修正配置（选择器/网址/解析方式/是否升级浏览器等），只输出修正后的完整 config.json。"
                 )},
@@ -721,7 +777,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         if verify and verify.get("checks"):
             bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]
             vtxt = ("｜复核 ✅ 通过" if not bad else "｜复核 ⚠️ " + "；".join(bad))
-        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段）{vtxt}，导出 {list(files)}"
+        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段）{vtxt}{_font_obfuscation_hint(real)}，导出 {list(files)}"
     else:
         reason = _diagnose_failure(cfg.get("start_urls"), last_result, log)
         summary = f"⚠️ 任务结束：0 条。原因诊断：{reason}"
@@ -826,6 +882,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                     f"运行结果：{_json.dumps(result, ensure_ascii=False)}\n"
                     f"{_page_context((config.get('start_urls') or [''])[0]) if config.get('start_urls') else ''}\n"
                     f"运行日志（末尾）：\n{last_log[-2000:]}\n\n"
+                    f"{_rendered_class_hint(task_dir)}\n"
                     f"请修正配置（选择器/网址/解析方式等），只输出修正后的完整 config.json。"
                 )},
             ]
@@ -902,7 +959,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         if verify and verify.get("checks"):
             bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]
             vtxt = ("｜复核 ✅ 通过" if not bad else "｜复核 ⚠️ " + "；".join(bad))
-        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段）{vtxt}，导出 {list(files)}"
+        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段）{vtxt}{_font_obfuscation_hint(real)}，导出 {list(files)}"
     else:
         reason = _diagnose_failure(config.get("start_urls"), last_result, log)
         summary = f"⚠️ 任务结束：0 条。原因诊断：{reason}"
