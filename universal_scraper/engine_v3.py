@@ -636,6 +636,28 @@ class EngineV3:
         max_pages = int(detail.get("max_pages", 0)) or len(rows)
         concurrency = max(1, int(detail.get("concurrency", 2)))
         interval = float(detail.get("interval", 0.5))
+        # 交互浏览器（login/verify/headless=false）一次只能一个窗口：详情优先用浏览器池
+        # （复用已保存登录态 session.json，可并发），池失败再回退交互串行，避免多进程抢
+        # 同一 profile 互相把对方浏览器关掉（Boss直聘 75 详情页实测只成功 3 页的根因）
+        pool_fetcher = None
+        try:
+            from .modules.fetchers import BrowserFetcher
+            _src0 = self.config.get("source") or {}
+            _interactive = bool((_src0.get("login") or {}).get("enabled")
+                                or (_src0.get("verify") or {}).get("enabled")
+                                or _src0.get("headless") is False)
+            if isinstance(self.fetcher, BrowserFetcher) and _interactive:
+                _src2 = dict(_src0)
+                _src2.pop("login", None)
+                _src2.pop("verify", None)
+                _src2["pool"] = True
+                _src2["headless"] = True
+                _src2["scroll_count"] = int(_src2.get("scroll_count", 0))
+                _src2["scroll_wait_ms"] = int(_src2.get("scroll_wait_ms", 2000))
+                pool_fetcher = BrowserFetcher(_src2, self.vars, self.anti)
+                self.logger.info(f"详情：交互模式改用浏览器池并发（{concurrency}），失败页自动回退交互串行")
+        except Exception as e:
+            self.logger.warn(f"详情：浏览器池初始化失败（{e}），退回原取数器")
         todo, seen = [], set()
         for r in rows:
             u = str(r.get(url_field) or "").strip()
@@ -664,7 +686,14 @@ class EngineV3:
 
         def _work(u, r):
             try:
-                resp = self.fetcher.fetch(Request(url=u))
+                try:
+                    if pool_fetcher is not None:
+                        resp = pool_fetcher.fetch(Request(url=u))
+                    else:
+                        resp = self.fetcher.fetch(Request(url=u))
+                except Exception:
+                    # 池失败（详情页触发验证/登录墙等）→ 回退原交互取数器保底
+                    resp = self.fetcher.fetch(Request(url=u))
                 html = resp.text or ""
                 for spec in extract:
                     _n = spec.get("name", "detail")

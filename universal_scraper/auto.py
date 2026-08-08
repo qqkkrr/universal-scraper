@@ -67,7 +67,8 @@ v3 任务包 config.json 结构（字段含义）：
 }
 
 规则：
-- 日期范围：把用户说的"2025年1月1日到1月3日"转成 **北京时间** 的 Unix 秒，用 between 过滤（min=2025-01-01 00:00 CST，max=2025-01-04 00:00 CST）。
+- 日期范围：把用户说的日期转成 **北京时间** 的 Unix 秒，用 between 过滤（min=当天 00:00 CST，max=次日 00:00 CST，左闭右开）。
+- **年份硬规则（必须遵守）**：当前是 **2026年**。用户只说"8月6日/昨天/今天"没写年份时，默认 **2026年**（不要用 2025 或其它年份）。换算示例：2026-08-06 00:00 北京时间 = 1785945600 秒。
 - 翻页：HTML 用 extract_links，allow 建议写**锚定路径正则**（如 "^/page/\\d+/$"），引擎会按 URL 路径匹配，防止误吃 /tag/xxx/page/1/ 这类同构 URL；JSON 分页用 type=json_paged（records_path/strategy=page_param/page_param/page_size/max_pages/fields）。
 - 选择器要根据网站常见结构推断（.item/.list/table tr 等），宁可宽一点；字段 CSS 可直接写 ".text" 或 ".text::text"，两种都支持。
 - **字段提取规范（必须遵守）**：标题/名称优先选行内第一个带语义的节点（span/heading/首个链接），**禁止**直接用裸 `a::text` 或裸 `a::attr(href)`——列表行常有多个链接（详情+附件），裸 a 会把它们拼成 "d\nf"、"/a /b"。取链接时用首个详情链接：`a:first-of-type::text`、`a[href*='/detail']::text`；href 用 `.u::attr(href)` 或 `a:first-of-type::attr(href)`。只有用户明确要"所有链接"时才用 multiple。
@@ -665,6 +666,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         _src0 = cfg.get("source", {}) or {}
         if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
             round_timeout = max(round_timeout, 600)  # 人工验证要等人，放宽到 10 分钟
+        if (cfg.get("detail") or {}).get("enabled"):
+            round_timeout = max(round_timeout, 1200)  # 详情补抓(几十页)要时间，放宽到 20 分钟
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
         from .engine_v3 import run_task
         from .log import Logger
@@ -886,6 +889,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     _src0 = config.get("source", {}) or {}
     if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
         round_timeout = max(round_timeout, 600)
+    if (config.get("detail") or {}).get("enabled"):
+        round_timeout = max(round_timeout, 1200)  # 详情补抓要时间
     for round_i in range(1, rounds + 1):
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
         from .engine_v3 import run_task
