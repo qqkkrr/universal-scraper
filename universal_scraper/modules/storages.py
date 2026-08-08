@@ -72,11 +72,11 @@ class CsvStorage(JsonLinesStorage):
             if not self.fields or (self.f.tell() == 0):
                 self.writer.writeheader()
         elif set(item) - set(self.fields):
+            # 追加模式中途出现新列：扩列即可，禁止再写表头（否则 CSV 中间多一行表头，文件损坏）
             self.fields = list(dict.fromkeys(self.fields + [k for k in item if k not in self.fields]))
             self.f.close()
             self.f = open(self.dir / f"{self.name}.csv", "a", newline="", encoding="utf-8-sig")
             self.writer = csv.DictWriter(self.f, fieldnames=self.fields, extrasaction="ignore")
-            self.writer.writeheader()
         self.writer.writerow({k: (v if v is not None else "") for k, v in item.items()})
 
 
