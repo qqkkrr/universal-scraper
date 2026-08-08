@@ -432,7 +432,7 @@ function centerCaptcha(page) {
         try { await page.waitForSelector(gateSuccessSel, { timeout: 3000 });
               if (await hasReqCookie(context)) done = true; } catch (e) {}
       }
-      let notifGate = false, notifLogin = false;
+      let notifGate = false, notifLogin = false, notifWaf = false;
       if (!done) {
         try { await page.bringToFront(); } catch (e) {}
         out({ type: "verify_required", message: "检测到网站验证码/登录要求：请在弹出的浏览器窗口（标题通常为 Google Chrome for Testing）中完成 ①滑块/点选验证 ②扫码或账号登录，完成后自动继续。最长等待 " + Math.round(gateMaxWait / 1000) + " 秒" });
@@ -476,6 +476,9 @@ function centerCaptcha(page) {
         // 取前 5000 字符（原 500 会让 txtLen>2000 的"长页面=登录成功"兜底永远不成立）
         try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 5000) : "")); } catch (e) {}
         const hitMarker = gateMarkers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
+        // CWAP/WZWS 滑块 WAF：专门识别并强制等待用户拖动（普通"长文本即通过"兜底会误放行）
+        const wafMarkers = ["waf_slider", "wzws-waf-cgi", "wzws_waf", "CWAP-waf", "请完成安全验证", "滑动填", "拖动滑块"];
+        const hitWaf = !!(spec.verify && spec.verify.enabled) && wafMarkers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
         // 验证码元素锁在右下角/视口外（用户点不到按钮）：
         // ① fixed 弹窗强制居中 ② 普通元素滚进视口中央
         try {
@@ -508,7 +511,13 @@ function centerCaptcha(page) {
           try { await page.bringToFront(); } catch (e) {}
           out({ type: "login_required", message: "检测到登录页：请在浏览器中扫码或账号登录，登录后自动继续" });
         }
-        if (gateSuccessSel) {
+        if (hitWaf && !notifWaf) {
+          notifWaf = true;
+          await snap("verify");
+          try { await page.bringToFront(); } catch (e) {}
+          out({ type: "verify_required", message: "🛡️ 检测到 WAF 滑块验证（CWAP/wzws）：请在浏览器窗口中拖动滑块完成拼图，完成后自动继续" });
+        }
+        if (gateSuccessSel && !hitWaf) {
           try { await page.waitForSelector(gateSuccessSel, { timeout: 2000 });
                 if (await hasReqCookie(context)) { done = true; break; } } catch (e) {}
         }
@@ -519,7 +528,7 @@ function centerCaptcha(page) {
         const txtLen = txt.length;
         const hasShop = txt.includes("人均") || txt.includes("条评价") || txt.includes("点评");
         const inLoginUrl = u.includes("/login") || u.includes("passport.") || u.includes("verify.") || u.includes("account.meituan");
-        if (!inLoginUrl && (hasShop || txtLen > 800) && await hasReqCookie(context)) { done = true; break; }
+        if (!hitWaf && !inLoginUrl && (hasShop || txtLen > 800) && await hasReqCookie(context)) { done = true; break; }
         // 每 8s 输出一次循环内诊断（定位"已登录但识别不了"）
         if (diagSent < 3 && Date.now() - gateStartTs > 6000 + diagSent * 8000) {
           diagSent++;
@@ -539,7 +548,7 @@ function centerCaptcha(page) {
           const names = cs.map(c => c.name).filter(n => (safeRe(requireCookie) || /a^/).test(n)).join(",");
           _cookieInfo = " | 登录cookie(" + requireCookie + "): " + (names || "❌ 未出现——说明尚未真正登录");
         }
-        out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）。当前页面: " + _u + " | 标题: " + _tt + _cookieInfo + "。请确保在弹出的窗口中完成滑块验证和扫码/账号登录" });
+        out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）。当前页面: " + _u + " | 标题: " + _tt + _cookieInfo + "。请确保在弹出的窗口中完成滑块验证（WAF 滑块需拖动拼图）和扫码/账号登录" });
         process.exit(1);
       }
       // 登录/验证通过后，若被跳走（如移动版 dphome），强制回到目标页再抓

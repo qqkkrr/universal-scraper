@@ -89,6 +89,8 @@ v3 任务包 config.json 结构（字段含义）：
 - **强风控 SPA（小红书/抖音/知乎/微博等，数据全靠加密接口）**：source.type 用 browser + 登录/CDP，并加 "record_from":"capture_all" 与 "capture_all":true——工具会**自动捕获页面上所有 JSON 接口响应**（不用预先知道接口名），任务结束后记录在 {_api_url, data}，再由 LLM/解析器挑字段。比硬逆向签名省事得多。
 - 如果用户已提供登录 Cookie：source.type 用 http，source.headers 加 "Cookie": "<用户提供的Cookie>"，
   并加 rules/parsers 解析 SSR 页面（如大众点评搜索页 .shop-list li），不要用 browser（Cookie 直抓更快更稳）。
+- **入口网址必须真实（硬性规则）**：只能写你知道真实存在的网址；不知道官方域名时**不要编造**（常见错误：把期刊/公司官网猜成 www.xxx.org.cn，DNS 解析直接失败）。工具会自动校验域名：无法解析的域名会被丢弃并自动搜索官方域名替换。
+- **CWAP/WZWS 滑块 WAF**（部分期刊/政务/学校站会 302 到 waf_slider_verify.html）：不需要你手写特殊配置，工具检测到 WAF 拦截会自动升级为 browser + 人工滑块模式（会弹真实浏览器）。
 - 只输出 JSON 对象本身。"""
 
 
@@ -107,7 +109,7 @@ def _llm_chat(messages: List[Dict[str, str]]) -> str:
     return client.chat(messages, temperature=0.2)
 
 
-def _validate_and_fix(cfg: dict) -> dict:
+def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     """规范化 AI 输出：把不认识的写法映射为引擎支持的写法，再校验。"""
     from .config import validate_task
     cfg.setdefault("name", "auto_task")
@@ -184,6 +186,12 @@ def _validate_and_fix(cfg: dict) -> dict:
     cfg["start_urls"] = [u for u in cfg.get("start_urls", []) if str(u).startswith(("http://", "https://"))]
     if not cfg["start_urls"]:
         raise ValueError("AI 未给出有效入口网址")
+
+    # 域名校验 + 死域名搜索替换（AI 猜错域名时自动救回，如 ciejournal.org.cn → ciejournal.ajcass.com）
+    try:
+        cfg = _fix_dead_domains(cfg, description, log)
+    except Exception:
+        pass
 
     # 路由修正：rules 若指向空解析器，自动改指"最有内容"的解析器（避免抓到一堆空壳）
     def parser_richness(pc):
@@ -364,6 +372,9 @@ def _diagnose_failure(urls, result, log) -> str:
     """失败原因诊断（说人话、快）：404 / 登录验证码 / 字体反爬 / 选择器不匹配。"""
     import urllib.request
     reasons = []
+    _blk = (result or {}).get("block_stats") or {}
+    if _blk.get("waf"):
+        reasons.append("网站返回 WAF 滑块验证（CWAP/wzws-waf，跳 waf_slider_verify.html）——HTTP 模式无法直抓，工具已自动切换浏览器模式，请在弹出的浏览器中完成滑块拼图")
     if result.get("errors", 0) > 0:
         reasons.append(f"请求错误 {result['errors']} 次")
     if result.get("error"):
@@ -491,6 +502,248 @@ def _valid_proxy(p: Optional[str]) -> bool:
     return True
 
 
+# ---------------------------------------------------------------- 域名自愈
+_DNS_FIX_CACHE: Dict[str, List[str]] = {}
+_DNS_FIX_LOCK = threading.Lock()
+_DNS_FIX_CACHE_FILE = ROOT / "outputs" / ".dns_fix_cache.json"
+
+
+def _dns_cache_load() -> Dict[str, List[str]]:
+    try:
+        if _DNS_FIX_CACHE_FILE.exists():
+            return json.loads(_DNS_FIX_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _dns_cache_save() -> None:
+    try:
+        _DNS_FIX_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _DNS_FIX_CACHE_FILE.write_text(json.dumps(_DNS_FIX_CACHE, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+_DNS_SEARCH_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+                  "(KHTML, like Gecko) Version/18.6 Safari/605.1.15")
+
+
+def _host_status(host: str, timeout: float = 3.0) -> str:
+    """域名解析状态：ok=可解析；dead=明确不存在；unknown=超时/网络异常。"""
+    import socket
+    host = (host or "").strip().lower().rstrip(".")
+    if not host or host == "localhost":
+        return "dead"
+    try:
+        import ipaddress
+        ipaddress.ip_address(host)
+        return "ok"
+    except Exception:
+        pass
+    out: Dict[str, str] = {}
+
+    def _t():
+        try:
+            socket.getaddrinfo(host, None)
+            out["st"] = "ok"
+        except socket.gaierror:
+            out["st"] = "dead"
+        except Exception:
+            out["st"] = "unknown"
+
+    th = threading.Thread(target=_t, daemon=True)
+    th.start()
+    th.join(timeout)
+    if th.is_alive():
+        out["st"] = "unknown"
+    return out.get("st", "unknown")
+
+
+def _search_official_links(query: str, limit: int = 6) -> List[str]:
+    """搜索引擎找官方域名：DuckDuckGo HTML + Bing，返回候选 URL（按 host 去重）。"""
+    import urllib.parse
+    import urllib.request
+    links: List[str] = []
+    seen_hosts = set()
+    patterns = [
+        # DDG：<a class="result__a" href="//duckduckgo.com/l/?uddg=...">
+        re.compile(r'<a[^>]+href="([^"]+)"[^>]*class="[^"]*result__a[^"]*"', re.I),
+        re.compile(r'<a[^>]+class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"', re.I),
+        # Bing：<h2><a href="...">
+        re.compile(r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"', re.I),
+    ]
+    for base in ("https://html.duckduckgo.com/html/?q=", "https://www.bing.com/search?q="):
+        if len(links) >= limit:
+            break
+        url = base + urllib.parse.quote(query)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": _DNS_SEARCH_UA})
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            raw = opener.open(req, timeout=8).read(300000).decode("utf-8", "ignore")
+        except Exception:
+            continue
+        for pat in patterns:
+            for m in pat.finditer(raw):
+                href = m.group(1).replace("&amp;", "&")
+                if href.startswith("//"):
+                    href = "https:" + href
+                if not href.startswith(("http://", "https://")):
+                    continue
+                if "uddg=" in href:  # DDG 跳转包装
+                    try:
+                        _q = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                        if _q.get("uddg"):
+                            href = _q["uddg"][0]
+                    except Exception:
+                        pass
+                try:
+                    host = urllib.parse.urlparse(href).hostname or ""
+                except Exception:
+                    continue
+                if not host or host in seen_hosts:
+                    continue
+                if host.endswith((".bing.com", ".duckduckgo.com", ".microsoft.com", ".google.com", ".baidu.com")):
+                    continue
+                seen_hosts.add(host)
+                links.append(href)
+                if len(links) >= limit:
+                    break
+            if len(links) >= limit:
+                break
+    return links[:limit]
+
+
+def _score_candidate(url: str, keywords: List[str], timeout: float = 4.0) -> int:
+    """抓候选站点首页打分：能访问 +1，命中任务关键词每个 +2；0=不可用。"""
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _DNS_SEARCH_UA})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        resp = opener.open(req, timeout=timeout)
+        raw = resp.read(80000).decode("utf-8", "ignore")
+    except Exception:
+        return 0
+    if len(raw) < 300:
+        return 0
+    score = 1
+    head = re.sub(r"<script.*?</script>|<style.*?</style>", " ", raw, flags=re.S | re.I)
+    head = re.sub(r"<[^>]+>", " ", head)[:8000].lower()
+    for kw in keywords:
+        if kw and kw.lower() in head:
+            score += 2
+    # 官方期刊托管平台确定性加分（中科院 ajcass / 知网采编 cbpt / 万方 / 维普官方页）
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ""
+    except Exception:
+        host = ""
+    if any(t in host for t in ("ajcass", "cbpt.cnki.net", "wanfangdata", "cqvip")):
+        score += 3
+    # 期刊站特征加分：有"当期目录/过刊浏览/投稿指南/期刊简介"更像期刊官网而非行业组织
+    for feat in ("当期目录", "过刊浏览", "投稿指南", "期刊简介", "编辑部"):
+        if feat in head:
+            score += 1
+            break
+    return score
+
+
+def _fix_dead_domains(cfg: dict, description: str = "", log=None) -> dict:
+    """域名校验 + 死域名搜索替换：
+    - 有可解析域名：只保留可解析的（丢弃 AI 猜的死域名）
+    - 全部死域名：用任务关键词搜官方域名，替换为能访问的候选（结果缓存，不重复搜）
+    """
+    import os as _os
+    if _os.environ.get("US_DISABLE_DNS_FIX"):
+        return cfg
+    urls = [u for u in (cfg.get("start_urls") or []) if str(u).startswith(("http://", "https://"))]
+    if not urls:
+        return cfg
+    from urllib.parse import urlparse
+    hosts = [urlparse(u).hostname or "" for u in urls]
+    statuses = [_host_status(h) for h in hosts]
+    if any(st == "ok" for st in statuses):
+        good = [u for u, st in zip(urls, statuses) if st == "ok"]
+        if len(good) != len(urls):
+            cfg["start_urls"] = good[:10]
+            if log:
+                log("🔍 已过滤 AI 猜的死域名（DNS 无法解析），保留可访问入口")
+        return cfg
+    if not all(st == "dead" for st in statuses):
+        return cfg  # 有未知状态（超时等），不动，避免误杀
+    # 全部死域名 → 搜索官方域名
+    cache_key = hashlib.md5((description or " ".join(hosts)).encode("utf-8")).hexdigest()
+    with _DNS_FIX_LOCK:
+        if not _DNS_FIX_CACHE:
+            _DNS_FIX_CACHE.update(_dns_cache_load())
+        candidates = _DNS_FIX_CACHE.get(cache_key)
+    if candidates is None:
+        m = re.search(r"[《「『]([^》」』]{2,40})[》」』]", description or "")
+        if m:
+            query = m.group(1) + " 官网"
+        else:
+            query = (description or " ".join(h for h in hosts if h))[:80]
+        if log:
+            log(f"🔍 AI 给的域名全部无法解析，正在搜索官方域名（关键词：{query}）...")
+        links = _search_official_links(query, limit=6)
+        kws: List[str] = []
+        if m and m.group(1) not in kws:
+            kws.append(m.group(1))
+        for kw in re.findall(r"[\u4e00-\u9fff]{2,6}", (description or "")[:60]):
+            if kw not in kws:
+                kws.append(kw)
+        scored = []
+        for u in links:
+            sc = _score_candidate(u, kws)
+            if sc > 0:
+                scored.append((sc, u))
+        # 根路径优先（避免搜到深链文章页/第三方聚合页混入入口）
+        def _path_pref(u):
+            try:
+                from urllib.parse import urlparse
+                return len(urlparse(u).path.rstrip("/").split("/"))
+            except Exception:
+                return 99
+
+        scored.sort(key=lambda x: (-x[0], _path_pref(x[1]), len(x[1])))
+        candidates = [u for _, u in scored[:1]]
+        with _DNS_FIX_LOCK:
+            _DNS_FIX_CACHE[cache_key] = candidates
+            _dns_cache_save()
+    if candidates:
+        cfg["start_urls"] = candidates
+        if log:
+            log(f"✅ 已用官方域名替换死入口：{candidates[0]}")
+    else:
+        if log:
+            log("⚠️ 搜索未找到可用官方域名，保留原入口（任务将报错，供诊断）")
+    return cfg
+
+
+def _force_browser_waf(cfg: dict) -> dict:
+    """把 http 配置升级为 browser + WAF 滑块人工验证（CWAP/wzws 等）。"""
+    old = cfg.get("source") or {}
+    src = {
+        "type": "browser",
+        "headless": False,
+        "scroll_count": int(old.get("scroll_count", 4)),
+        "scroll_wait_ms": int(old.get("scroll_wait_ms", 800)),
+        "verify": {
+            "enabled": True,
+            "markers": ["waf_slider_verify", "wzws-waf-cgi", "wzws_waf", "CWAP-waf", "请完成安全验证", "滑动填"],
+            "max_wait_ms": 600000,
+        },
+    }
+    for k in ("headers", "cdp", "record_from", "capture_all"):
+        if old.get(k):
+            src[k] = old[k]
+    if (old.get("login") or {}).get("enabled"):
+        src["login"] = old["login"]
+    cfg["source"] = src
+    if not (src.get("login") or {}).get("enabled"):
+        cfg.pop("login", None)
+    cfg.pop("verify", None)
+    return cfg
+
+
 def _build_config(description: str, proxy: Optional[str] = None,
                     cookie: Optional[str] = None, log=None) -> tuple:
     """生成任务配置（探测 + LLM + 校验 + 注入），返回 (cfg, name, task_dir)。不运行。"""
@@ -526,7 +779,7 @@ def _build_config(description: str, proxy: Optional[str] = None,
     ]
     log("🤖 AI 正在理解任务并生成配置...")
     cfg = _extract_json(_llm_chat(messages))
-    cfg = _validate_and_fix(cfg)
+    cfg = _validate_and_fix(cfg, description, log)
     if proxy:
         if _valid_proxy(proxy):
             cfg.setdefault("anti_bot", {})["proxy"] = proxy
@@ -729,6 +982,13 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
 
+        # 🛡️ WAF 滑块拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
+        _blk = (result or {}).get("block_stats") or {}
+        if not real and _blk.get("waf") and ((cfg.get("source") or {}).get("type") == "http"):
+            log("🛡️ 检测到 WAF 滑块验证（CWAP/wzws），自动升级为浏览器模式——请在弹出的浏览器窗口中完成滑块拼图，完成后自动继续...")
+            cfg = _force_browser_waf(cfg)
+            continue
+
         if round_i < rounds:
             log(f"⚠️ 第 {round_i} 轮 0 条/报错，AI 正在自修复...")
             _blocks = (result or {}).get("block_stats") or {}
@@ -758,7 +1018,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             ]
             try:
                 cfg = _extract_json(_llm_chat(fix_messages))
-                cfg = _validate_and_fix(cfg)
+                cfg = _validate_and_fix(cfg, description, log)
                 cfg["name"] = name
                 cfg["storage"]["name"] = name
                 cfg["output"]["base_name"] = name
@@ -889,9 +1149,13 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     _src0 = config.get("source", {}) or {}
     if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
         round_timeout = max(round_timeout, 600)
-    if (config.get("detail") or {}).get("enabled"):
-        round_timeout = max(round_timeout, 1200)  # 详情补抓要时间
     for round_i in range(1, rounds + 1):
+        # 每轮按当前配置重算超时（WAF 自动升级浏览器后要等人工滑块，需放宽到 10 分钟）
+        _src0 = config.get("source", {}) or {}
+        if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
+            round_timeout = max(round_timeout, 600)
+        if (config.get("detail") or {}).get("enabled"):
+            round_timeout = max(round_timeout, 1200)
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
         from .engine_v3 import run_task
         log_file = ROOT / "outputs" / f".run_{name}.log"
@@ -946,6 +1210,14 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
+
+        # 🛡️ WAF 滑块拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
+        _blk = (result or {}).get("block_stats") or {}
+        if not real and _blk.get("waf") and ((config.get("source") or {}).get("type") == "http"):
+            log("🛡️ 检测到 WAF 滑块验证（CWAP/wzws），自动升级为浏览器模式——请在弹出的浏览器窗口中完成滑块拼图，完成后自动继续...")
+            config = _force_browser_waf(config)
+            continue
+
         if round_i < rounds:
             log(f"⚠️ 第 {round_i} 轮 0 条/报错，AI 正在自修复...")
             fix_messages = [
@@ -965,7 +1237,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             ]
             try:
                 config = _extract_json(_llm_chat(fix_messages))
-                config = _validate_and_fix(config)
+                config = _validate_and_fix(config, description, log)
                 config["name"] = name
                 config["storage"]["name"] = name
                 config["output"]["base_name"] = name
