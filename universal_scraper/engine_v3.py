@@ -254,6 +254,18 @@ class EngineV3:
             pname = self.route_parser(resp.url or req.url)
             parser = self.get_parser(pname)
             result = parser.parse(resp, self.ctx)
+            # 🏆 精配兜底：AI 解析器 0 条但命中注册表站点（期刊/门户等）→ 用精配解析器
+            if not result.items:
+                try:
+                    from .sites import parse_site_html
+                    _rows = parse_site_html(resp.url or req.url, resp.text or "")
+                    if _rows:
+                        for _r in _rows:
+                            _r.setdefault("_url", resp.url or req.url)
+                            _r.setdefault("_parser", f"site:{_r.get('_site', '')}")
+                        result.items = _rows
+                except Exception:
+                    pass
             # 真实内容页：保存渲染后的页面（供 LLM 兜底/自修复选择器，登录/JS 页必须用渲染结果）
             if len(resp.text or "") > 2000 and not self._last_page_saved:
                 try:

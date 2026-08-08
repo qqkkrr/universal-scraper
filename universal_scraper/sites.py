@@ -51,6 +51,10 @@ HIGH_FREQUENCY_SITES = [
     {"name": "沈阳体育学院学报", "domain": "stxb.magtech.com.cn", "module": "sytyxb", "status": "✅ 已精配",
      "desc": "期刊全文/PDF（magtech 系统，2024 起免费）", "difficulty": "低·公开全文",
      "url_tips": "期次: /CN/Y<年>/V<卷>/I<期>；文章: /CN/<DOI>；PDF 由 showArticleFile.do 换取直链"},
+    {"name": "社科院期刊系（ajcass）", "domain": "*.ajcass.com", "module": "ajcass", "status": "✅ 已精配",
+     "desc": "中国社科院各刊官网（中国工业经济/经济研究/金融研究等同一套系统）：期次列表=GetIssueContentList，含[摘要]/作者/全文PDF/浏览人次；期次页有 WAF 滑块",
+     "difficulty": "中·期次页有 WAF 滑块（浏览器模式滑一次）",
+     "url_tips": "期次列表: /Magazine/GetIssueContentList?Year=2026&Issue=1；文章: /Magazine/Show?id=.. 或 /Magazine/show/?id=.."},
 ]
 
 # ---------------------------------------------------------------------------
@@ -184,6 +188,25 @@ def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
         return {"ok": False, "status": e.code, "html": "", "final_url": url, "error": f"HTTP {e.code}"}
     except Exception as e:
         return {"ok": False, "status": 0, "html": "", "final_url": url, "error": f"{type(e).__name__}: {e}"}
+
+
+def parse_site_html(url: str, html: str) -> List[Dict[str, Any]]:
+    """注册表精配解析（引擎兜底用）：命中站点直接解析 HTML，未命中/空返回 []。"""
+    site = match_site(url)
+    if not site or not html:
+        return []
+    s = SITES[site]
+    try:
+        rows = s["parse"](html, url)
+    except Exception:
+        return []
+    if not isinstance(rows, list):
+        return []
+    # 空壳行防线
+    rows = [r for r in rows if any(str(v or "").strip() for k, v in r.items() if k != "_site")]
+    for r in rows:
+        r.setdefault("_site", site)
+    return rows
 
 
 def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
@@ -536,6 +559,111 @@ def _sytyxb_parse(html, url):
 
 register("sytyxb", match_sytyxb, _sytyxb_parse, fetch=fetch_html,
          desc="沈阳体育学院学报：期次/文章/PDF（magtech 期刊系统）")
+
+
+# ---------------------------------------------------------------------------
+# 社科院期刊系（*.ajcass.com）：中国工业经济/经济研究/金融研究等同一套系统
+# 期次列表页结构（div.neirong > div）：
+#   <a href="/Magazine/show/?id=.." style="...bold;">标题</a>
+#   [摘要]摘要… ｜ 作者：xxx ｜ 全文：[PDF xx KB] 2026.43(1) 共有<b> N </b>人次浏览
+# ---------------------------------------------------------------------------
+def match_ajcass(url: str) -> bool:
+    try:
+        host = urllib.parse.urlparse(url).hostname or ""
+        return host.endswith(".ajcass.com") or host == "ajcass.com"
+    except Exception:
+        return False
+
+
+def _ajcass_block(row_html: str, field: str, default: str = "") -> str:
+    """按字段名从文章块提取干净文本（标题/作者/期号/浏览人次/摘要/PDF大小）。"""
+    try:
+        from lxml import html as _lh
+        doc = _lh.fromstring(row_html)
+        txt = " ".join(doc.text_content().split())
+    except Exception:
+        txt = re.sub(r"<[^>]+>", " ", row_html)
+        txt = " ".join(txt.split())
+    if field == "title":
+        m = re.search(r'<a[^>]+href="([^"]*(?:Magazine/Show|Magazine/show)[^"]*)"[^>]*>(.*?)</a>', row_html, re.S | re.I)
+        if m:
+            return " ".join(re.sub(r"<[^>]+>", " ", m.group(2)).split())
+        return default
+    if field == "link":
+        m = re.search(r'href="([^"]*(?:Magazine/Show|Magazine/show)[^"]*)"', row_html, re.I)
+        return m.group(1) if m else default
+    if field == "authors":
+        m = re.search(r"作者[：:]\s*([^。；;\n]{1,120}?)", txt)
+        return m.group(1).strip().rstrip("】") if m else default
+    if field == "issue":
+        m = re.search(r"(\d{4})\s*\.\s*(\d+)\s*\((\d+)\)", txt)
+        if m:
+            return f"{m.group(1)}年第{m.group(3)}期(卷{m.group(2)})"
+        return default
+    if field == "views":
+        m = re.search(r"共有\s*([\d,]+)\s*人次浏览", txt)
+        return m.group(1).replace(",", "") if m else default
+    if field == "summary":
+        m = re.search(r"\[摘要\](.*?)(?:作者[：:]|$)", txt)
+        return (m.group(1).strip() or default) if m else default
+    if field == "pdf_size":
+        m = re.search(r"([\d.]+)\s*KB", txt)
+        return m.group(1) if m else default
+    return default
+
+
+def parse_ajcass(html: str, url: str = "") -> List[Dict[str, Any]]:
+    """解析 ajcass 期刊期次列表页 → 文章记录（含中英文双字段名，兼容 AI 配置 pipeline）。"""
+    if not html:
+        return []
+    rows: List[Dict[str, Any]] = []
+    _lh = None
+    try:
+        from lxml import html as _lh_mod
+        _lh = _lh_mod
+        doc = _lh.fromstring(html)
+        blocks = doc.cssselect("div.neirong > div") or doc.cssselect("div.neirong")
+    except Exception:
+        blocks = []
+    if not blocks:
+        for m in re.finditer(r"<div[^>]*neirong[^>]*>(.*?)</div>", html, re.S | re.I):
+            blocks.append(m.group(1))
+    for b in blocks:
+        b_html = b if isinstance(b, str) else (_lh.tostring(b, encoding="unicode") if _lh else str(b))
+        title = _ajcass_block(b_html, "title")
+        link = _ajcass_block(b_html, "link")
+        if not title and not link:
+            continue
+        authors = _ajcass_block(b_html, "authors")
+        issue = _ajcass_block(b_html, "issue")
+        views = _ajcass_block(b_html, "views")
+        summary = _ajcass_block(b_html, "summary")
+        pdf_size = _ajcass_block(b_html, "pdf_size")
+        if not views and not issue and not title:
+            continue
+        rows.append({
+            "标题": title, "title": title,
+            "链接": link, "link": link,
+            "作者": authors, "authors": authors,
+            "刊期": issue, "issue": issue,
+            "浏览人次": views, "views": views, "download_raw": views,
+            "摘要": summary, "summary": summary,
+            "pdf_size": pdf_size,
+        })
+    return rows
+
+
+def _ajcass_fetch(url, cookie="", proxy=None):
+    # 期次列表页有 CWAP-WAF 滑块：HTTP 抓不到就返回错误，由 auto 层自动升级浏览器
+    res = fetch_html(url, cookie=cookie, proxy=proxy)
+    if res.get("ok") and "waf_slider" in (res.get("html") or "").lower():
+        res["ok"] = False
+        res["error"] = "WAF滑块拦截（waf_slider_verify.html）——请用浏览器模式滑一次"
+    return res
+
+
+register("ajcass", match_ajcass, parse_ajcass, fetch=_ajcass_fetch,
+         desc="社科院期刊系（*.ajcass.com）：期次列表/文章/浏览人次，期次页有WAF滑块")
 
 
 # ===========================================================================
