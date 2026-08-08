@@ -26,6 +26,11 @@ SYSTEM_PROMPT = """你是万能爬虫工具的"任务配置生成器"。根据�
 v3 任务包 config.json 结构（字段含义）：
 {
   "name": "任务名(英文小写)",
+  "intent": {   // 必填：AI 对任务意图的自检，供用户确认时一眼看出入口对不对
+    "target_type": "资源类型，如 mod/软件/文档/商品/新闻/帖子/评论/视频...",
+    "entry_rationale": "为什么这个入口对应目标类型（如：MOD发布区 forum-53 是 mod 资源列表页）",
+    "expected_fields": ["标题", "作者", "发布时间", "下载链接"]
+  },
   "vars": {"可选的变量": "值"},
   "start_urls": ["入口网址(必须 http/https)"],
   "queue": {"max_depth": 3, "max_requests": 100, "max_concurrency": 2},
@@ -67,6 +72,8 @@ v3 任务包 config.json 结构（字段含义）：
 }
 
 规则：
+- **意图自检（最高优先级，必须遵守）**：先判断用户要的实体类型（资源/帖子/商品/文档/新闻/评论等）。**资源类任务（mod/软件/插件/模板/文档/视频/素材）必须进入该类型专属的资源/下载/发布列表页**，禁止用全站最新发表/全站搜索当入口（会把求助帖/闲聊当结果）。入口 URL 未知时，从已知站点结构推断（论坛常有「MOD发布区」「资源下载区」），并把判断写进 intent.entry_rationale 供用户确认；不确定就 intent.entry_unknown=true。
+- **intent 必填**：每个配置都要输出 intent，用户确认计划时靠它判断入口对不对。
 - 日期范围：把用户说的日期转成 **北京时间** 的 Unix 秒，用 between 过滤（min=当天 00:00 CST，max=次日 00:00 CST，左闭右开）。
 - **日期硬规则（必须遵守）**：当前真实日期以任务消息里【当前真实日期】为准（每次都会注入，含今天/明天的 Unix 秒，**直接抄用，禁止用示例里的旧日期**）。用户说"今天/昨天/前天/今天8点/N天前"等时，一律按注入的真实日期换算成北京时间 Unix 秒（between 用当天 00:00 ~ 次日 00:00，左闭右开）。
 - 翻页：HTML 用 extract_links，allow 建议写**锚定路径正则**（如 "^/page/\\d+/$"），引擎会按 URL 路径匹配，防止误吃 /tag/xxx/page/1/ 这类同构 URL；JSON 分页用 type=json_paged（records_path/strategy=page_param/page_param/page_size/max_pages/fields）。
@@ -75,7 +82,9 @@ v3 任务包 config.json 结构（字段含义）：
 - **列表缺字段用 detail（必须遵守）**：如果用户要的字段（发布日期/时间/正文/价格/评分等）在列表页没有、只在详情页有（如招聘/电商/资讯站的发布时间、商品详情），必须配 `detail`：`url_field` 用列表记录里存详情 URL 的字段（如 link），`url_transform.prefix` 把相对路径补成完整域名，`extract` 用 css_text/css_attr 抓详情页字段，`filters` 做合并后过滤（日期类先用 parse_date 转 unix 秒再 between）。引擎会自动逐个抓详情页并合并回列表记录。
 - **论坛类站点（Discuz 等，如 bbs.mountblade.com.cn）硬知识（必须遵守）**：
   "最新发表/最新回复" guide 列表页（forum.php?mod=guide）通常**没有板块列**——只有 标题/作者/回复数/查看数/最后回复时间，**不要把板块名配成列表字段**（td.common 在 guide 页不存在，会得到空字段）。
-  正确做法：板块名从详情页面包屑取倒数第二个链接 `div#pt a:nth-last-of-type(2)::text`（Discuz 面包屑是 首页>板块>帖子标题，last-of-type 是标题，别抓错；字段名用 forum_name 或 forum 均可）；发布日期从详情页取 `em[id^='authorposton']::text`（格式为「发表于 昨天 22:47」这类相对时间，parse_date 会自动转成绝对 Unix 秒）。
+  正确做法：板块名从详情页面包屑取倒数第二个链接 `div#pt a:nth-last-of-type(2)::text`（Discuz 面包屑是 首页>板块>帖子标题，last-of-type 是标题，别抓错；字段名用 forum_name 或 forum 均可）。
+  发帖时间【优先从列表页取，不要依赖详情页】：Discuz 板块列表每行的作者列带绝对发帖时间 `td.by em span[title]::attr(title)`（格式如 2026-8-8 18:47，parse_date 可直接转 Unix 秒）；不要用列表页 `em span` 里显示的相对文本（如"5 小时前"），要用 span[title] 的绝对时间属性。详情页 em[id^='authorposton'] 只在列表页没有时才用（详情页易触发验证码，会导致整批时间缺失）。
+  **Discuz 排序硬知识**：板块列表默认按【最后回复】排序（老帖会被顶上来），用户要"今天新发布"时，入口 URL 必须加 `orderby=dateline`（如 forum-53-1.html?orderby=dateline），并翻页抓取。
 - 需要登录的网站（大众点评/小红书/微博/淘宝/京东/知乎等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
 - **京东 URL 硬知识（必须遵守）**：京东店铺页真实格式是 https://mall.jd.com/index-<店铺数字ID>.html；商品页是 https://item.jd.com/<sku数字ID>.html；**绝对不要**把店铺名猜成 "<店铺名>sp.jd.com/list.html"（那是假地址，会 404）。用户只给店铺名没给链接时，start_urls 可以先用京东搜索或直接用已知商品链接，并在任务说明里注明"需先找到店铺/商品真实 URL"。京东搜索页(www.jd.com)、商品页、评论接口(club.jd.com)全都被强风控：公开 HTTP 接口已失效，必须 source.type=browser + 真实扫码登录。京东登录硬校验："login":{"enabled":true,"url":"https://www.jd.com/","wait_selector":".nickname","require_cookie":"pt_key|pt_pin"}——工具会检查登录 cookie 是否真的出现，没有 pt_key/pt_pin 就不会放行，避免"假登录通过"。
 - 验证码/整页验证（大众点评/美团等会跳到验证中心）：source.type=browser 并加 "headless": false 与
@@ -569,6 +578,38 @@ def _missing_key_field(description: str, sample: list) -> str:
     return "、".join(missing)
 
 
+def _intent_check(description: str, sample: list, log) -> str:
+    """意图验收（GitHub 大佬 agent 闭环的 verify 环节）：
+    用 LLM 判断抓到的样本是否符合用户要的实体类型。
+    返回 "" = 匹配；否则返回不匹配原因（触发自修复换入口，而不是修选择器）。"""
+    if not description or not sample:
+        return ""
+    items = []
+    for it in sample[:4]:
+        if isinstance(it, dict):
+            items.append({k: str(v)[:80] for k, v in it.items() if not str(k).startswith("_")})
+    if not items:
+        return ""
+    try:
+        raw_out = _llm_chat([
+            {"role": "system", "content": "你是任务验收员：判断抓取结果是否符合用户意图。只输出 JSON {'match': true/false, 'reason': '一句话原因'}。"},
+            {"role": "user", "content": (
+                f"任务：{description}\n\n"
+                f"抓取结果样本：{json.dumps(items, ensure_ascii=False)[:2500]}\n\n"
+                f"这些结果属于用户要的实体类型吗？例如用户要 mod/资源，但结果是论坛求助帖/闲聊帖 → match=false。"
+                f"只输出 JSON。"
+            )},
+        ], timeout=120)
+        m = re.search(r"\{.*\}", raw_out, re.S)
+        if m:
+            d = json.loads(m.group(0))
+            if d.get("match") is False:
+                return str(d.get("reason") or "抓取结果与用户意图不符")
+    except Exception:
+        pass
+    return ""
+
+
 def _diagnose_failure(urls, result, log) -> str:
     """失败原因诊断（说人话、快）：404 / 登录验证码 / 字体反爬 / 选择器不匹配。"""
     import urllib.request
@@ -1059,6 +1100,18 @@ def describe_route(cfg: dict) -> Dict[str, str]:
     su = (cfg.get("start_urls") or [""])[0]
     src = cfg.get("source", {}) or {}
     parts = []
+    _int = cfg.get("intent") or {}
+    if _int:
+        _t = str(_int.get("target_type") or "").strip()
+        _e = str(_int.get("entry_rationale") or "").strip()
+        if _t:
+            parts.append(f"🎯 AI 理解的实体类型：{_t}")
+        if _e:
+            parts.append(f"📌 入口依据：{_e}")
+        if _int.get("entry_unknown"):
+            parts.append("⚠️ AI 不确定入口，请人工确认/提供正确入口 URL")
+    else:
+        parts.append("⚠️ AI 未输出意图自检（intent），请重点核对入口是否对应你要的资源类型")
     site = match_site(su) if su else None
     if site:
         parts.append(f"🏆 命中精配站点[{site}]：用专用解析器，字段干净")
@@ -1230,9 +1283,13 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         real = [it for it in sample if any(
             str(it.get(k) or "").strip() for k in it if k not in META)]
         _miss = _missing_key_field(description, sample)
+        _intent_bad = ""
         if result.get("total", 0) > 0 and real and not _miss:
-            log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
-            break
+            _intent_bad = _intent_check(description, sample, log)
+            if not _intent_bad:
+                log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
+                break
+            log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
         if _miss:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
@@ -1280,7 +1337,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     f"任务：{description}\n"
                     f"上次配置：{json.dumps(cfg, ensure_ascii=False)}\n"
                     f"运行结果：{json.dumps(result, ensure_ascii=False)}\n"
-                    f"{_bhint}\n"
+                    + (f"意图校验未通过：{_intent_bad}\n**这是入口选错，不是选择器问题**：必须换到目标资源类型对应的列表页（如论坛的 MOD发布区/资源下载区/下载频道），不要只改选择器；用户没给入口就向用户要正确入口 URL。\n" if _intent_bad else "")
+                    + f"{_bhint}\n"
                     f"{_page_context(cfg.get('start_urls', [''])[0]) if cfg.get('start_urls') else ''}\n"
                     f"{_annotated_dom_hint(task_dir, (cfg.get('start_urls') or [''])[0])}\n"
                     f"{_rendered_class_hint(task_dir)}\n"
@@ -1497,9 +1555,13 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         META = ("_url", "_parser", "_ts", "_id")
         real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
         _miss = _missing_key_field(description, sample)
+        _intent_bad = ""
         if result.get("total", 0) > 0 and real and not _miss:
-            log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
-            break
+            _intent_bad = _intent_check(description, sample, log)
+            if not _intent_bad:
+                log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
+                break
+            log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
         if _miss:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
@@ -1537,7 +1599,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                     f"任务：{description}\n"
                     f"上次配置：{_json.dumps(config, ensure_ascii=False)}\n"
                     f"运行结果：{_json.dumps(result, ensure_ascii=False)}\n"
-                    f"{_page_context((config.get('start_urls') or [''])[0]) if config.get('start_urls') else ''}\n"
+                    + (f"意图校验未通过：{_intent_bad}\n**这是入口选错，不是选择器问题**：必须换到目标资源类型对应的列表页（如论坛的 MOD发布区/资源下载区/下载频道），不要只改选择器；用户没给入口就向用户要正确入口 URL。\n" if _intent_bad else "")
+                    + f"{_page_context((config.get('start_urls') or [''])[0]) if config.get('start_urls') else ''}\n"
                     f"{_annotated_dom_hint(task_dir, (config.get('start_urls') or [''])[0])}\n"
                     f"运行日志（末尾）：\n{last_log[-2000:]}\n\n"
                     f"{_rendered_class_hint(task_dir)}\n"

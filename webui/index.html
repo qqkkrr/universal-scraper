@@ -405,6 +405,10 @@ function startJob(path,payload,btn,box){
       currentJob=d.job;
       clearJobTimer(d.job);
       timers.set(d.job, setInterval(()=>pollJob(d.job,box),1000));
+    })
+    .catch(e=>{
+      box.innerHTML='<pre class="err">'+esc(e.message||e)+'</pre>'; box.style.display='block';
+      btn.disabled=false; btn.textContent='重新开始';
     });
 }
 let lastPlan=null;
@@ -416,13 +420,22 @@ async function planAuto(){
     limit:$('#a_limit').value||null,
     proxy:$('#a_proxy').value.trim(),
     cookie:$('#a_cookie').value.trim()};
-  const d=await api('/api/auto/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  let d;
+  try{
+    d=await api('/api/auto/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  }catch(e){
+    btn.disabled=false; btn.textContent='生成执行计划';
+    const box=$('#a_progress'); box.style.display='block';
+    box.innerHTML='<div class="banner err">计划生成失败：'+esc(e.message||e)+'</div>';
+    return;
+  }
   btn.disabled=false; btn.textContent='生成执行计划';
   const box=$('#a_progress'); box.style.display='block';
   if(d.error){ box.innerHTML='<div class="banner err">计划生成失败：'+esc(d.error)+'</div>'; return; }
   lastPlan=d;
   let html='<div class="card">'
     +'<div class="card-title"><span class="idx">PLAN</span><h2>AI 的任务理解与技术路线</h2><span class="hint">请确认</span></div>'
+    +intentBlock(d.config)
     +'<h4>任务摘要</h4><pre>'+esc(d.summary||'')+'</pre>'
     +'<h4>技术路线</h4><pre>'+esc(d.route||'')+'</pre>'
     +'<h4>完整配置（可直接修改，确认时以你改过的为准）</h4>'
@@ -483,6 +496,16 @@ async function startJournal(){
   startJob('/api/journal/start',payload,$('#j_btn'),$('#j_progress'));
   $('#j_progress').innerHTML='<div class="card"><h4>已提交，开始下载…</h4></div>';
   $('#j_progress').style.display='block';
+}
+function intentBlock(cfg){
+  if(!cfg || !cfg.intent) return '';
+  const it=cfg.intent;
+  let h='<div class="banner ok" style="padding:10px 12px;font-size:12.5px;margin-bottom:10px">';
+  h+='AI 理解的实体类型：<b>'+esc(it.target_type||'?')+'</b>';
+  if(it.entry_rationale) h+='<div class="sub" style="margin-top:3px">入口依据：'+esc(it.entry_rationale)+'</div>';
+  if(it.entry_unknown) h+='<div class="sub" style="margin-top:3px;color:var(--amber)">⚠️ AI 不确定入口，请确认/提供正确入口 URL</div>';
+  h+='</div>';
+  return h;
 }
 function todayHint(){
   const tz=8*3600*1000, d=new Date(Date.now()+tz);

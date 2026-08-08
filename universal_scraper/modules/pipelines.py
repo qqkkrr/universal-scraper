@@ -128,8 +128,11 @@ class Pipeline(BasePipeline):
                     return None
                 if op == "eq" and val != str(value):
                     return None
-                if op == "regex" and not re.search(step.get("pattern", ""), val):
-                    return None
+                if op == "regex":
+                    # 兼容 AI 生成写法：value 或 pattern 都认（历史上 AI 常写 value）
+                    _pat = step.get("pattern", "") or step.get("value", "")
+                    if _pat and not re.search(_pat, val):
+                        return None
                 if op == "between":
                     raw = item.get(field)
                     if raw in (None, ""):

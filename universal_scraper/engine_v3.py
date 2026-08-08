@@ -680,7 +680,9 @@ class EngineV3:
                 if "replace" in tr:
                     u = u.replace(tr["replace"][0], tr["replace"][1])
                 elif "prefix" in tr:
-                    u = tr["prefix"] + u
+                    # 🛡️ 绝对链接不拼前缀：防止 https://host + https://host/... 双域名
+                    if not u.startswith(("http://", "https://")):
+                        u = tr["prefix"] + u
                 elif "suffix" in tr:
                     u = u + tr["suffix"]
             # 🛡️ 无效/伪链接防线：javascript:; / # / mailto 等必须跳过，
@@ -701,6 +703,11 @@ class EngineV3:
             if len(todo) >= max_pages:
                 break
         if not todo:
+            if pool_fetcher is not None:
+                try:
+                    pool_fetcher.close()
+                except Exception:
+                    pass
             return
         self.logger.info(f"详情：共 {len(rows)} 条，待抓 {len(todo)}（并发 {concurrency}，字段缺失自动补全）")
         self._notify(f"📄 详情补抓：{len(todo)} 个详情页（字段缺失自动补全）")
@@ -784,6 +791,12 @@ class EngineV3:
             self.logger.warn(f"详情：storage 写回失败（{e}）")
         with self._lock:
             self.stats["items"] = len(rows)
+        # 🛡️ 用完必关：残留浏览器池会占会话锁/资源，导致下一个任务卡死（曾实测 17:05 的 pool 残留到 18:30）
+        if pool_fetcher is not None:
+            try:
+                pool_fetcher.close()
+            except Exception:
+                pass
         self.logger.info(f"详情完成：成功 {ok}/{len(todo)}，记录 {len(rows)} 条")
         self._notify(f"✅ 详情补抓完成：{ok}/{len(todo)}，字段已合并")
 
