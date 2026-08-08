@@ -203,6 +203,34 @@ class ConfigParser(BaseParser):
             elif any(w in key for w in ("author", "user", "people")):
                 key = "author"
         hints = ConfigParser._FIELD_HINTS.get(key) or []
+        if key == "date":
+            # 1) meta 标签（SEO 标准：发布时间常藏在 meta property/name/itemprop 里）
+            for node in el.iter():
+                if node.tag == "meta":
+                    attrs = " ".join(str(node.get(a) or "") for a in ("property", "name", "itemprop"))
+                    if any(w in attrs.lower() for w in ("date", "time")):
+                        c = (node.get("content") or "").strip()
+                        if c:
+                            return c
+            # 2) JSON-LD（upDate/datePublished/dateModified 等）
+            try:
+                import json as _json
+                for scr in el.cssselect("script[type='application/ld+json']") or []:
+                    data = _json.loads(scr.text or "{}")
+                    if isinstance(data, dict):
+                        for k in ("upDate", "datePublished", "dateModified", "dateCreated", "pubDate"):
+                            v = data.get(k)
+                            if isinstance(v, dict):
+                                v = v.get("@value")
+                            if v:
+                                return str(v)
+            except Exception:
+                pass
+            # 3) 可见文本"发布时间/更新时间：2026-08-07"
+            txt = re.sub(r"\s+", " ", (el.text_content() or ""))
+            m = re.search(r"(?:发布|更新|上线)时间[：:]\s*([0-9]{4}[-/年][0-9]{1,2}[-/月][0-9]{1,2}日?)", txt)
+            if m:
+                return m.group(1)
         # 精确类名（带连字符的完整类名）优先，泛词（company/tag 等）最后，避免 company 误命中 company-location
         precise = [h for h in hints if "-" in h]
         generic = [h for h in hints if "-" not in h]
