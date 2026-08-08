@@ -299,45 +299,6 @@
   "desc": "什么值得买“好价”频道实时流，抓取所有带有“绝对值”标签的爆料商品名称、价格、商城、值率、评论数，过滤后自动转发。"
  },
  {
-  "id": 9,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "browser",
-  "first": {},
-  "secs": 99.9,
-  "desc": "有赞微商城“故宫淘宝”店铺全部商品列表页，每日抓取商品名称、价格、销量、库存状态，监控文创产品上新。"
- },
- {
-  "id": 11,
-  "ok": false,
-  "total": 0,
-  "fetched": 4,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 106.0,
-  "desc": "链家上海二手房“浦东新区”房源，每日抓取所有新上架房源的挂牌价、面积、户型、楼层、是否学区，生成当日上新日报。"
- },
- {
-  "id": 13,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 63.1,
-  "desc": "安居客“成都·天府新区”新楼盘列表，每周抓取楼盘名称、均价、主力户型、交房时间、剩余套数，绘制新盘地图。"
- },
- {
   "id": 6,
   "ok": false,
   "total": 0,
@@ -349,45 +310,6 @@
   "first": {},
   "secs": 153.3,
   "desc": "得物App（Web端）指定鞋款“Air Jordan 1 High OG 芝加哥”，每小时抓取各尺码的当前售价、销量、求购数，绘制价格K线。"
- },
- {
-  "id": 12,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "browser",
-  "first": {},
-  "secs": 160.3,
-  "desc": "贝壳找房“深圳·南山区”整租房源，每周四抓取租金在3000-6000元的所有房源信息，包含小区、面积、地铁距离、配套设施，供毕业生租房群使用。"
- },
- {
-  "id": 15,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "browser",
-  "first": {},
-  "secs": 120.3,
-  "desc": "58同城“杭州·个人急售”二手房板块，每两小时抓取最新发布的20条信息，提取标题、总价、小区、电话标记（仅展示公开信息），识别真实低价房源。"
- },
- {
-  "id": 16,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 75.2,
-  "desc": "我爱我家“南京”站，爬取所有可交易小区详情页，抓取建筑年代、绿化率、物业费、停车位数量，构建小区基础数据库。"
  },
  {
   "id": 17,
@@ -436,19 +358,6 @@
   "desc": "BOSS直聘“全国·算法工程师”搜索结果，每周一抓取前200条职位，包含公司名称、融资阶段、薪资范围、经验要求、职位描述高频词，分析技能需求演进。"
  },
  {
-  "id": 21,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 99.6,
-  "desc": "猎聘网“年薪50万以上·市场总监”职位，每三天抓取一次，提取公司名称、行业、职责中的管理幅度描述，为猎头提供线索。"
- },
- {
   "id": 10,
   "ok": true,
   "total": 1,
@@ -484,27 +393,6 @@
   "desc": "拉勾网“广州·产品经理”职位列表，每日抓取前100条，记录公司规模、行业、岗位职责前三条、要求掌握的软件，绘制人才画像。"
  },
  {
-  "id": 23,
-  "ok": false,
-  "error": "RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络/Key",
-  "secs": 200.0,
-  "desc": "应届生求职网BBS“华为2025校招”版块，抓取所有面经帖子的标题、内容摘要、回复数，汇集成面试题库。",
-  "kind": "exception"
- },
- {
-  "id": 14,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "browser",
-  "first": {},
-  "secs": 149.6,
-  "desc": "自如北京“整租·一居室”房源，每日抓取房间面积、价格、楼层、距离最近地铁站步行分钟数，分析性价比区间。"
- },
- {
   "id": 25,
   "ok": true,
   "total": 50,
@@ -538,19 +426,6 @@
   "desc": "看准网“腾讯”公司主页，抓取员工匿名评分、好评标签、差评标签、典型评价文本，做雇主品牌情感分析。 **社交媒体与内容**"
  },
  {
-  "id": 18,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 91.2,
-  "desc": "杭州市住房保障和房产管理局官网“商品房预售证公示”，每日抓取新发预售证的项目名称、开发商、楼栋号、发证日期，用于购房情报。 **招聘与职场**"
- },
- {
   "id": 22,
   "ok": true,
   "total": 11,
@@ -569,5 +444,109 @@
   },
   "secs": 177.1,
   "desc": "智联招聘“校园招聘”频道，每年9月10日抓取所有宣讲会安排，包括公司、学校、时间、场地，整理成日历表格。"
+ },
+ {
+  "id": 11,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>80s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 147.2,
+  "desc": "链家上海二手房“浦东新区”房源，每日抓取所有新上架房源的挂牌价、面积、户型、楼层、是否学区，生成当日上新日报。"
+ },
+ {
+  "id": 13,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>80s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 148.4,
+  "desc": "安居客“成都·天府新区”新楼盘列表，每周抓取楼盘名称、均价、主力户型、交房时间、剩余套数，绘制新盘地图。"
+ },
+ {
+  "id": 15,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>80s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 91.5,
+  "desc": "58同城“杭州·个人急售”二手房板块，每两小时抓取最新发布的20条信息，提取标题、总价、小区、电话标记（仅展示公开信息），识别真实低价房源。"
+ },
+ {
+  "id": 9,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>80s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 314.3,
+  "desc": "有赞微商城“故宫淘宝”店铺全部商品列表页，每日抓取商品名称、价格、销量、库存状态，监控文创产品上新。"
+ },
+ {
+  "id": 16,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>80s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 168.6,
+  "desc": "我爱我家“南京”站，爬取所有可交易小区详情页，抓取建筑年代、绿化率、物业费、停车位数量，构建小区基础数据库。"
+ },
+ {
+  "id": 18,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>80s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 117.0,
+  "desc": "杭州市住房保障和房产管理局官网“商品房预售证公示”，每日抓取新发预售证的项目名称、开发商、楼栋号、发证日期，用于购房情报。 **招聘与职场**"
+ },
+ {
+  "id": 12,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "blocked_login",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 291.7,
+  "desc": "贝壳找房“深圳·南山区”整租房源，每周四抓取租金在3000-6000元的所有房源信息，包含小区、面积、地铁距离、配套设施，供毕业生租房群使用。"
+ },
+ {
+  "id": 21,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>80s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 267.1,
+  "desc": "猎聘网“年薪50万以上·市场总监”职位，每三天抓取一次，提取公司名称、行业、职责中的管理幅度描述，为猎头提供线索。"
  }
 ]

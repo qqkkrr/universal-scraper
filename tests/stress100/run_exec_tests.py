@@ -23,10 +23,10 @@ def load_tasks(path=None):
     return {t["id"]: t["desc"] for t in json.load(open(p, encoding="utf-8"))}
 
 
-def run_one(tid, desc, limit, timeout):
+def run_one(tid, desc, limit, timeout, rounds=1):
     t0 = time.time()
     try:
-        r = auto_task(desc, limit=limit, rounds=1, round_timeout=timeout,
+        r = auto_task(desc, limit=limit, rounds=rounds, round_timeout=timeout,
                       agent_fallback=False, log_cb=lambda m: None)
     except Exception as e:
         return {"id": tid, "ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}",
@@ -60,6 +60,7 @@ def main():
     ap.add_argument("--limit", type=int, default=5)
     ap.add_argument("--timeout", type=int, default=75)
     ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--rounds", type=int, default=1)
     ap.add_argument("--reuse", action="store_true")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--force", action="store_true", help="覆盖已有结果重跑")
@@ -84,7 +85,7 @@ def main():
 
     def worker(ts):
         for tid in ts:
-            rec = run_one(tid, TASKS[tid], args.limit, args.timeout)
+            rec = run_one(tid, TASKS[tid], args.limit, args.timeout, args.rounds)
             results[:] = [x for x in results if x["id"] != tid]
             results.append(rec)
             mark = {"ok": "✅", "blocked_login": "🔒", "error": "❌", "empty": "⚠️", "exception": "💥"}.get(rec["kind"], "?")

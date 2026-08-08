@@ -615,6 +615,9 @@ class EngineV3:
                 self._active += 1
             try:
                 self._handle(req)
+            except KeyboardInterrupt:
+                # 停止信号：浏览器桥主动抛 KeyboardInterrupt 中断本轮，属预期行为，不打堆栈
+                self.logger.warn("任务停止信号已生效，本轮请求中断")
             finally:
                 with self._lock:
                     self._active -= 1
