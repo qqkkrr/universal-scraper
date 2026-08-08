@@ -658,9 +658,16 @@ def parse_ajcass(html: str, url: str = "") -> List[Dict[str, Any]]:
 def _ajcass_fetch(url, cookie="", proxy=None):
     # 期次列表页有 CWAP-WAF 滑块：HTTP 抓不到就返回错误，由 auto 层自动升级浏览器
     res = fetch_html(url, cookie=cookie, proxy=proxy)
-    if res.get("ok") and "waf_slider" in (res.get("html") or "").lower():
-        res["ok"] = False
-        res["error"] = "WAF滑块拦截（waf_slider_verify.html）——请用浏览器模式滑一次"
+    if res.get("ok"):
+        try:
+            from .antibot import detect_block
+            bd = detect_block(res.get("status", 200), res.get("html", ""),
+                              res.get("headers") or {}, url)
+            if bd["kind"] == "waf":
+                res["ok"] = False
+                res["error"] = "WAF滑块拦截（wzws/CWAP waf_slider_verify）——请用浏览器模式滑一次"
+        except Exception:
+            pass
     return res
 
 
