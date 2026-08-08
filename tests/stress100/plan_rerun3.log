@@ -1,0 +1,22 @@
+共 15 个待测（6-95），workers=3
+✅ # 17 分3  60.1s | https://bj.ke.com/ershoufang/pg1/ | 二手房房源 | err:
+✅ #  6 分3  83.3s | https://www.dewu.com/ | 电商商品价格/销量/求购数据（得 | err:
+✅ # 31 分3 100.5s | https://www.xiaohongshu.com/search_result?keyword=%23%E | 笔记/帖子 | err:
+✅ # 45 分3  98.0s | https://kcb.sse.com.cn/renewal/ | ipo审核项目动态记录 | err:
+✅ # 32 分3  85.8s | https://www.douyin.com/search/%23%E6%8C%91%E6%88%98%E5% | 抖音话题视频列表与评论 | err:
+✅ # 60 分3  95.1s | https://www.stats.gov.cn/sj/zxfb/ | 官方统计数据表（70个大中城市住 | err:
+✅ # 63 分3  64.0s | https://www.gsxt.gov.cn/index.html | 企业工商信用信息 | err:
+✅ # 65 分3  82.1s | https://zxgk.court.gov.cn/shixin/ | 失信被执行人记录及履行情况 | err:
+✅ # 71 分3  93.2s | https://webapi.sporttery.cn/gateway/jc/football/getMatc | 竞彩足球胜平负赔率数据 | err:
+✅ # 70 分3 141.6s | https://music.163.com/#/playlist?id=3778678 | 音乐歌曲 | err:
+✅ # 77 分3 100.1s | https://www.wappalyzer.com/websites/categories/automoti | 行业网站技术栈数据（汽车与出行  | err:
+🔴 # 84 分1  92.6s | https://epub.cnipa.gov.cn/ | 专利（发明） | err:
+🔴 # 92 分1  89.2s | https://www.csair.com/ | 里程票兑换信息（奖励机票库存） | err:
+✅ # 83 分3  99.1s | https://www.nmpa.gov.cn/datasearch/home-index.html | 进口化妆品备案信息（产品名称/成 | err:
+✅ # 95 分3  51.7s | https://www.drugs.dxy.cn/ | 药品说明书/用药指导 | err:
+
+完成 100 条。按分数统计：
+  分3: 88
+  分2: 0
+  分1: 2
+  分0: 0

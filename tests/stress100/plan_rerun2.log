@@ -1,1 +1,11 @@
 共 16 个待测（6-95），workers=3
+⛔ # 31 分0  44.1s |  |  | err:NameError: name 'description' is not def
+🔴 #  6 分1  85.2s | https://www.dewu.com/ | 商品行情（得物鞋款尺码价格/销量 | err:
+⛔ # 17 分0 101.6s |  |  | err:NameError: name 'description' is not def
+⛔ # 32 分0  62.2s |  |  | err:NameError: name 'description' is not def
+⛔ # 45 分0  69.0s | https://www.sjtu.cn/ | 上交所科创板IPO项目动态（问询 | err:
+⛔ # 60 分0 200.5s |  |  | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络
+✅ # 62 分3 119.2s | https://wenshu.court.gov.cn/website/wenshu/181217BMTKHN | 裁判文书（司法判决） | err:
+⛔ # 63 分0 110.2s |  |  | err:NameError: name 'description' is not def
+⛔ # 65 分0  64.8s |  |  | err:NameError: name 'description' is not def
+✅ # 70 分3  88.5s | https://music.163.com/#/discover/toplist?id=3778678 | 歌曲/音乐 | err:

@@ -376,6 +376,11 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             _su0 = _v
             break
 
+    # 上交所 vs 上海交大：AI 常混淆（sjtu.cn 是上海交大）。任务含"上交所/科创板"就强制换入口
+    if re.search(r"上交所|科创板", description or "") and "sjtu" in _su0:
+        cfg["start_urls"] = ["https://kcb.sse.com.cn/renewal/"]
+        _su0 = cfg["start_urls"][0]
+
     # 已知强登录/反爬站点：AI 若配成 http 直抓，自动升为 browser+登录（否则必 0 条）
     _login_domains = ("xiaohongshu.com", "zhihu.com", "weibo.com", "douyin.com", "kuaishou.com",
                       "taobao.com", "tmall.com", "jd.com", "yangkeduo.com", "pinduoduo.com",
@@ -1281,7 +1286,7 @@ def _build_config(description: str, proxy: Optional[str] = None,
     return cfg, name, task_dir
 
 
-def describe_route(cfg: dict) -> Dict[str, str]:
+def describe_route(cfg: dict, description: str = "") -> Dict[str, str]:
     """生成技术路线说明（给用户确认用）。"""
     from .sites import match_site
     su = (cfg.get("start_urls") or [""])[0]
@@ -1378,7 +1383,7 @@ def plan_task(description: str, limit: Optional[int] = None, proxy: Optional[str
             log_cb(msg)
     try:
         cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
-        plan = describe_route(cfg)
+        plan = describe_route(cfg, description)
         return {"ok": True, "name": name, "task_dir": str(task_dir),
                 "config": cfg, "route": plan["route"], "summary": plan["summary"],
                 "warnings": plan.get("warnings") or [],
