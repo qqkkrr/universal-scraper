@@ -33,7 +33,7 @@ class LLMClient:
 
     def __init__(self, model: Optional[str] = None, base_url: Optional[str] = None,
                  api_key: Optional[str] = None, timeout: Optional[int] = None):
-        timeout = timeout or int(os.environ.get("LLM_TIMEOUT", "150"))
+        timeout = timeout or int(os.environ.get("LLM_TIMEOUT", "90"))
         self.api_key = api_key or _get_key()
         self.base_url = base_url or os.environ.get(
             "OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
@@ -44,7 +44,7 @@ class LLMClient:
         self.vision_api_key = os.environ.get("VISION_API_KEY") or self.api_key
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.1,
-             retries: int = 3) -> str:
+             retries: int = 2) -> str:
         """带指数退避重试（LLM 一慢/一闪断不应让整个任务死掉）。"""
         import time
         import urllib.request

@@ -103,10 +103,25 @@ def _extract_json(raw: str) -> dict:
     return json.loads(m.group(0))
 
 
-def _llm_chat(messages: List[Dict[str, str]]) -> str:
+def _llm_chat(messages: List[Dict[str, str]], timeout: int = 200) -> str:
+    """LLM 调用带硬超时：模型一慢/一挂不能让任务无限卡死（最多等 timeout 秒）。"""
     from .llm import LLMClient
-    client = LLMClient()
-    return client.chat(messages, temperature=0.2)
+    box: Dict[str, Any] = {}
+
+    def _t():
+        try:
+            box["r"] = LLMClient().chat(messages, temperature=0.2)
+        except Exception as e:
+            box["e"] = e
+
+    th = threading.Thread(target=_t, daemon=True)
+    th.start()
+    th.join(timeout)
+    if th.is_alive():
+        raise RuntimeError(f"LLM 响应超时（>{timeout}s），请检查模型接口/网络/Key")
+    if "e" in box:
+        raise box["e"]
+    return box["r"]
 
 
 def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
@@ -1028,8 +1043,9 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
 
         # 🛡️ WAF 滑块拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
+        # 注意：即使本轮有真实行，只要 WAF 拦截导致关键字段缺失/详情失败，也必须升级
         _blk = (result or {}).get("block_stats") or {}
-        if not real and _blk.get("waf") and ((cfg.get("source") or {}).get("type") == "http"):
+        if _blk.get("waf") and ((cfg.get("source") or {}).get("type") == "http"):
             log("🛡️ 检测到 WAF 滑块验证（CWAP/wzws），自动升级为浏览器模式——请在弹出的浏览器窗口中完成滑块拼图，完成后自动继续...")
             cfg = _force_browser_waf(cfg)
             continue
@@ -1257,8 +1273,9 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
 
         # 🛡️ WAF 滑块拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
+        # 注意：即使本轮有真实行，只要 WAF 拦截导致关键字段缺失/详情失败，也必须升级
         _blk = (result or {}).get("block_stats") or {}
-        if not real and _blk.get("waf") and ((config.get("source") or {}).get("type") == "http"):
+        if _blk.get("waf") and ((config.get("source") or {}).get("type") == "http"):
             log("🛡️ 检测到 WAF 滑块验证（CWAP/wzws），自动升级为浏览器模式——请在弹出的浏览器窗口中完成滑块拼图，完成后自动继续...")
             config = _force_browser_waf(config)
             continue
