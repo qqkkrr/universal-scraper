@@ -397,9 +397,12 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             break
 
     # 上交所 vs 上海交大：AI 常混淆（sjtu.cn 是上海交大）。任务含"上交所/科创板"就强制换入口
-    if re.search(r"上交所|科创板", description or "") and "sjtu" in _su0:
-        cfg["start_urls"] = ["https://kcb.sse.com.cn/renewal/"]
+    # 注意 kcb.sse.com.cn 域名在本网络 NXDOMAIN，用 www.sse.com.cn/listing/renewal/ipo/
+    if re.search(r"上交所|科创板", description or "") and ("sjtu" in _su0 or "kcb.sse.com.cn" in _su0):
+        cfg["start_urls"] = ["https://www.sse.com.cn/listing/renewal/ipo/"]
         _su0 = cfg["start_urls"][0]
+        cfg["source"] = {"type": "browser", "headless": False, "scroll_count": 4, "scroll_wait_ms": 800}
+        _src = cfg["source"]
 
     # 已知强登录/反爬站点：AI 若配成 http 直抓，自动升为 browser+登录（否则必 0 条）
     _login_domains = ("xiaohongshu.com", "zhihu.com", "weibo.com", "douyin.com", "kuaishou.com",
@@ -463,11 +466,14 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         _src = cfg["source"]
 
     # 公开 JSON/Atom 精配站点：确保 source=http 且不改浏览器
-    # 只对「纯 API」入口强制 http：leetcode.cn 的 /problem-list/ 是 SPA，必须 browser
+    # 只对「纯公开 API」入口强制 http：leetcode.cn 的 /problem-list/ 是 SPA，必须 browser；
+    # 且强制 http 不能覆盖强登录站点（zhihu/api 也要登录，http 直抓必 401）
     _http_ok_domains = ("api.github.com", "export.arxiv.org", "leetcode.com",
                         "wttr.in", "weather.com.cn", "api.bilibili.com")
-    if any(_host.endswith(d) for d in _http_ok_domains) \
-            or "/api/" in _su0 or ("leetcode.cn" in _host and "/api/" in _su0):
+    _is_login_host = any(_host.endswith(d) for d in _login_domains)
+    if (any(_host.endswith(d) for d in _http_ok_domains) \
+            or ("/api/" in _su0 and not _is_login_host)
+            or ("leetcode.cn" in _host and "/api/" in _su0)) and not _is_login_host:
         cfg["source"] = {"type": "http"}
     # 强制 JSON 精配站点用 http + 不弹登录
     cfg.setdefault("anti_bot", {})

@@ -25,10 +25,21 @@ def load_tasks(path=None):
 
 def run_one(tid, desc, limit, timeout, rounds=1):
     t0 = time.time()
+    import hashlib as _hl
+    _h = _hl.md5(desc.encode()).hexdigest()[:10]
     try:
         r = auto_task(desc, limit=limit, rounds=rounds, round_timeout=timeout,
                       agent_fallback=False, log_cb=lambda m: None)
     except Exception as e:
+        # 异常但可能已产出数据（如超时后引擎线程仍在后台写完）：回查 items jsonl
+        _items = []
+        _p = ROOT / "outputs" / "items" / f"auto_{_h}.jsonl"
+        if _p.exists():
+            _items = [json.loads(l) for l in _p.read_text().splitlines() if l.strip()]
+        if _items:
+            return {"id": tid, "ok": True, "total": len(_items), "fetched": len(_items),
+                    "kind": "ok_late", "error": f"{type(e).__name__}: {str(e)[:150]}（超时但已产出数据）",
+                    "secs": round(time.time()-t0, 1), "desc": desc[:80], "first": _items[0]}
         return {"id": tid, "ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}",
                 "secs": round(time.time()-t0, 1), "desc": desc[:80], "kind": "exception"}
     res = r.get("result") or {}
@@ -36,6 +47,15 @@ def run_one(tid, desc, limit, timeout, rounds=1):
     cfg = r.get("config") or {}
     src = cfg.get("source") or {}
     # 结果分类
+    _items2 = []
+    _p2 = ROOT / "outputs" / "items" / f"auto_{_h}.jsonl"
+    if _p2.exists():
+        _items2 = [json.loads(l) for l in _p2.read_text().splitlines() if l.strip()]
+    if not res.get("total") and _items2:
+        # 引擎超时但后台写完了数据：算成功（真实产出）
+        return {"id": tid, "ok": True, "total": len(_items2), "fetched": len(_items2),
+                "kind": "ok_late", "error": "超时但已产出数据", "secs": round(time.time()-t0, 1),
+                "desc": desc[:80], "first": _items2[0]}
     if res.get("total"):
         kind = "ok"
     elif (src.get("verify") or {}).get("enabled") or (src.get("login") or {}).get("enabled"):

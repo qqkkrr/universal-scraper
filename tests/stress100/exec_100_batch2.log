@@ -1,0 +1,158 @@
+执行测试 25 个任务（limit=5, timeout=80s, workers=4, reuse=False, headless=True）
+[23:46:31] [INFO] 任务启动: auto_d36f996b12 | 队列 1 | 规则 1
+[23:46:31] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:46:43] [INFO] 任务启动: auto_77bb0b53da | 队列 1 | 规则 2
+[23:47:01] [INFO] 任务启动: auto_a3e3874f59 | 队列 1 | 规则 1
+[23:47:11] [WARN] 跳过（401 永久失败）: https://www.zhihu.com/api/v3/feed/topstory/hot-lists/tech?limit=50
+[23:47:11] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0 | 跳过 1
+[23:47:42] [INFO] 任务启动: auto_64be65b8cc | 队列 1 | 规则 2
+[23:47:56] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:48:02] [INFO] 任务启动: auto_a3e3874f59 | 队列 1 | 规则 1
+[23:48:11] [WARN] 跳过（401 永久失败）: https://www.zhihu.com/api/v3/feed/topstory/hot-lists/tech?limit=50
+[23:48:11] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0 | 跳过 1
+⚠️ # 27 empty         total=0 233.8s | 知乎“热榜·科技”分类下的所有问题，每日9点、21点各抓取一次，记录问题标题、关注数、浏 | err:
+[23:49:02] [INFO] 任务启动: auto_d36f996b12 | 队列 1 | 规则 1
+[23:49:03] [WARN] 任务停止信号已生效，本轮请求中断
+[23:49:04] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:49:04] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:49:47] [INFO] 任务启动: auto_77bb0b53da | 队列 2 | 规则 2
+🔒 # 26 blocked_login total=0 284.8s | 微博@小米公司官方账号，抓取其2025年上半年所有原创微博的发布时间、文本、图片链接、转 | err:运行超时（>80s）
+[23:50:25] [INFO] 任务启动: auto_d1540db310 | 队列 1 | 规则 1
+[23:50:28] [WARN] 任务停止信号已生效，本轮请求中断
+[23:50:29] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:50:29] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:50:38] [INFO] 任务启动: auto_2b5a825cba | 队列 1 | 规则 2
+[23:51:13] [WARN] 任务停止信号已生效，本轮请求中断
+[23:51:16] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:51:16] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:51:46] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:51:58] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:52:31] [WARN] 任务停止信号已生效，本轮请求中断
+[23:52:32] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 29 blocked_login total=0 447.6s | 豆瓣“买组 & All buy”小组，抓取标题包含“【作业】”的帖子，提取商品名称、优惠 | err:运行超时（>80s）
+[23:52:56] [WARN] 任务停止信号已生效，本轮请求中断
+[23:52:58] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 31 blocked_login total=0 240.7s | 小红书“#早C晚A护肤”话题，抓取最热门的200篇笔记的标题、正文文本、点赞收藏评论数、 | err:运行超时（>80s）
+🔒 # 30 blocked_login total=0 189.8s | 豆瓣电影“2025暑期档”片单，抓取所有影片名称、上映日期、类型、想看人数、预告片链接， | err:运行超时（>80s）
+[23:53:32] [INFO] 任务启动: auto_a04e29c21e | 队列 1 | 规则 1
+[23:53:33] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 28 blocked_login total=0 517.3s | 知乎问题“如何评价2025年上海车展？”下的全部回答，抓取答主姓名、回答内容、赞同数、评 | err:运行超时（>80s）
+[23:54:09] [INFO] 任务启动: auto_a04e29c21e | 队列 1 | 规则 2
+[23:54:47] [INFO] 任务启动: auto_96c0c9ca70 | 队列 1 | 规则 1
+[23:54:48] [INFO] 任务启动: auto_f74e9dce90 | 队列 2 | 规则 1
+[23:54:50] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:55:04] [INFO] 延迟重试 1/3: https://tieba.baidu.com/f?kw=%E7%9B%B8%E6%9C%BA&ie=utf-8&pn=0（2s 后）
+[23:55:04] [WARN] 请求失败 https://tieba.baidu.com/f?kw=%E7%9B%B8%E6%9C%BA&ie=utf-8&pn=0: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+[23:55:12] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:55:18] [INFO] 任务启动: auto_59603cb0cf | 队列 1 | 规则 3
+[23:55:33] [INFO] 任务启动: auto_96c0c9ca70 | 队列 1 | 规则 1
+⚠️ # 33 empty         total=0 179.1s | B站“每周必看”第200期视频列表，抓取所有视频的BV号、标题、UP主、播放量、弹幕数、 | err:
+[23:55:34] [INFO] 详情：共 54 条，待抓 54（并发 2，字段缺失自动补全）
+[23:56:05] [INFO] 详情进度: 10/54
+[23:56:11] [WARN] 任务停止信号已生效，本轮请求中断
+[23:56:11] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:56:23] [INFO] 详情进度: 20/54
+[23:56:30] [INFO] 任务启动: auto_c19994d127 | 队列 1 | 规则 1
+[23:56:35] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) Send failure: Broken pipe. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[23:56:58] [WARN] 收到停止信号，详情补抓提前结束
+[23:57:02] [WARN] 任务停止信号已生效，本轮请求中断
+[23:57:02] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:57:02] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:57:14] [INFO] 延迟重试 1/2: https://www.csdn.net/nav/ai（2s 后）
+🔒 # 35 blocked_login total=0 254.0s | 百度贴吧“相机吧”帖子列表，每日抓取前两页帖子的标题、回复数、发帖时间，统计相机品牌提及 | err:运行超时（>80s）
+[23:57:14] [WARN] 请求失败 https://www.csdn.net/nav/ai: RuntimeError: HTTP 521: <html><body><script language="javascript"> window.onload=setTimeout("dy(22)", 200); function dy(QM) {var qo, m
+[23:57:14] [INFO] 详情完成：成功 25/54，记录 54 条
+[23:57:16] [INFO] 延迟重试 2/2: https://www.csdn.net/nav/ai（4s 后）
+[23:57:16] [WARN] 请求失败 https://www.csdn.net/nav/ai: RuntimeError: HTTP 521: <html><body><script language="javascript"> window.onload=setTimeout("kr(7)", 200); function kr(PD) {var qo, mo
+[23:57:17] [INFO] 导出: json=auto_96c0c9ca70.json, csv=auto_96c0c9ca70.csv, xlsx=auto_96c0c9ca70.xlsx
+[23:57:17] [INFO] 完成: 抓取 1 | 条目 54 | 错误 0
+[23:57:21] [WARN] 放弃重试 https://www.csdn.net/nav/ai（已达 2 次）
+[23:57:21] [WARN] 请求失败 https://www.csdn.net/nav/ai: RuntimeError: HTTP 521: <html><body><script language="javascript"> window.onload=setTimeout("mr(125)", 200); function mr(YA) {var qo, 
+[23:57:21] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+❌ # 34 error         total=0 269.2s | 虎扑“步行街”板块首页热帖，每30分钟抓取一次标题、作者、回复数、亮评数，捕捉直男社区热 | err:运行超时（>80s）
+[23:57:34] [INFO] 任务启动: auto_c19994d127 | 队列 1 | 规则 1
+[23:58:11] [INFO] 延迟重试 2/3: https://tieba.baidu.com/f?kw=%E7%9B%B8%E6%9C%BA&ie=utf-8&pn=0（4s 后）
+[23:58:11] [WARN] 请求失败 https://tieba.baidu.com/f?kw=%E7%9B%B8%E6%9C%BA&ie=utf-8&pn=0: RuntimeError: browserType.launchPersistentContext: Timeout 180000ms exceeded.
+Call log:
+[2m  - <launching> /Applications/Google Chrom
+[23:58:11] [INFO] 完成: 抓取 3 | 条目 0 | 错误 2
+[23:58:15] [INFO] 任务启动: auto_7357eab5b1 | 队列 1 | 规则 1
+[23:59:04] [WARN] 任务停止信号已生效，本轮请求中断
+[23:59:04] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:59:04] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 32 blocked_login total=0 340.9s | 抖音“#挑战全网最低价”话题下视频列表（通过公开接口），每半天抓取一次，记录视频点赞量、 | err:运行超时（>80s）
+[23:59:36] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:59:41] [INFO] 任务启动: auto_20b6235e39 | 队列 1 | 规则 1
+[23:59:44] [WARN] 任务停止信号已生效，本轮请求中断
+[23:59:45] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:59:45] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ # 39 error         total=0 153.6s | 雪球“悬赏话题”列表，抓取所有待回答的话题标题、赏金、关注数，寻找投资话题热点。 | err:运行超时（>80s）
+✅ # 37 ok            total=3 263.4s | CSDN“人工智能”分类下24小时热门文章，抓取标题、作者、阅读量、收藏数，发现技术圈内 | err:运行超时（>80s）
+[00:00:22] [INFO] 任务启动: auto_fa3acbdcb2 | 队列 1 | 规则 2
+[00:01:08] [INFO] 任务启动: auto_f41f2a025e | 队列 1 | 规则 3
+[00:01:17] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[00:01:42] [INFO] 任务启动: auto_20b6235e39 | 队列 3 | 规则 3
+[00:01:48] [INFO] 任务启动: auto_ec8723c4c4 | 队列 1 | 规则 1
+[00:01:49] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[00:02:01] [INFO] 导出: json=auto_20b6235e39.json, csv=auto_20b6235e39.csv, xlsx=auto_20b6235e39.xlsx
+[00:02:01] [INFO] 完成: 抓取 3 | 条目 500 | 错误 0
+✅ # 38 ok            total=500 274.7s | 东方财富“龙虎榜”每日收盘后抓取上榜股票代码、名称、买入卖出前五营业部及金额，辅助游资追 | err:
+✅ # 43 ok            total=26 152.1s | 集思录“可转债”数据表，每日收盘后抓取所有转债代码、现价、转股溢价率、纯债价值、到期税后 | err:
+[00:02:28] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:02:30] [WARN] 任务停止信号已生效，本轮请求中断
+[00:02:30] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[00:04:44] [INFO] 任务启动: auto_ec8723c4c4 | 队列 1 | 规则 2
+[00:04:45] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+💥 # 42 exception     total=None 200.0s | 中国人民银行“货币政策司”公开市场操作公告，每个交易日抓取逆回购规模、中标利率、期限，自 | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络/Key
+💥 # 47 exception     total=None 200.0s | 携程“长沙-重庆”机票，出发日期为未来第30天，每天10点、16点抓取所有直飞航班航司、 | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络/Key
+🔒 # 36 blocked_login total=0 392.2s | 微信公众号“人民日报”通过搜狗微信入口，抓取每日推送的所有文章标题、摘要、发布时间，用于 | err:运行超时（>80s）
+⚠️ # 41 empty         total=0 444.8s | 天天基金网“偏股型基金”近六月收益排行，每月初抓取前50名基金代码、名称、基金经理、重仓 | err:
+[00:08:22] [INFO] 任务启动: auto_10c6a78e5a | 队列 1 | 规则 1
+[00:08:38] [INFO] 任务启动: auto_547d0c90f7 | 队列 1 | 规则 1
+💥 # 46 exception     total=None 200.0s | 巨潮资讯网“贵州茅台”公告，抓取所有PDF公告标题与摘要，对关键词如“分红”触发通知。  | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络/Key
+[00:08:53] [INFO] 延迟重试 1/3: https://kcb.sse.com.cn/renewal/（2s 后）
+[00:08:53] [WARN] 请求失败 https://kcb.sse.com.cn/renewal/: RuntimeError: page.goto: net::ERR_NAME_NOT_RESOLVED at https://kcb.sse.com.cn/renewal/
+Call log:
+[2m  - navigating to "https://kcb.ss
+[00:08:54] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[00:09:27] [INFO] 延迟重试 2/3: https://kcb.sse.com.cn/renewal/（4s 后）
+[00:09:27] [WARN] 请求失败 https://kcb.sse.com.cn/renewal/: RuntimeError: page.goto: net::ERR_NAME_NOT_RESOLVED at https://kcb.sse.com.cn/renewal/
+Call log:
+[2m  - navigating to "https://kcb.ss
+❌ # 45 error         total=0 170.8s | 上交所科创板“项目动态”页面，每周抓取所有问询中企业的名称、受理日期、当前状态，监控IP | err:运行超时（>80s）
+[00:10:13] [INFO] 延迟重试 3/3: https://kcb.sse.com.cn/renewal/（8s 后）
+[00:10:13] [WARN] 请求失败 https://kcb.sse.com.cn/renewal/: RuntimeError: page.goto: net::ERR_NAME_NOT_RESOLVED at https://kcb.sse.com.cn/renewal/
+Call log:
+[2m  - navigating to "https://kcb.ss
+[00:10:13] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:10:13] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[00:10:36] [INFO] 任务启动: auto_7b57380dce | 队列 1 | 规则 1
+[00:11:11] [INFO] 任务启动: auto_547d0c90f7 | 队列 1 | 规则 1
+[00:11:23] [INFO] 任务启动: auto_68e4064322 | 队列 1 | 规则 1
+[00:11:56] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:11:58] [WARN] 任务停止信号已生效，本轮请求中断
+[00:11:59] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 50 blocked_login total=0 203.4s | 大众点评“成都·太古里”商圈“火锅”品类，抓取所有商户星级、评论数、环境/口味/服务分、 | err:运行超时（>80s）
+[00:12:32] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:12:35] [WARN] 任务停止信号已生效，本轮请求中断
+[00:12:35] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 40 blocked_login total=0 400.3s | 同花顺个股“宁德时代”公告页，抓取最近一年所有公告的标题、发布日期、公告类型，构建事件时 | err:运行超时（>80s）
+[00:12:43] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:12:46] [WARN] 任务停止信号已生效，本轮请求中断
+[00:12:47] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 49 blocked_login total=0 162.4s | 美团“西安回民街”附近3公里内餐厅，按好评排序抓取前150家，包含评分、人均、推荐菜To | err:运行超时（>80s）
+[00:14:12] [INFO] 任务启动: auto_ac020a3619 | 队列 1 | 规则 1
+[00:15:35] [WARN] 任务停止信号已生效，本轮请求中断
+[00:15:35] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:15:35] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 44 blocked_login total=0 181.7s | 英为财情“经济日历”中国CPI公布时刻，自动抓取公布页面的实际值、预期值、前值，触发预警 | err:运行超时（>80s）
+[00:17:03] [INFO] 任务启动: auto_86e766ebfd | 队列 1 | 规则 1
+[00:19:04] [WARN] 任务停止信号已生效，本轮请求中断
+[00:19:04] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:19:04] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 48 blocked_login total=0 211.5s | 飞猪“千岛湖洲际度假酒店”未来60天基础房型价格，每日抓取，识别价格洼地并通知会员。 | err:运行超时（>80s）
+
+完成 25：{'empty': 3, 'blocked_login': 13, 'error': 3, 'ok': 3, 'exception': 3}
