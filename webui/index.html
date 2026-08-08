@@ -426,7 +426,7 @@ async function planAuto(){
     +'<h4>任务摘要</h4><pre>'+esc(d.summary||'')+'</pre>'
     +'<h4>技术路线</h4><pre>'+esc(d.route||'')+'</pre>'
     +'<h4>完整配置（可直接修改，确认时以你改过的为准）</h4>'
-    +'<div class="muted" style="font-size:11.5px;margin-bottom:6px">日期过滤在 pipelines 的 between：min/max 是<b>北京时间 Unix 秒</b>（2026-08-06 00:00 = 1786003200，2026-08-07 00:00 = 1786089600）；要取消日期过滤就删除该条 between。</div>'
+    +'<div class="muted" style="font-size:11.5px;margin-bottom:6px">日期过滤在 pipelines 的 between：min/max 是<b>北京时间 Unix 秒</b>（'+todayHint()+'）；要取消日期过滤就删除该条 between。</div>'
     +'<textarea id="a_config_edit" rows="12" style="width:100%;font-family:var(--mono);font-size:12px">'+esc(JSON.stringify(d.config,null,2))+'</textarea>'
     +'<div style="display:flex;gap:10px;margin-top:16px">'
     +'<button class="btn btn-primary" style="flex:1" onclick="confirmAuto()">确认无误，开始执行</button>'
@@ -483,6 +483,12 @@ async function startJournal(){
   startJob('/api/journal/start',payload,$('#j_btn'),$('#j_progress'));
   $('#j_progress').innerHTML='<div class="card"><h4>已提交，开始下载…</h4></div>';
   $('#j_progress').style.display='block';
+}
+function todayHint(){
+  const tz=8*3600*1000, d=new Date(Date.now()+tz);
+  d.setUTCHours(0,0,0,0);
+  const t0=Math.floor(d.getTime()/1000), t1=t0+86400;
+  return '今天 00:00 = '+t0+'，明天 00:00 = '+t1;
 }
 const STATUS={running:['running','进行中'],done:['ok','成功'],error:['fail','失败']};
 async function loadRecent(){

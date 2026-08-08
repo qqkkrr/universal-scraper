@@ -12,6 +12,88 @@ from ..protocols import BasePipeline
 _META_KEYS = ("_url", "_parser", "_ts", "_id")
 
 
+def _parse_zh_datetime(text: str, base) -> Optional[Any]:
+    """把常见中文相对/绝对时间文本转成北京时间 datetime（解析失败返回 None）。
+
+    支持：刚刚 / 现在；今天/今日/昨天/昨日/前天/大前天 [+HH:MM]；
+    N分钟前/N小时前/N天前/N秒前；2026-8-7 11:08 / 2026年8月7日 11:08。
+    多个时间（多楼层拼接的“发表于…”）逐行解析，取第一个成功（楼主发布时间优先）。
+    """
+    import datetime as _dt
+    if not text or not str(text).strip():
+        return None
+    tz8 = _dt.timezone(_dt.timedelta(hours=8))
+    lines = [ln.strip() for ln in str(text).replace("\r", "").split("\n") if ln.strip()]
+    for line in lines:
+        # 去掉常见前缀词（发表于/发布于/创建于/最后发表/发帖/时间/日期 等）
+        v = re.sub(r"^(发表于|发布于|创建于|最后发表|发帖时间|时间|日期|更新于|编辑于|来自)[:：]?\s*", "", line)
+        if not v:
+            continue
+        # 1) 刚刚 / 现在
+        if re.fullmatch(r"(刚刚|现在|刚刚发布|just now)", v, re.I):
+            return base
+        # 2) 绝对日期 2026-8-7 11:08 / 2026年8月7日11:08 / 2026-08-07
+        m = re.search(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})[日]?(?:[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?", v)
+        if m:
+            try:
+                return _dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                                    int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0),
+                                    tzinfo=tz8)
+            except Exception:
+                pass
+        # 3) 今天/今日 [+HH:MM]
+        m = re.match(r"^(今天|今日)[\s:：]*(\d{1,2}):(\d{1,2})", v)
+        if m:
+            try:
+                return base.replace(hour=int(m.group(2)), minute=int(m.group(3)), second=0, microsecond=0)
+            except Exception:
+                pass
+        if re.fullmatch(r"(今天|今日)", v):
+            return base.replace(hour=0, minute=0, second=0, microsecond=0)
+        # 4) 昨天/昨日 [+HH:MM]
+        m = re.match(r"^(昨天|昨日)[\s:：]*(\d{1,2}):(\d{1,2})", v)
+        if m:
+            try:
+                d0 = (base - _dt.timedelta(days=1)).replace(hour=int(m.group(2)), minute=int(m.group(3)), second=0, microsecond=0)
+                return d0
+            except Exception:
+                pass
+        if re.fullmatch(r"(昨天|昨日)", v):
+            return (base - _dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        # 5) 前天/大前天 [+HH:MM]
+        for i, w in enumerate(("前天", "大前天"), 2):
+            m = re.match(rf"^{w}[\s:：]*(\d{{1,2}}):(\d{{1,2}})", v)
+            if m:
+                try:
+                    return (base - _dt.timedelta(days=i)).replace(hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0)
+                except Exception:
+                    pass
+            if re.fullmatch(w, v):
+                return (base - _dt.timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        # 6) N天前 / N小时前 / N分钟前 / N秒前
+        m = re.search(r"(\d+)\s*(天|小时|分钟|秒)前", v)
+        if m:
+            n = int(m.group(1))
+            unit = m.group(2)
+            if unit == "天":
+                return base - _dt.timedelta(days=n)
+            if unit == "小时":
+                return base - _dt.timedelta(hours=n)
+            if unit == "分钟":
+                return base - _dt.timedelta(minutes=n)
+            if unit == "秒":
+                return base - _dt.timedelta(seconds=n)
+        # 7) HH:MM（无日期修饰：视为今天）
+        m = re.match(r"^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$", v)
+        if m:
+            try:
+                return base.replace(hour=int(m.group(1)), minute=int(m.group(2)), second=int(m.group(3) or 0), microsecond=0)
+            except Exception:
+                pass
+    return None
+
+
+
 def content_hash(item: Dict[str, Any], fields: Optional[list] = None) -> str:
     """对条目算 SHA-256 内容指纹（对标 browsertrix-crawler-deduplication 内容哈希去重）。
     fields 指定时只对这几个字段；否则对所有非元字段。"""
@@ -133,39 +215,19 @@ class Pipeline(BasePipeline):
                 except Exception:
                     item[step["field"]] = step.get("default", "")
             elif t == "parse_date":
-                # 把日期文本（2026-08-06 / 今天 / 昨天 / N天前 / N小时前 / N分钟前）转 Unix 秒（北京时间）
+                # 把日期文本（2026-08-06 / 今天 / 昨天 / 前天 / N天前 / N小时前 / N分钟前 /
+                # 「发表于 昨天 22:47」这类带前缀/多楼层拼接的相对时间）转 Unix 秒（北京时间）
                 import datetime as _dt
+                import time as _t
                 field = step.get("field", "date")
                 out_f = step.get("out", "timestamp")
                 v = str(item.get(field) or "").strip()
-                ts = 0
                 now = step.get("now")
                 try:
                     if not now:
-                        import time as _t
                         now = _t.time()
                     base = _dt.datetime.fromtimestamp(float(now), tz=_dt.timezone(_dt.timedelta(hours=8)))
-                    vv = v
-                    if vv in ("今天", "今日"):
-                        d = base.replace(hour=0, minute=0, second=0, microsecond=0)
-                    elif vv in ("昨天", "昨日"):
-                        d = (base - _dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-                    elif "天前" in vv:
-                        n = int(re.sub(r"\D", "", vv) or 0)
-                        d = (base - _dt.timedelta(days=n)).replace(hour=0, minute=0, second=0, microsecond=0)
-                    elif "小时前" in vv:
-                        n = int(re.sub(r"\D", "", vv) or 0)
-                        d = base - _dt.timedelta(hours=n)
-                    elif "分钟前" in vv:
-                        n = int(re.sub(r"\D", "", vv) or 0)
-                        d = base - _dt.timedelta(minutes=n)
-                    else:
-                        m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", vv)
-                        if m:
-                            d = _dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
-                                             tzinfo=_dt.timezone(_dt.timedelta(hours=8)))
-                        else:
-                            d = None
+                    d = _parse_zh_datetime(v, base)
                 except Exception:
                     d = None
                 if d is not None:

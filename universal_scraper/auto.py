@@ -68,11 +68,14 @@ v3 任务包 config.json 结构（字段含义）：
 
 规则：
 - 日期范围：把用户说的日期转成 **北京时间** 的 Unix 秒，用 between 过滤（min=当天 00:00 CST，max=次日 00:00 CST，左闭右开）。
-- **年份硬规则（必须遵守）**：当前是 **2026年**。用户只说"8月6日/昨天/今天"没写年份时，默认 **2026年**（不要用 2025 或其它年份）。换算示例：2026-08-06 00:00 北京时间 = 1785945600 秒。
+- **日期硬规则（必须遵守）**：当前真实日期以任务消息里【当前真实日期】为准（每次都会注入，含今天/明天的 Unix 秒，**直接抄用，禁止用示例里的旧日期**）。用户说"今天/昨天/前天/今天8点/N天前"等时，一律按注入的真实日期换算成北京时间 Unix 秒（between 用当天 00:00 ~ 次日 00:00，左闭右开）。
 - 翻页：HTML 用 extract_links，allow 建议写**锚定路径正则**（如 "^/page/\\d+/$"），引擎会按 URL 路径匹配，防止误吃 /tag/xxx/page/1/ 这类同构 URL；JSON 分页用 type=json_paged（records_path/strategy=page_param/page_param/page_size/max_pages/fields）。
 - 选择器要根据网站常见结构推断（.item/.list/table tr 等），宁可宽一点；字段 CSS 可直接写 ".text" 或 ".text::text"，两种都支持。
 - **字段提取规范（必须遵守）**：标题/名称优先选行内第一个带语义的节点（span/heading/首个链接），**禁止**直接用裸 `a::text` 或裸 `a::attr(href)`——列表行常有多个链接（详情+附件），裸 a 会把它们拼成 "d\nf"、"/a /b"。取链接时用首个详情链接：`a:first-of-type::text`、`a[href*='/detail']::text`；href 用 `.u::attr(href)` 或 `a:first-of-type::attr(href)`。只有用户明确要"所有链接"时才用 multiple。
 - **列表缺字段用 detail（必须遵守）**：如果用户要的字段（发布日期/时间/正文/价格/评分等）在列表页没有、只在详情页有（如招聘/电商/资讯站的发布时间、商品详情），必须配 `detail`：`url_field` 用列表记录里存详情 URL 的字段（如 link），`url_transform.prefix` 把相对路径补成完整域名，`extract` 用 css_text/css_attr 抓详情页字段，`filters` 做合并后过滤（日期类先用 parse_date 转 unix 秒再 between）。引擎会自动逐个抓详情页并合并回列表记录。
+- **论坛类站点（Discuz 等，如 bbs.mountblade.com.cn）硬知识（必须遵守）**：
+  "最新发表/最新回复" guide 列表页（forum.php?mod=guide）通常**没有板块列**——只有 标题/作者/回复数/查看数/最后回复时间，**不要把板块名配成列表字段**（td.common 在 guide 页不存在，会得到空字段）。
+  正确做法：板块名从详情页面包屑取倒数第二个链接 `div#pt a:nth-last-of-type(2)::text`（Discuz 面包屑是 首页>板块>帖子标题，last-of-type 是标题，别抓错；字段名用 forum_name 或 forum 均可）；发布日期从详情页取 `em[id^='authorposton']::text`（格式为「发表于 昨天 22:47」这类相对时间，parse_date 会自动转成绝对 Unix 秒）。
 - 需要登录的网站（大众点评/小红书/微博/淘宝/京东/知乎等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
 - **京东 URL 硬知识（必须遵守）**：京东店铺页真实格式是 https://mall.jd.com/index-<店铺数字ID>.html；商品页是 https://item.jd.com/<sku数字ID>.html；**绝对不要**把店铺名猜成 "<店铺名>sp.jd.com/list.html"（那是假地址，会 404）。用户只给店铺名没给链接时，start_urls 可以先用京东搜索或直接用已知商品链接，并在任务说明里注明"需先找到店铺/商品真实 URL"。京东搜索页(www.jd.com)、商品页、评论接口(club.jd.com)全都被强风控：公开 HTTP 接口已失效，必须 source.type=browser + 真实扫码登录。京东登录硬校验："login":{"enabled":true,"url":"https://www.jd.com/","wait_selector":".nickname","require_cookie":"pt_key|pt_pin"}——工具会检查登录 cookie 是否真的出现，没有 pt_key/pt_pin 就不会放行，避免"假登录通过"。
 - 验证码/整页验证（大众点评/美团等会跳到验证中心）：source.type=browser 并加 "headless": false 与
@@ -998,7 +1001,18 @@ def _build_config(description: str, proxy: Optional[str] = None,
             summary = _page_context(urls[0])
             if summary:
                 log("✅ 已抓取入口页 Markdown 摘要（省 token、选择器更准）")
+    # 注入当前真实日期（北京时间）：让 AI 按“今天/昨天”正确换算，杜绝抄示例旧日期
+    import datetime as _dt
+    _tz8 = _dt.timezone(_dt.timedelta(hours=8))
+    _now = _dt.datetime.now(_tz8)
+    _today0 = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+    _tomorrow0 = _today0 + _dt.timedelta(days=1)
     prompt = f"任务：{description}\n请输出完整 config.json。"
+    prompt += (
+        f"\n\n【当前真实日期】今天是 {_now.strftime('%Y-%m-%d')}（北京时间）。"
+        f"今天 00:00 的 Unix 秒 = {int(_today0.timestamp())}，明天 00:00 = {int(_tomorrow0.timestamp())}。"
+        f"用户说“今天/昨天/前天/N天前”时按此换算，禁止使用示例里的旧日期。"
+    )
     if summary:
         prompt += f"\n\n入口页结构摘要（来自真实抓取，据此推断 row_css/fields/extract_links 会更准）：\n{summary}"
     if re.search(r"翻|分页|page|更多页", description, re.I):
