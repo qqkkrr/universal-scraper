@@ -353,19 +353,35 @@ _KEY_DATE_WORDS = ("日期", "时间", "发布", "更新", "date", "time", "publ
 
 
 def _missing_key_field(description: str, sample: list) -> str:
-    """检测用户任务里的关键字段是否缺失（如日期/时间类）：缺失时返回字段说明，用于触发自修复。"""
+    """检测用户任务里的关键字段是否缺失（日期/时间、下载量/阅读量等）：
+    缺失时返回字段说明，用于触发自修复（避免把没抓到关键字段的结果当成功）。"""
     if not description or not sample:
         return ""
     low = description.lower()
-    if not any(w in low for w in _KEY_DATE_WORDS):
-        return ""
-    time_fields = [k for k in set(k for it in sample for k in it)
-                   if any(w in k.lower() for w in ("date", "time", "publish", "pub", "时间", "日期", "更新"))]
-    if not time_fields:
-        return "发布日期/时间"
-    if all(not str(it.get(k) or "").strip() for it in sample for k in time_fields):
-        return "、".join(sorted(time_fields)[:3])
-    return ""
+    missing = []
+    # 日期/时间类
+    if any(w in low for w in _KEY_DATE_WORDS):
+        time_fields = [k for k in set(k for it in sample for k in it)
+                       if any(w in k.lower() for w in ("date", "time", "publish", "pub", "时间", "日期", "更新"))]
+        if not time_fields:
+            missing.append("发布日期/时间")
+        elif all(not str(it.get(k) or "").strip() for it in sample for k in time_fields):
+            missing.append("、".join(sorted(time_fields)[:3]))
+    # 下载量/阅读量/被引类
+    if any(w in low for w in ("下载", "download", "阅读量", "被引", "引用", "热度", "浏览")):
+        dl_fields = [k for k in set(k for it in sample for k in it)
+                     if any(w in k.lower() for w in ("download", "下载", "down", "read", "view", "次数", "popular"))]
+        if not dl_fields or all(not str(it.get(k) or "").strip() for it in sample for k in dl_fields):
+            missing.append("下载量/阅读量")
+    # 期刊期数语境检查：任务指明"2026年第1期/2026年1月"，但数据不含该期 → 视为失败去自修复
+    if re.search(r"期刊|学报|杂志|论文|文章|《", description):
+        m = re.search(r"(20\d{2})年(?:第)?(\d{1,2})[期月]", description)
+        if m:
+            _y, _n = m.group(1), m.group(2)
+            hay = " ".join(str(v) for it in sample for k, v in it.items() if not str(k).startswith("_"))
+            if not re.search(rf"{_y}年(?:,)?第{_n}期|{_y}年{_n}月", hay):
+                missing.append(f"{_y}年第{_n}期")
+    return "、".join(missing)
 
 
 def _diagnose_failure(urls, result, log) -> str:
@@ -646,6 +662,23 @@ def _score_candidate(url: str, keywords: List[str], timeout: float = 4.0) -> int
     return score
 
 
+def _fix_detail_prefixes(cfg: dict, base: str, log=None) -> None:
+    """detail.url_transform.prefix 常被 AI 写成猜的死域名：用已确认的官方站点前缀修正。"""
+    try:
+        from urllib.parse import urlparse
+        for t in (cfg.get("detail") or {}).get("url_transform", []):
+            pre = (t.get("prefix") or "").strip()
+            if not pre:
+                continue
+            ph = urlparse(pre).hostname if pre.startswith(("http://", "https://")) else ""
+            if ph and _host_status(ph, timeout=2) == "dead":
+                t["prefix"] = base
+                if log:
+                    log(f"🔧 详情页前缀 {pre} 无法解析，已修正为 {base}")
+    except Exception:
+        pass
+
+
 def _fix_dead_domains(cfg: dict, description: str = "", log=None) -> dict:
     """域名校验 + 死域名搜索替换：
     - 有可解析域名：只保留可解析的（丢弃 AI 猜的死域名）
@@ -666,6 +699,12 @@ def _fix_dead_domains(cfg: dict, description: str = "", log=None) -> dict:
             cfg["start_urls"] = good[:10]
             if log:
                 log("🔍 已过滤 AI 猜的死域名（DNS 无法解析），保留可访问入口")
+        try:
+            from urllib.parse import urlparse as _up
+            _b = _up(good[0])
+            _fix_detail_prefixes(cfg, f"{_b.scheme}://{_b.netloc}", log)
+        except Exception:
+            pass
         return cfg
     if not all(st == "dead" for st in statuses):
         return cfg  # 有未知状态（超时等），不动，避免误杀
@@ -712,6 +751,12 @@ def _fix_dead_domains(cfg: dict, description: str = "", log=None) -> dict:
         cfg["start_urls"] = candidates
         if log:
             log(f"✅ 已用官方域名替换死入口：{candidates[0]}")
+        try:
+            from urllib.parse import urlparse as _up
+            _b = _up(candidates[0])
+            _fix_detail_prefixes(cfg, f"{_b.scheme}://{_b.netloc}", log)
+        except Exception:
+            pass
     else:
         if log:
             log("⚠️ 搜索未找到可用官方域名，保留原入口（任务将报错，供诊断）")

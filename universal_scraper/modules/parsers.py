@@ -148,9 +148,30 @@ class ConfigParser(BaseParser):
                         v = self._guess_field(el, name)
                     row[name] = v
                 else:
-                    row[name] = el_html
+                    row[name] = self._string_field(el_html, fspec, name)
             out.append(row)
         return out
+
+    @staticmethod
+    def _string_field(el_html: str, spec: str, name: str = "") -> str:
+        """字符串形式字段选择器（AI 常用）：'sel' / 'sel::text' / 'sel::attr(href)' / xpath://...
+        修复：之前字符串 spec 直接把整行 HTML 塞进字段（title 变 <tr>...</tr>）。"""
+        from ..selectors import css_attr, css_text, xpath_text
+        s = str(spec or "").strip()
+        if not s:
+            return ""
+        if s.startswith("xpath:") or s.startswith("//"):
+            x = s[6:] if s.startswith("xpath:") else s
+            return ConfigParser._smart_single(xpath_text(el_html, x), "text")
+        m = re.search(r"::attr\(([^)]*)\)\s*$", s)
+        if m:
+            attr = (m.group(1).strip().strip("'\"") or "href")
+            sel = s[:m.start()].strip()
+            return ConfigParser._smart_single(css_attr(el_html, sel, attr), "attr")
+        sel = re.sub(r"::text\s*$", "", s).strip()
+        if not sel:
+            return ""
+        return ConfigParser._smart_single(css_text(el_html, sel), "text")
 
     # 字段名 → 常见 class 关键词（自愈时按字段名猜选择器，让猜错 row_css 也能拿到字段值）
     _FIELD_HINTS = {
