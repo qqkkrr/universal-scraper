@@ -281,6 +281,15 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             pcfg["extract_links"] = lk
     # 默认 parser
     cfg["parsers"].setdefault("default", {"type": "html", "fields": {}})
+    # records_path 规范化：AI 常写 row_path / rows_path / data_path → 统一 records_path
+    for pcfg in cfg["parsers"].values():
+        if not isinstance(pcfg, dict):
+            continue
+        if "records_path" not in pcfg or not pcfg.get("records_path"):
+            for _rk in ("row_path", "rows_path", "data_path", "records"):
+                if pcfg.get(_rk):
+                    pcfg["records_path"] = pcfg[_rk]
+                    break
     # records_path 规范化：JSONPath 的 $ 根 / $.a.b → 引擎支持的 a.b / 空（顶层数组自动识别）
     for pcfg in cfg["parsers"].values():
         if not isinstance(pcfg, dict):
@@ -521,7 +530,7 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     if non_empty:
         def _rule_hits(r, u):
             m = r.get("match", "contains")
-            pat = r.get("pattern", "/")
+            pat = r.get("pattern") or "/"  # AI 可能写 null
             if m == "regex":
                 try:
                     return re.search(pat, u) is not None

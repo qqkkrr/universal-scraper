@@ -1,0 +1,14 @@
+执行测试 2 个任务（limit=5, timeout=90s, workers=2, reuse=True, headless=True）
+[02:12:12] [INFO] 任务启动: auto_dd5ad672fe | 队列 1 | 规则 1
+[02:12:12] [INFO] 任务启动: auto_fbce314a49 | 队列 1 | 规则 1
+[02:12:13] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[02:12:14] [WARN] ⚠️ 管道过滤把 500 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 5 条）。如需精确过滤请改配置或加 detail 过滤
+[02:12:14] [INFO] 详情：共 5 条，待抓 5（并发 2，字段缺失自动补全）
+[02:12:18] [INFO] 详情进度: 5/5
+[02:12:18] [INFO] 详情完成：成功 5/5，记录 5 条
+[02:12:19] [INFO] 导出: json=auto_dd5ad672fe.json, csv=auto_dd5ad672fe.csv, xlsx=auto_dd5ad672fe.xlsx
+[02:12:19] [INFO] 完成: 抓取 1 | 条目 5 | 错误 0
+✅ # 57 ok            total=5 29.2s | LeetCode中国“剑指Offer”专项练习题目列表，抓取所有题目名称、难度、通过率、 | err:
+✅ # 58 ok            total=5 333.3s | arXiv “cs.CL”分类下每日新提交论文，抓取标题、作者列表、摘要，自动推送到NL | err:
+
+完成 2：{'ok': 2}

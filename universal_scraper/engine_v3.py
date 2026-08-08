@@ -65,7 +65,7 @@ def resolve_tpl(value: Any, vars: Dict[str, str]) -> Any:
 
 def _match_rule(rule: Dict[str, Any], url: str) -> bool:
     m = rule.get("match", "regex")
-    pat = rule.get("pattern", "")
+    pat = rule.get("pattern") or "/"  # AI 可能写 null/空：None in url 会 TypeError
     if m == "contains":
         return pat in url
     if m == "regex":
@@ -180,6 +180,7 @@ class EngineV3:
             self._spool_path = None
         # 失败重试队列：{url: attempts}
         self._retries: Dict[str, int] = {}
+        self._pre_filter_items: list = []  # 管道过滤前快照（宽松回退用）
         self.max_retries = int(anti.get("max_retries", 2))
         self._active = 0
         # robots.txt 尊重（对标 Crawlee respectRobotsTxtFile / Scrapy）
@@ -299,6 +300,8 @@ class EngineV3:
                         break  # 中间件丢弃该 item
                 if item is None:
                     continue
+                if len(self._pre_filter_items) < 500:
+                    self._pre_filter_items.append(item)
                 item = self.pipeline.process(item)
                 if item is not None and self._seen_store is not None:
                     from .storage import record_key
@@ -467,6 +470,19 @@ class EngineV3:
         finally:
             self.storage.close()
             self._save_pending()
+        # 宽松回退：非日期过滤把全部数据滤成 0 时，恢复过滤前数据并警告（有数据总比 0 好）
+        if self.stats["items"] == 0 and getattr(self, "_pre_filter_items", None):
+            _pf = self._pre_filter_items
+            _pcfg = self.config.get("pipelines") or []
+            _has_strict = any(isinstance(p, dict) and p.get("type") == "filter"
+                              and p.get("op") in ("contains", "non_empty", "not_contains", "regex")
+                              for p in _pcfg)
+            _has_between = any(isinstance(p, dict) and p.get("op") == "between" for p in _pcfg)
+            if _has_strict and not _has_between and _pf:
+                self.logger.warn(f"⚠️ 管道过滤把 {len(_pf)} 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 {self.limit or 50} 条）。如需精确过滤请改配置或加 detail 过滤")
+                _pf = list(_pf)[: int(self.limit or 50)]
+                self._all_items = _pf
+                self.stats["items"] = len(_pf)
         for mw in self.middlewares:
             if hasattr(mw, "flush"):
                 try:

@@ -1,0 +1,163 @@
+执行测试 21 个任务（limit=5, timeout=90s, workers=3, reuse=True, headless=True）
+[01:43:33] [INFO] 任务启动: auto_f45d038c8d | 队列 1 | 规则 1
+[01:43:33] [INFO] 任务启动: auto_10c6a78e5a | 队列 1 | 规则 2
+[01:43:34] [INFO] 任务启动: auto_dd5ad672fe | 队列 1 | 规则 1
+[01:43:36] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:45:02] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:45:20] [WARN] 任务停止信号已生效，本轮请求中断
+[01:45:20] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:45:21] [INFO] 完成: 抓取 3 | 条目 0 | 错误 0
+[01:45:26] [WARN] 任务停止信号已生效，本轮请求中断
+[01:45:28] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ # 45 error         total=0 116.7s | 上交所科创板“项目动态”页面，每周抓取所有问询中企业的名称、受理日期、当前状态，监控IP | err:运行超时（>90s）
+[01:45:28] [INFO] 任务启动: auto_422c6b93e3 | 队列 1 | 规则 2
+🔒 # 18 blocked_login total=0 117.0s | 杭州市住房保障和房产管理局官网“商品房预售证公示”，每日抓取新发预售证的项目名称、开发商 | err:运行超时（>90s）
+[01:45:31] [INFO] 任务启动: auto_fbce314a49 | 队列 1 | 规则 1
+[01:45:32] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:46:45] [INFO] 延迟重试 1/2: https://www.icourse163.org/（2s 后）
+[01:46:45] [WARN] 请求失败 https://www.icourse163.org/: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+[01:47:10] [WARN] 任务停止信号已生效，本轮请求中断
+[01:47:11] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+❌ # 59 error         total=0 125.1s | 中国大学MOOC“计算机”类别下全部已结课课程，抓取课程名、学校、授课教师、选课人数、评 | err:运行超时（>90s）
+⚠️ # 57 empty         total=0 247.6s | LeetCode中国“剑指Offer”专项练习题目列表，抓取所有题目名称、难度、通过率、 | err:
+[01:49:46] [INFO] 任务启动: auto_08d5d1d4ed | 队列 2 | 规则 2
+[01:49:53] [INFO] 延迟重试 1/2: https://www.icourse163.org/about/aboutus.htm（2s 后）
+[01:49:54] [WARN] 请求失败 https://www.icourse163.org/about/aboutus.htm: RuntimeError: browserType.launchPersistentContext: Timeout 180000ms exceeded.
+Call log:
+[2m  - <launching> /Applications/Google Chrom
+[01:49:54] [INFO] 完成: 抓取 4 | 条目 0 | 错误 2
+[01:50:10] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+💥 # 63 exception     total=None 200.0s | 国家企业信用信息公示系统，批量查询指定100家公司的经营状态、列入异常名录情况，每日定时 | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络/Key
+[01:51:00] [INFO] 任务启动: auto_58ef9aa9d1 | 队列 1 | 规则 1
+[01:52:07] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 67 empty         total=0 357.5s | 懂球帝“英超联赛”积分榜与射手榜，每轮比赛日结束后抓取更新，自动生成前6名球队积分变化图 | err:
+[01:53:31] [INFO] 任务启动: auto_b551c2dfdf | 队列 1 | 规则 4
+[01:54:02] [INFO] 任务启动: auto_58ef9aa9d1 | 队列 1 | 规则 2
+[01:54:04] [INFO] 详情：交互模式改用浏览器池并发（2），失败页自动回退交互串行
+[01:54:04] [INFO] 详情：共 11 条，待抓 11（并发 2，字段缺失自动补全）
+[01:55:03] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 70 empty         total=0 247.9s | 网易云音乐“官方歌单·新歌推荐”，每周抓取新增歌曲名称、歌手、评论数、收藏数，发现潜力新 | err:
+[01:55:07] [INFO] 任务启动: auto_cbcd0a892a | 队列 2 | 规则 2
+[01:55:10] [WARN] 收到停止信号，详情补抓提前结束
+[01:55:27] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20007 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:55:28] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20000 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:55:32] [INFO] 详情过滤：11 -> 0 条（link 详情合并后按条件保留）
+❌ # 75 error         total=0 121.6s | NPM “most depended packages”榜单，每月抓取前100包名、依赖 | err:运行超时（>90s）
+[01:55:33] [INFO] 任务启动: auto_c0d144c5e7 | 队列 1 | 规则 2
+⚠️ # 58 empty         total=0 605.5s | arXiv “cs.CL”分类下每日新提交论文，抓取标题、作者列表、摘要，自动推送到NL | err:
+[01:55:34] [INFO] 任务启动: auto_1f58a0ad4d | 队列 1 | 规则 1
+[01:55:35] [INFO] 详情完成：成功 2/11，记录 0 条
+[01:55:35] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:55:52] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timeout after 20003 ms. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:55:52] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timeout after 20488 ms. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:55:56] [INFO] 延迟重试 1/2: https://hub.docker.com/v2/repositories/library/python/（2s 后）[01:55:56] [INFO] 延迟重试 1/2: https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100（2s 后）
+
+[01:55:56] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timeout after 20003 ms. See https://curl.se/libcurl/c/libcurl-errors.ht
+[01:55:56] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timeout after 20488 ms. See https://curl.se/libcurl/c/libcurl-errors.ht
+[01:56:16] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:56:18] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:56:18] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20001 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:56:31] [INFO] 延迟重试 1/2: https://epub.cnipa.gov.cn/（2s 后）
+[01:56:31] [WARN] 请求失败 https://epub.cnipa.gov.cn/: RuntimeError: page.goto: net::ERR_TIMED_OUT at https://epub.cnipa.gov.cn/
+Call log:
+[2m  - navigating to "https://epub.cnipa.gov.cn/"
+[01:56:40] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20003 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:56:40] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20003 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:56:48] [INFO] 延迟重试 2/2: https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100（4s 后）
+[01:56:48] [INFO] 延迟重试 2/2: https://hub.docker.com/v2/repositories/library/python/（4s 后）
+[01:56:48] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20003 milliseconds. See https://curl.se/libcurl/c/libcu
+[01:56:48] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20003 milliseconds. See https://curl.se/libcurl/c/libcu
+[01:56:48] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:56:48] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[01:57:03] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+❌ # 76 error         total=0 155.0s | Docker Hub “official images”中“python”标签页，监控镜 | err:运行超时（>90s）
+[01:57:42] [INFO] 任务启动: auto_8aed4386d5 | 队列 1 | 规则 7
+[01:57:48] [INFO] 任务启动: auto_1f58a0ad4d | 队列 2 | 规则 1
+❌ # 84 error         total=0 136.2s | 中国专利公布公告网站，搜索“大疆”的发明专利，抓取最近一年公开的专利名称、摘要、申请日、 | err:运行超时（>90s）
+[01:57:52] [INFO] 任务启动: auto_954da61f75 | 队列 2 | 规则 1
+[01:58:09] [INFO] 延迟重试 1/3: https://www.landchina.com/（2s 后）
+[01:58:09] [WARN] 请求失败 https://www.landchina.com/: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+[01:58:15] [INFO] 延迟重试 2/2: https://epub.cnipa.gov.cn/（4s 后）
+[01:58:15] [WARN] 请求失败 https://epub.cnipa.gov.cn/: RuntimeError: page.goto: net::ERR_CONNECTION_TIMED_OUT at https://epub.cnipa.gov.cn/
+Call log:
+[2m  - navigating to "https://epub.cni
+[01:58:16] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+[01:59:13] [WARN] 任务停止信号已生效，本轮请求中断
+[01:59:13] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:59:13] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+[01:59:18] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:59:27] [WARN] 任务停止信号已生效，本轮请求中断
+[01:59:27] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:59:27] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+❌ # 87 error         total=0 107.1s | 中国期货业协会“期货公司评级”结果页，每年公布后抓取公司名称、分类结果，更新合作方白名单 | err:运行超时（>90s）
+[01:59:29] [INFO] 任务启动: auto_6b57752eca | 队列 1 | 规则 2
+❌ # 92 error         total=0 102.4s | 各航空公司官网“里程票”查询（公开），固定航线“广州-乌鲁木齐”每日查票并抓取可兑换的日 | err:运行超时（>90s）
+[01:59:32] [INFO] 任务启动: auto_6706461833 | 队列 1 | 规则 1
+❌ # 64 error         total=0 254.7s | 自然资源部“土地市场”成交结果，抓取城市、地块名称、用途、成交价、楼面价、竞得企业，形成 | err:运行超时（>90s）
+[01:59:49] [INFO] 任务启动: auto_35a346ec9e | 队列 1 | 规则 1
+[01:59:57] [INFO] 延迟重试 1/3: https://www.huke88.com/search.html?keyword=PS&price=0（2s 后）
+[01:59:57] [WARN] 请求失败 https://www.huke88.com/search.html?keyword=PS&price=0: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[02:00:09] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[02:00:11] [INFO] 重试成功（冲销 1 错误）: https://www.huke88.com/search.html?keyword=PS&price=0
+[02:00:14] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+[02:00:27] [INFO] 任务启动: auto_6b57752eca | 队列 1 | 规则 2
+[02:00:58] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 93 empty         total=0 91.6s | 虎课网“PS教程”免费课程列表，抓取课程名称、时长、学习人数、评分，整理自学路径。 | err:
+[02:01:01] [INFO] 任务启动: auto_51953d6be1 | 队列 1 | 规则 1
+[02:01:02] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[02:01:14] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[02:01:17] [INFO] 延迟重试 1/2: https://play.google.com/store/apps/category/GAME/collection/topselling_free?hl=en_US&gl=US（2s 后）
+[02:01:17] [WARN] 请求失败 https://play.google.com/store/apps/category/GAME/collection/topselling_free?hl=en_US&gl=US: RuntimeError: page.goto: Timeout 90000ms exceeded.
+Call log:
+[2m  - navigating to "https://play.google.com/store/apps/category/GAME/c
+[02:01:17] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[02:01:21] [INFO] 延迟重试 2/3: https://www.landchina.com/（4s 后）
+[02:01:21] [WARN] 请求失败 https://www.landchina.com/: RuntimeError: browserType.launchPersistentContext: Timeout 180000ms exceeded.
+Call log:
+[2m  - <launching> /Applications/Google Chrom
+[02:01:21] [INFO] 完成: 抓取 3 | 条目 0 | 错误 2
+❌ # 99 error         total=0 154.6s | Google Play “Top Free Games” 美国区，每日抓取前50游戏名称 | err:运行超时（>90s）
+[02:02:58] [INFO] 任务启动: auto_35a346ec9e | 队列 1 | 规则 1
+[02:02:59] [INFO] 延迟重试 1/2: https://api.stackexchange.com/2.3/questions?site=stackoverflow&tagged=python&fromdate=1786204800&todate=1786291200&sort=votes&order=desc&pagesize=100（2s 后）
+[02:02:59] [WARN] 请求失败 https://api.stackexchange.com/2.3/questions?site=stackoverflow&tagged=python&fromdate=1786204800&todate=1786291200&sort=votes&order=desc&pagesize=100: RateLimitedError: 限流 200: https://api.stackexchange.com/2.3/questions?site=stackoverflow&tagged=python&fromdate=1786204800&todate=17862912
+[02:03:02] [INFO] 延迟重试 2/2: https://api.stackexchange.com/2.3/questions?site=stackoverflow&tagged=python&fromdate=1786204800&todate=1786291200&sort=votes&order=desc&pagesize=100（4s 后）
+[02:03:02] [WARN] 请求失败 https://api.stackexchange.com/2.3/questions?site=stackoverflow&tagged=python&fromdate=1786204800&todate=1786291200&sort=votes&order=desc&pagesize=100: RateLimitedError: 限流 200: https://api.stackexchange.com/2.3/questions?site=stackoverflow&tagged=python&fromdate=1786204800&todate=17862912
+[02:03:06] [WARN] 放弃重试 https://api.stackexchange.com/2.3/questions?site=stackoverflow&tagged=python&fromdate=1786204800&todate=1786291200&sort=votes&order=desc&pagesize=100（已达 2 次）
+[02:03:06] [WARN] 请求失败 https://api.stackexchange.com/2.3/questions?site=stackoverflow&tagged=python&fromdate=1786204800&todate=1786291200&sort=votes&order=desc&pagesize=100: RateLimitedError: 限流 200: https://api.stackexchange.com/2.3/questions?site=stackoverflow&tagged=python&fromdate=1786204800&todate=17862912
+[02:03:06] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[02:03:06] [INFO] 反爬拦截统计: cloudflare×3
+🔒 # 74 blocked_login total=0 199.4s | Stack Overflow“Questions”标签“python”下按votes排序 | err:
+[02:03:08] [INFO] 任务启动: auto_ff25cddeed | 队列 1 | 规则 1
+[02:03:45] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #100 empty         total=0 213.3s | 中国政府采购网“中标公告”，抓取“网络安全服务”相关的中标公告，提取中标供应商、中标金额 | err:
+[02:06:28] [INFO] 任务启动: auto_ff25cddeed | 队列 1 | 规则 1
+[02:06:54] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 83 empty         total=0 228.7s | 国家药监局“进口化妆品备案”查询，针对“兰蔻”品牌抓取所有已备案产品的产品名称、成分、生 | err:
+[02:07:00] [INFO] 任务启动: auto_e00455154c | 队列 1 | 规则 1
+[02:08:29] [INFO] 延迟重试 1/2: https://www.binance.com/zh-CN/support/announcement/c-48?navId=48（2s 后）
+[02:08:29] [WARN] 请求失败 https://www.binance.com/zh-CN/support/announcement/c-48?navId=48: RuntimeError: page.goto: net::ERR_CONNECTION_TIMED_OUT at https://www.binance.com/zh-CN/support/announcement/c-48?navId=48
+Call log:
+
+[02:08:32] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[02:08:32] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+❌ # 88 error         total=0 111.3s | 币安官网“公告中心”新币上线通告，每小时抓取最新公告标题、项目名、交易开放时间，用于社区 | err:运行超时（>90s）
+[02:08:48] [INFO] 任务启动: auto_7e3b5bdb4f | 队列 1 | 规则 1
+[02:09:09] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[02:09:31] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[02:09:35] [INFO] 延迟重试 1/2: https://github.com/trending?since=weekly（2s 后）
+[02:09:35] [WARN] 请求失败 https://github.com/trending?since=weekly: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcu
+[02:09:57] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[02:10:18] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[02:10:19] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20003 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[02:10:23] [INFO] 延迟重试 2/2: https://github.com/trending?since=weekly（4s 后）
+[02:10:23] [WARN] 请求失败 https://github.com/trending?since=weekly: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20003 milliseconds. See https://curl.se/libcurl/c/libcu
+[02:10:23] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+❌ # 98 error         total=0 151.3s | GitHub Trending “All languages”本周榜单，每周一抓取前20 | err:运行超时（>90s）
+
+完成 21：{'error': 11, 'blocked_login': 2, 'empty': 7, 'exception': 1}

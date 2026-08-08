@@ -1,1 +1,226 @@
 执行测试 25 个任务（limit=5, timeout=90s, workers=4, reuse=False, headless=True）
+[01:13:47] [INFO] 任务启动: auto_cbcd0a892a | 队列 2 | 规则 2
+[01:14:03] [INFO] 任务启动: auto_435100ee64 | 队列 1 | 规则 1
+[01:14:08] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20098 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:14:08] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:14:19] [INFO] 任务启动: auto_e5464cff77 | 队列 1 | 规则 1
+[01:14:30] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20007 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:14:30] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20000 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:14:34] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:14:34] [INFO] 延迟重试 1/2: https://hub.docker.com/v2/repositories/library/python/（2s 后）
+[01:14:34] [INFO] 延迟重试 1/2: https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100（2s 后）
+[01:14:34] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20007 milliseconds. See https://curl.se/libcurl/c/libcu
+[01:14:34] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20000 milliseconds. See https://curl.se/libcurl/c/libcu
+[01:14:56] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20003 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:14:57] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20000 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:14:59] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:15:18] [INFO] 任务启动: auto_e99a31a064 | 队列 1 | 规则 1
+[01:15:18] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20001 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:15:19] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:15:22] [INFO] 延迟重试 2/2: https://hub.docker.com/v2/repositories/library/python/（4s 后）
+[01:15:22] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20001 milliseconds. See https://curl.se/libcurl/c/libcu
+[01:15:22] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:15:23] [INFO] 延迟重试 2/2: https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100（4s 后）
+[01:15:23] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcu
+[01:15:23] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+❌ # 76 error         total=0 200.7s | Docker Hub “official images”中“python”标签页，监控镜 | err:运行超时（>90s）
+[01:16:29] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:17:17] [INFO] 任务启动: auto_435100ee64 | 队列 1 | 规则 3
+[01:17:34] [INFO] 任务启动: auto_e5464cff77 | 队列 1 | 规则 2
+[01:18:05] [INFO] 任务启动: auto_e99a31a064 | 队列 1 | 规则 1
+[01:18:26] [INFO] 任务启动: auto_8b689804c4 | 队列 1 | 规则 1
+[01:19:05] [WARN] 任务停止信号已生效，本轮请求中断
+[01:19:05] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:19:05] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:19:26] [WARN] 任务停止信号已生效，本轮请求中断
+[01:19:26] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+🔒 # 79 blocked_login total=0 396.1s | 懂车帝“销量榜”- 新能源SUV月销量，每月初抓取前30车型名称、品牌、销量、指导价，跟 | err:运行超时（>90s）
+🔒 # 78 blocked_login total=0 398.3s | 汽车之家“口碑”频道，针对“特斯拉 Model Y”抓取所有认证车主口碑，包含最满意/不 | err:运行超时（>90s）
+[01:19:35] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:19:38] [WARN] 任务停止信号已生效，本轮请求中断
+[01:19:40] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:19:41] [INFO] 延迟重试 1/3: https://www.guazi.com/tesla/（2s 后）
+[01:19:41] [WARN] 请求失败 https://www.guazi.com/tesla/: TypeError: 'in <string>' requires string as left operand, not NoneType
+🔒 # 77 blocked_login total=0 412.4s | Wappalyzer结合自定义爬虫，批量探测某行业前500名网站的建站技术栈，抓取使用的 | err:运行超时（>90s）
+[01:19:56] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:19:58] [WARN] 任务停止信号已生效，本轮请求中断
+[01:19:58] [INFO] 完成: 抓取 2 | 条目 0 | 错误 1
+🔒 # 80 blocked_login total=0 230.0s | 瓜子二手车“全国购”特斯拉 Model 3 车源，每日抓取最新上架的20辆车里程、上牌时 | err:运行超时（>90s）
+[01:20:46] [INFO] 任务启动: auto_2447ba23f5 | 队列 1 | 规则 1
+[01:20:56] [INFO] 任务启动: auto_81bf8e33d8 | 队列 1 | 规则 1
+[01:21:35] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:21:38] [INFO] 延迟重试 1/3: https://www.autohome.com.cn/110/（2s 后）
+[01:21:38] [WARN] 请求失败 https://www.autohome.com.cn/110/: RuntimeError: browserType.launchPersistentContext: Timeout 180000ms exceeded.
+Call log:
+[2m  - <launching> /Applications/Google Chrom
+[01:21:38] [INFO] 完成: 抓取 3 | 条目 0 | 错误 1
+[01:22:08] [INFO] 任务启动: auto_ff25cddeed | 队列 1 | 规则 1
+[01:22:16] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:22:21] [WARN] 任务停止信号已生效，本轮请求中断
+[01:22:21] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:22:27] [INFO] 任务启动: auto_c0d144c5e7 | 队列 1 | 规则 2
+🔒 # 82 blocked_login total=0 178.8s | 七麦数据“iOS免费榜-工具类”，每日抓取前100位App名称、开发商、评分、近30日下 | err:运行超时（>90s）
+[01:22:41] [INFO] 延迟重试 1/2: https://www.nmpa.gov.cn/datasearch/search-result.html?type=hzp_import&keyword=%E5%85%B0%E9%85%B7（2s 后）
+[01:22:41] [WARN] 请求失败 https://www.nmpa.gov.cn/datasearch/search-result.html?type=hzp_import&keyword=%E5%85%B0%E9%85%B7: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[01:23:20] [INFO] 延迟重试 2/2: https://www.nmpa.gov.cn/datasearch/search-result.html?type=hzp_import&keyword=%E5%85%B0%E9%85%B7（4s 后）
+[01:23:20] [WARN] 请求失败 https://www.nmpa.gov.cn/datasearch/search-result.html?type=hzp_import&keyword=%E5%85%B0%E9%85%B7: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[01:23:39] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:23:43] [INFO] 延迟重试 1/2: https://epub.cnipa.gov.cn/（2s 后）
+[01:23:43] [WARN] 请求失败 https://epub.cnipa.gov.cn/: RuntimeError: page.goto: net::ERR_TIMED_OUT at https://epub.cnipa.gov.cn/
+Call log:
+[2m  - navigating to "https://epub.cnipa.gov.cn/"
+[01:23:58] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:24:07] [WARN] 任务停止信号已生效，本轮请求中断
+[01:24:07] [INFO] 完成: 抓取 3 | 条目 0 | 错误 2
+[01:24:28] [INFO] 任务启动: auto_81bf8e33d8 | 队列 1 | 规则 1
+❌ # 83 error         total=0 306.0s | 国家药监局“进口化妆品备案”查询，针对“兰蔻”品牌抓取所有已备案产品的产品名称、成分、生 | err:运行超时（>90s）
+[01:24:47] [INFO] 任务启动: auto_b24c795a5d | 队列 1 | 规则 1
+❌ # 84 error         total=0 288.3s | 中国专利公布公告网站，搜索“大疆”的发明专利，抓取最近一年公开的专利名称、摘要、申请日、 | err:运行超时（>90s）
+[01:25:21] [INFO] 导出: json=auto_81bf8e33d8.json, csv=auto_81bf8e33d8.csv, xlsx=auto_81bf8e33d8.xlsx
+[01:25:21] [INFO] 完成: 抓取 1 | 条目 1 | 错误 0
+✅ # 81 ok            total=1 339.0s | 滴滴出行/高德地图公开的“北京区域”实时拥堵延时指数（通过Web页面），每半小时抓取一次 | err:
+[01:25:51] [INFO] 详情：交互模式改用浏览器池并发（2），失败页自动回退交互串行
+[01:25:51] [INFO] 详情：共 1 条，待抓 1（并发 2，字段缺失自动补全）
+[01:25:51] [INFO] 延迟重试 2/2: https://epub.cnipa.gov.cn/（4s 后）
+[01:25:51] [WARN] 请求失败 https://epub.cnipa.gov.cn/: RuntimeError: page.goto: net::ERR_CONNECTION_TIMED_OUT at https://epub.cnipa.gov.cn/
+Call log:
+[2m  - navigating to "https://epub.cni
+[01:25:51] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+[01:26:11] [INFO] 详情进度: 1/1
+[01:26:11] [INFO] 详情过滤：1 -> 0 条（link 详情合并后按条件保留）
+[01:26:14] [INFO] 详情完成：成功 1/1，记录 0 条
+[01:26:14] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:26:33] [INFO] 任务启动: auto_e00455154c | 队列 1 | 规则 1
+[01:27:05] [INFO] 任务启动: auto_8aed4386d5 | 队列 1 | 规则 7
+[01:27:08] [INFO] 任务启动: auto_58750bc350 | 队列 1 | 规则 2
+[01:28:18] [INFO] 延迟重试 1/2: https://www.binance.com/zh-CN/support/announcement/c-48?navId=48（2s 后）
+[01:28:18] [WARN] 请求失败 https://www.binance.com/zh-CN/support/announcement/c-48?navId=48: RuntimeError: page.goto: net::ERR_CONNECTION_TIMED_OUT at https://www.binance.com/zh-CN/support/announcement/c-48?navId=48
+Call log:
+
+[01:28:18] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:28:18] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[01:28:33] [INFO] 任务启动: auto_b24c795a5d | 队列 1 | 规则 1
+❌ # 88 error         total=0 223.7s | 币安官网“公告中心”新币上线通告，每小时抓取最新公告标题、项目名、交易开放时间，用于社区 | err:运行超时（>90s）
+[01:28:41] [INFO] 延迟重试 1/2: https://law.wkinfo.com.cn/case-analysis/list?fq=organsNew%C7%812CO00000076%C7%81%C7%82%E6%9C%80%E9%AB%98%E6%B3%95%E6%8C%87%E5%AF%BC%E6%80%A7%E6%A1%88%E4%BE%8B（2s 后）
+[01:28:41] [WARN] 请求失败 https://law.wkinfo.com.cn/case-analysis/list?fq=organsNew%C7%812CO00000076%C7%81%C7%82%E6%9C%80%E9%AB%98%E6%B3%95%E6%8C%87%E5%AF%BC%E6%80%A7%E6%A1%88%E4%BE%8B: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+[01:28:41] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:28:46] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:28:46] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+❌ # 87 error         total=0 257.7s | 中国期货业协会“期货公司评级”结果页，每年公布后抓取公司名称、分类结果，更新合作方白名单 | err:运行超时（>90s）
+[01:29:11] [WARN] 任务停止信号已生效，本轮请求中断
+[01:29:11] [INFO] 完成: 抓取 3 | 条目 0 | 错误 1
+🔒 # 85 blocked_login total=0 240.5s | 威科先行法律库“劳动法”下最新典型案例，抓取案例标题、案号、裁决要旨，更新内部法律知识库 | err:运行超时（>90s）
+[01:29:44] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:29:47] [INFO] 任务启动: auto_ecddaef75b | 队列 1 | 规则 1
+✅ # 86 ok            total=20 475.1s | 各地政府采购网，抓取“信息化建设”品目下最新公开招标公告的项目名称、预算金额、投标截止时 | err:
+[01:30:31] [INFO] 任务启动: auto_cf00a91fe1 | 队列 1 | 规则 3
+[01:31:18] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:31:22] [WARN] 任务停止信号已生效，本轮请求中断
+[01:31:22] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 91 blocked_login total=0 152.2s | 企查查“A股上市公司”列表，每月抓取所有上市公司的注册资本、成立日期、注册地址，校验工商 | err:运行超时（>90s）
+[01:31:28] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[01:31:31] [INFO] 任务启动: auto_954da61f75 | 队列 2 | 规则 1
+[01:32:40] [INFO] 任务启动: auto_cf00a91fe1 | 队列 1 | 规则 3
+[01:32:49] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+[01:33:07] [INFO] 任务启动: auto_d36d8a9142 | 队列 1 | 规则 1
+[01:33:09] [INFO] 任务启动: auto_835d044fec | 队列 1 | 规则 1
+[01:33:09] [INFO] 延迟重试 1/3: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap（2s 后）
+[01:33:09] [WARN] 请求失败 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap: RateLimitedError: 限流 200: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap (
+[01:33:12] [INFO] 延迟重试 2/3: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap（4s 后）
+[01:33:12] [WARN] 请求失败 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap: RateLimitedError: 限流 200: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap (
+[01:33:16] [INFO] 延迟重试 3/3: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap（8s 后）
+[01:33:16] [WARN] 请求失败 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap: RateLimitedError: 限流 200: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap (
+[01:33:29] [WARN] 放弃重试 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap（已达 3 次）
+[01:33:29] [WARN] 请求失败 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap: RateLimitedError: 限流 200: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E7%AB%99&c=131&pn=0&rn=50&ie=utf-8&oue=1&res=api&from=webmap (
+[01:33:29] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[01:33:29] [INFO] 反爬拦截统计: captcha×4
+[01:33:29] [INFO] 任务启动: auto_835d044fec | 队列 1 | 规则 1
+[01:33:29] [INFO] 延迟重试 1/2: https://www.drugs.dxy.cn/（2s 后）
+[01:33:29] [WARN] 请求失败 https://www.drugs.dxy.cn/: RuntimeError: page.goto: net::ERR_CERT_COMMON_NAME_INVALID at https://www.drugs.dxy.cn/
+Call log:
+[2m  - navigating to "https://www.d
+[01:33:58] [INFO] 延迟重试 2/2: https://www.drugs.dxy.cn/（4s 后）
+[01:33:58] [WARN] 请求失败 https://www.drugs.dxy.cn/: RuntimeError: page.goto: net::ERR_CERT_COMMON_NAME_INVALID at https://www.drugs.dxy.cn/
+Call log:
+[2m  - navigating to "https://www.d
+[01:34:18] [WARN] 任务停止信号已生效，本轮请求中断
+[01:34:18] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:34:19] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 89 blocked_login total=0 299.4s | 小红书“考研”话题下经验笔记，抓取300篇笔记正文，统计提及率最高的参考书、网课老师，生 | err:运行超时（>90s）
+[01:34:34] [WARN] 放弃重试 https://www.drugs.dxy.cn/（已达 2 次）
+[01:34:34] [WARN] 请求失败 https://www.drugs.dxy.cn/: RuntimeError: page.goto: net::ERR_CERT_COMMON_NAME_INVALID at https://www.drugs.dxy.cn/
+Call log:
+[2m  - navigating to "https://www.d
+[01:34:34] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[01:35:00] [WARN] 任务停止信号已生效，本轮请求中断
+[01:35:00] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:35:00] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 90 blocked_login total=0 275.9s | 百度地图“北京·五环内”充电桩POI搜索，通过公开地点搜索抓取所有充电站名称、快慢充数量 | err:运行超时（>90s）
+[01:35:28] [INFO] 任务启动: auto_6b57752eca | 队列 1 | 规则 1
+[01:35:33] [INFO] 任务启动: auto_09ad8468fc | 队列 1 | 规则 1
+[01:35:37] [INFO] 导出: json=auto_09ad8468fc.json, csv=auto_09ad8468fc.csv, xlsx=auto_09ad8468fc.xlsx
+[01:35:37] [INFO] 完成: 抓取 1 | 条目 35 | 错误 0
+[01:35:41] [INFO] 延迟重试 1/2: https://www.huke88.com/search.html?keyword=PS&price=0（2s 后）
+[01:35:41] [WARN] 请求失败 https://www.huke88.com/search.html?keyword=PS&price=0: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[01:35:50] [INFO] 延迟重试 2/2: https://www.huke88.com/search.html?keyword=PS&price=0（4s 后）
+[01:35:50] [WARN] 请求失败 https://www.huke88.com/search.html?keyword=PS&price=0: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[01:36:04] [INFO] 重试成功（冲销 2 错误）: https://www.huke88.com/search.html?keyword=PS&price=0
+[01:36:07] [INFO] 完成: 抓取 3 | 条目 0 | 错误 0
+✅ # 94 ok            total=10 77.3s | 豆瓣同城“上海·展览”活动列表，每周抓取活动名称、时间、地点、费用、感兴趣人数，编辑城市 | err:
+⚠️ # 92 empty         total=0 474.5s | 各航空公司官网“里程票”查询（公开），固定航线“广州-乌鲁木齐”每日查票并抓取可兑换的日 | err:
+[01:36:41] [INFO] 任务启动: auto_1e508b5b4f | 队列 1 | 规则 1
+[01:36:54] [INFO] 任务启动: auto_d36d8a9142 | 队列 1 | 规则 1
+[01:37:16] [INFO] 任务启动: auto_7e3b5bdb4f | 队列 1 | 规则 1
+[01:37:33] [INFO] 详情：交互模式改用浏览器池并发（2），失败页自动回退交互串行
+[01:37:33] [INFO] 详情：共 5 条，待抓 1（并发 2，字段缺失自动补全）
+[01:37:37] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:37:59] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:38:06] [INFO] 延迟重试 1/2: https://github.com/trending?since=weekly（2s 后）
+[01:38:06] [WARN] 请求失败 https://github.com/trending?since=weekly: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcu
+[01:38:11] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:38:11] [WARN] 任务停止信号已生效，本轮请求中断
+[01:38:11] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 96 blocked_login total=0 104.4s | 中国政府网“国务院政策文件库”，抓取最新发布的中央文件标题、发文字号、发布日期，做政策简 | err:运行超时（>90s）
+[01:38:24] [INFO] 任务启动: auto_6b57752eca | 队列 1 | 规则 2
+[01:38:29] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20003 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[01:38:30] [WARN] 收到停止信号，详情补抓提前结束
+[01:38:33] [INFO] 详情完成：成功 0/1，记录 5 条
+[01:38:33] [INFO] 导出: json=auto_d36d8a9142.json, csv=auto_d36d8a9142.csv, xlsx=auto_d36d8a9142.xlsx
+[01:38:33] [INFO] 完成: 抓取 1 | 条目 5 | 错误 0
+? # 95 ok_late       total=5 435.0s | 丁香园“用药助手”药品详情页，抓取“头孢克肟”等常用药的适应症、用法用量、禁忌，构建个人 | err:超时但已产出数据
+[01:38:43] [INFO] 延迟重试 1/3: https://www.huke88.com/search.html?keyword=PS&price=0（2s 后）
+[01:38:43] [WARN] 请求失败 https://www.huke88.com/search.html?keyword=PS&price=0: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[01:38:46] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:38:53] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[01:38:54] [INFO] 延迟重试 2/3: https://www.huke88.com/search.html?keyword=PS&price=0（4s 后）
+[01:38:54] [WARN] 请求失败 https://www.huke88.com/search.html?keyword=PS&price=0: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[01:38:57] [INFO] 延迟重试 2/2: https://github.com/trending?since=weekly（4s 后）
+[01:38:57] [WARN] 请求失败 https://github.com/trending?since=weekly: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcu
+[01:38:57] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+[01:39:06] [INFO] 延迟重试 3/3: https://www.huke88.com/search.html?keyword=PS&price=0（8s 后）
+[01:39:06] [WARN] 请求失败 https://www.huke88.com/search.html?keyword=PS&price=0: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[01:39:23] [INFO] 任务启动: auto_51953d6be1 | 队列 1 | 规则 1
+[01:39:25] [INFO] 任务启动: auto_6706461833 | 队列 1 | 规则 1
+[01:39:28] [INFO] 重试成功（冲销 3 错误）: https://www.huke88.com/search.html?keyword=PS&price=0
+[01:39:32] [INFO] 完成: 抓取 4 | 条目 0 | 错误 0
+[01:39:47] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 93 empty         total=0 323.7s | 虎课网“PS教程”免费课程列表，抓取课程名称、时长、学习人数、评分，整理自学路径。 | err:
+❌ # 98 error         total=0 216.3s | GitHub Trending “All languages”本周榜单，每周一抓取前20 | err:运行超时（>90s）
+[01:40:55] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:41:11] [INFO] 任务启动: auto_bf456c9c9f | 队列 1 | 规则 1
+[01:41:14] [INFO] 延迟重试 1/2: https://play.google.com/store/apps/category/GAME/collection/topselling_free?hl=en_US&gl=US（2s 后）
+[01:41:14] [WARN] 请求失败 https://play.google.com/store/apps/category/GAME/collection/topselling_free?hl=en_US&gl=US: RuntimeError: page.goto: Timeout 90000ms exceeded.
+Call log:
+[2m  - navigating to "https://play.google.com/store/apps/category/GAME/c
+[01:41:14] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+❌ # 99 error         total=0 203.4s | Google Play “Top Free Games” 美国区，每日抓取前50游戏名称 | err:运行超时（>90s）
+[01:42:41] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[01:42:42] [WARN] 任务停止信号已生效，本轮请求中断
+[01:42:42] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 97 blocked_login total=0 182.8s | 爱企查“商标查询”第9类“已注册”商标，针对某企业名称抓取所有商标名称、注册号、状态，排 | err:运行超时（>90s）
+⚠️ #100 empty         total=0 293.1s | 中国政府采购网“中标公告”，抓取“网络安全服务”相关的中标公告，提取中标供应商、中标金额 | err:
+
+完成 25：{'error': 7, 'blocked_login': 11, 'ok': 3, 'empty': 3, 'ok_late': 1}
