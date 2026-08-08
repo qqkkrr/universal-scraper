@@ -180,5 +180,16 @@
   "first": {},
   "secs": 107.4,
   "desc": "PyPI“trending projects”页面，每周抓取最近一周热门Python包名称、简介、版本号、发布者，发现新工具。"
+ },
+ {
+  "id": 57,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 0,
+  "first": {},
+  "secs": 175.4,
+  "desc": "LeetCode中国“剑指Offer”专项练习题目列表，抓取所有题目名称、难度、通过率、标签，提供给备考小组。"
  }
 ]
