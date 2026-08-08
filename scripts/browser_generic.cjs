@@ -445,11 +445,31 @@ function centerCaptcha(page) {
         }
       }
       let diagSent = 0;
+      let autoClickedVerify = false;
       const gateStartTs = Date.now();
       while (!done && Date.now() < deadline) {
         if (stopRequested()) {
           out({ type: "stopped", message: "收到停止信号（.stop）" });
           process.exit(0);
+        }
+        // Boss直聘"点击按钮进行验证"：自动点一次（点击型验证，点完弹滑块交给用户拖）
+        if (!autoClickedVerify) {
+          try {
+            const btnPos = await page.evaluate(() => {
+              const els = Array.from(document.querySelectorAll("button, a, div, span, em"));
+              const target = els.find(e => /点击按钮进行验证|点击验证|开始验证/.test((e.textContent || "").trim())
+                && e.offsetWidth > 0 && e.offsetHeight > 0);
+              if (!target) return null;
+              const r = target.getBoundingClientRect();
+              return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+            });
+            if (btnPos) {
+              await page.mouse.click(btnPos.x, btnPos.y);
+              autoClickedVerify = true;
+              out({ type: "verify_required", message: "✅ 已自动点击「点击按钮进行验证」，滑块弹出后请拖动完成" });
+              await sleep(1500);
+            }
+          } catch (e) {}
         }
         const u = page.url() || "";
         let txt = "";
