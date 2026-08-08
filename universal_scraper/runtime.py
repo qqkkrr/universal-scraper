@@ -44,11 +44,17 @@ def resolve_node_path() -> str:
     try:
         out = subprocess.run(
             [resolve_node(), "-e",
-             "console.log(require.resolve('playwright/package.json').replace(/package.json$/, ''))"],
+             "console.log(require.resolve('playwright/package.json'))"],
             capture_output=True, text=True, timeout=10)
         p = out.stdout.strip()
-        if p and Path(p).exists():
-            return p
+        if p:
+            # require.resolve 返回 .../node_modules/playwright/package.json
+            # NODE_PATH 需要的是 node_modules 目录（父级）
+            pkg = Path(p)
+            if pkg.name == "package.json" and pkg.parent.parent.name == "node_modules":
+                return str(pkg.parent.parent)
+            if pkg.exists() and pkg.name == "playwright":
+                return str(pkg.parent)
     except Exception:
         pass
     return _FALLBACK_MODS if Path(_FALLBACK_MODS).exists() else ""

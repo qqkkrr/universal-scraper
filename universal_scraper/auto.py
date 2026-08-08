@@ -385,7 +385,7 @@ def _missing_key_field(description: str, sample: list) -> str:
     # 下载量/阅读量/被引类
     if any(w in low for w in ("下载", "download", "阅读量", "被引", "引用", "热度", "浏览")):
         dl_fields = [k for k in set(k for it in sample for k in it)
-                     if any(w in k.lower() for w in ("download", "下载", "down", "read", "view", "次数", "popular"))]
+                     if any(w in k.lower() for w in ("download", "下载", "down", "read", "view", "浏览", "阅读", "人次", "热度", "次数", "popular"))]
         if not dl_fields or all(not str(it.get(k) or "").strip() for it in sample for k in dl_fields):
             missing.append("下载量/阅读量")
     # 期刊期数语境检查：任务指明"2026年第1期/2026年1月"，但数据不含该期 → 视为失败去自修复
@@ -394,7 +394,8 @@ def _missing_key_field(description: str, sample: list) -> str:
         if m:
             _y, _n = m.group(1), m.group(2)
             hay = " ".join(str(v) for it in sample for k, v in it.items() if not str(k).startswith("_"))
-            if not re.search(rf"{_y}年(?:,)?第{_n}期|{_y}年{_n}月", hay):
+            # 兼容常见期号写法：2026年第1期 / 2026年,第1期 / 2026年1月 / 2026.43(1)（ajcass）
+            if not re.search(rf"{_y}年(?:,)?第{_n}期|{_y}年{_n}月|{_y}\.\d+\s*\(\s*{_n}\s*\)", hay):
                 missing.append(f"{_y}年第{_n}期")
     return "、".join(missing)
 
