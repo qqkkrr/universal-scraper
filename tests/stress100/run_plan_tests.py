@@ -13,9 +13,10 @@ sys.path.insert(0, str(ROOT))
 from universal_scraper.auto import plan_task
 
 BASE = Path(__file__).resolve().parent
-TASKS = json.load(open(BASE / "tasks.json", encoding="utf-8"))
+_TASKS_PATH = os.environ.get("US_TASKS_FILE", str(BASE / "tasks.json"))
+TASKS = json.load(open(_TASKS_PATH, encoding="utf-8"))
 EXPECTED = json.load(open(BASE / "expected.json", encoding="utf-8"))
-RESULT_FILE = BASE / "results_plan.json"
+RESULT_FILE = Path(os.environ.get("US_RESULT_FILE", str(BASE / "results_plan.json")))
 
 
 def host_of(url):
