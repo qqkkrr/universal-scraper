@@ -26,6 +26,10 @@ def _get_key() -> str:
 
 
 class LLMClient:
+    """主决策模型（纯文本）：配置生成/自修复/抽取，走 LLM_MODEL（默认千问）。
+    视觉模型（可选）：看截图/图片验证码，走 VISION_MODEL（如 qwen-vl-max / gpt-4o）。
+    两者可完全不同厂商：主模型用 DeepSeek，视觉用千问 qwen-vl，互不冲突。"""
+
     def __init__(self, model: Optional[str] = None, base_url: Optional[str] = None,
                  api_key: Optional[str] = None, timeout: Optional[int] = None):
         timeout = timeout or int(os.environ.get("LLM_TIMEOUT", "150"))
@@ -34,6 +38,9 @@ class LLMClient:
             "OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
         self.model = model or os.environ.get("LLM_MODEL", "qwen3.7-plus")
         self.timeout = timeout
+        self.vision_model = os.environ.get("VISION_MODEL") or os.environ.get("LLM_VISION_MODEL") or ""
+        self.vision_base_url = os.environ.get("VISION_BASE_URL") or self.base_url
+        self.vision_api_key = os.environ.get("VISION_API_KEY") or self.api_key
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.1,
              retries: int = 3) -> str:
@@ -56,6 +63,52 @@ class LLMClient:
                     wait = 2 ** attempt + 1
                     time.sleep(wait)
         raise RuntimeError(f"LLM 调用失败（重试 {retries} 次后）: {last_err}")
+
+    def vision(self, prompt: str, image_url: str, timeout: Optional[int] = None) -> str:
+        """视觉问答：传图片 URL（http/data: 均可），用 VISION_MODEL（未配置则回退主模型）。
+        用于看截图判断页面结构/验证码等场景。返回文本。"""
+        if not self.vision_model:
+            # 未配视觉模型：若主模型是千问可回退 qwen-vl-max，否则报错提示
+            if "dashscope" in self.base_url:
+                self.vision_model = os.environ.get("VISION_MODEL", "qwen-vl-max")
+            else:
+                raise RuntimeError("未配置视觉模型：设 VISION_MODEL 环境变量（如 qwen-vl-max）")
+        import time as _t
+        import urllib.request
+        body = json.dumps({
+            "model": self.vision_model,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ]}],
+            "temperature": 0.1,
+        }).encode()
+        to = timeout or self.timeout
+        last_err = ""
+        for attempt in range(1, 4):
+            req = urllib.request.Request(
+                self.vision_base_url.rstrip("/") + "/chat/completions", data=body,
+                headers={"Authorization": "Bearer " + self.vision_api_key,
+                         "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=to) as r:
+                    data = json.load(r)
+                return data["choices"][0]["message"]["content"]
+            except Exception as e:
+                last_err = str(e)
+                if attempt < 3:
+                    _t.sleep(2 ** attempt + 1)
+        raise RuntimeError(f"视觉模型调用失败: {last_err}")
+
+    @staticmethod
+    def describe() -> dict:
+        """当前 LLM 配置摘要（us llm / doctor 用）。"""
+        return {
+            "主模型": os.environ.get("LLM_MODEL", "qwen3.7-plus"),
+            "主接口": os.environ.get("OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            "视觉模型": os.environ.get("VISION_MODEL") or os.environ.get("LLM_VISION_MODEL") or "qwen-vl-max(默认)",
+            "API Key": ("已配置(" + (_get_key()[:6] + "...") if _get_key() else "未配置"),
+        }
 
     def extract_json(self, content: str, schema: Dict[str, Any],
                      instruction: str = "请从以下内容中提取字段，输出严格 JSON。") -> Dict[str, Any]:

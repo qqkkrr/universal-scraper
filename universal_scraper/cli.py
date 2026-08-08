@@ -188,6 +188,12 @@ def main() -> int:
 
     doc_p = sub.add_parser("doctor", help="🩺 自检：依赖/Node/浏览器/端口/仓库/输出目录")
 
+    llm_p = sub.add_parser("llm", help="🤖 显示/切换 AI 模型配置（主模型 + 视觉模型）")
+    llm_p.add_argument("--model", default="", help="切换主模型，如 qwen-max / deepseek-chat")
+    llm_p.add_argument("--vision", default="", help="切换视觉模型，如 qwen-vl-max")
+    llm_p.add_argument("--base", default="", help="主模型接口，如 https://api.deepseek.com/v1")
+    llm_p.add_argument("--key", default="", help="API Key（写入 ~/.zshenv 持久生效）")
+
     ck_p = sub.add_parser("cookies", help="🍪 浏览器登录态 → Cookie 直抓串（登录一次，HTTP 直抓复用）")
     ck_p.add_argument("--session", default="outputs/.session/session.json", help="storageState JSON 路径")
     ck_p.add_argument("--domain", default="", help="按域名过滤，如 jd.com / dianping.com / weibo.com")
@@ -360,6 +366,37 @@ def main() -> int:
     if args.cmd == "doctor":
         from .doctor import run as doctor_run, main as doctor_main
         return doctor_main()
+
+    if args.cmd == "llm":
+        from .llm import LLMClient
+        import os as _os
+        from pathlib import Path as _P
+        _zs = _P.home() / ".zshenv"
+        _lines = _zs.read_text().splitlines() if _zs.exists() else []
+        def _upsert(k, v):
+            nonlocal _lines
+            _lines = [ln for ln in _lines if not ln.startswith(f"export {k}=")]
+            _lines.append(f"export {k}={v!r}")
+        changed = False
+        if args.key:
+            _upsert("QWEN_API_KEY" if "dashscope" in (args.base or "") or not args.base else "OPENAI_API_KEY", args.key)
+            changed = True
+        if args.model:
+            _upsert("LLM_MODEL", args.model); changed = True
+        if args.vision:
+            _upsert("VISION_MODEL", args.vision); changed = True
+        if args.base:
+            _upsert("OPENAI_BASE_URL", args.base); changed = True
+        if changed:
+            _zs.write_text("\n".join(_lines) + "\n", encoding="utf-8")
+            print("✅ 已写入 ~/.zshenv（新终端/重启 WebUI 后生效）")
+        for k, v in LLMClient.describe().items():
+            print(f"  {k}: {v}")
+        print("\n切换示例：")
+        print("  us llm --model qwen-max            # 千问最强")
+        print("  us llm --model deepseek-chat --base https://api.deepseek.com/v1 --key sk-xxx   # DeepSeek")
+        print("  us llm --vision qwen-vl-max        # 视觉模型（看截图/验证码）")
+        return 0
 
         from .proxy_fetch import refresh as _pf_refresh
         r = _pf_refresh(out=args.out, workers=args.workers)
