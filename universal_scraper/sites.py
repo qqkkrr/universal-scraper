@@ -51,6 +51,9 @@ HIGH_FREQUENCY_SITES = [
     {"name": "沈阳体育学院学报", "domain": "stxb.magtech.com.cn", "module": "sytyxb", "status": "✅ 已精配",
      "desc": "期刊全文/PDF（magtech 系统，2024 起免费）", "difficulty": "低·公开全文",
      "url_tips": "期次: /CN/Y<年>/V<卷>/I<期>；文章: /CN/<DOI>；PDF 由 showArticleFile.do 换取直链"},
+    {"name": "全国公共资源交易平台", "domain": "ggzy.gov.cn", "module": "ggzy", "status": "✅ 已精配",
+     "desc": "招标/中标公告搜索（真实浏览器过WAF，历史交易dealList）", "difficulty": "中高·WAF+可能验证码",
+     "url_tips": "搜索入口: https://www.ggzy.gov.cn/history/dealList.html?keyword=<关键词>&begin=YYYY-MM-DD&end=YYYY-MM-DD&stages=0001,0002（0001=招标公告, 0002=中标公告）；详情页 /deal/html/a/xxx.html 正文在 /deal/html/b/xxx.html"},
     {"name": "社科院期刊系（ajcass）", "domain": "*.ajcass.com", "module": "ajcass", "status": "✅ 已精配",
      "desc": "中国社科院各刊官网（中国工业经济/经济研究/金融研究等同一套系统）：期次列表=GetIssueContentList，含[摘要]/作者/全文PDF/浏览人次；期次页有 WAF 滑块",
      "difficulty": "中·期次页有 WAF 滑块（浏览器模式滑一次）",
@@ -66,9 +69,9 @@ SITES: Dict[str, Dict[str, Any]] = {}
 
 
 def register(name: str, matcher: Callable[[str], bool], parser: Callable,
-             fetch: Optional[Callable] = None, desc: str = ""):
+             fetch: Optional[Callable] = None, desc: str = "", run: Optional[Callable] = None):
     SITES[name] = {"name": name, "match": matcher, "parse": parser,
-                   "fetch": fetch, "desc": desc}
+                   "fetch": fetch, "desc": desc, "run": run}
 
 
 def _dianping_fetch(url, cookie="", proxy=None):
@@ -216,6 +219,42 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
     if not site:
         return {"total": 0, "rows": [], "files": {}, "error": f"未命中精配站点: {url}"}
     s = SITES[site]
+    if s.get("run"):
+        # 直达型精配（如 ggzy 真浏览器桥）：直接产出记录，不走 fetch+parse
+        try:
+            rows = s["run"](url, cookie=cookie, proxy=proxy, limit=limit) or []
+        except Exception as e:
+            return {"total": 0, "rows": [], "files": {}, "error": f"精配运行失败: {type(e).__name__}: {e}"}
+        rows = [r for r in rows if any(str(v or "").strip() for k, v in r.items() if k != "_site")]
+        if not rows:
+            return {"total": 0, "rows": [], "files": {}, "error": "解析 0 条（可能触发验证码/WAF/无结果）"}
+        from pathlib import Path as _P
+        from urllib.parse import urlparse as _up
+        host = _up(url).netloc.replace(".", "_")
+        name = out_name or f"site_{site}_{host}"
+        out_dir = _P("outputs"); out_dir.mkdir(exist_ok=True)
+        fp = out_dir / f"{name}.json"
+        fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            import csv
+            with open(out_dir / f"{name}.csv", "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.DictWriter(f, fieldnames=[k for k in rows[0] if k != "_site"])
+                w.writeheader()
+                w.writerows([{k: v for k, v in r.items() if k != "_site"} for r in rows])
+        except Exception:
+            pass
+        try:
+            from openpyxl import Workbook
+            wb = Workbook(); ws = wb.active
+            keys = [k for k in rows[0] if k != "_site"]
+            ws.append(keys)
+            for r in rows:
+                ws.append([r.get(k, "") for k in keys])
+            wb.save(out_dir / f"{name}.xlsx")
+        except Exception:
+            pass
+        files = {"json": f"outputs/{name}.json", "csv": f"outputs/{name}.csv", "xlsx": f"outputs/{name}.xlsx"}
+        return {"total": len(rows), "rows": rows, "files": files, "error": "", "site": site}
     fetch = s.get("fetch") or fetch_html
     try:
         res = fetch(url, cookie=cookie, proxy=proxy)
@@ -673,6 +712,77 @@ def _ajcass_fetch(url, cookie="", proxy=None):
 
 register("ajcass", match_ajcass, parse_ajcass, fetch=_ajcass_fetch,
          desc="社科院期刊系（*.ajcass.com）：期次列表/文章/浏览人次，期次页有WAF滑块")
+
+
+# ---------------------------------------------------------------------------
+# 全国公共资源交易平台（ggzy.gov.cn）：招标/中标公告搜索
+# 走专用真浏览器桥（过 WAF/可能验证码），URL 用 query 传参：
+#   /history/dealList.html?keyword=数据中心&begin=2025-04-10&end=2025-04-10&stages=0001,0002
+# 0001=招标公告(交易公告), 0002=中标公告(成交公示)
+# ---------------------------------------------------------------------------
+def match_ggzy(url: str) -> bool:
+    return "ggzy.gov.cn" in (url or "")
+
+
+def _ggzy_run(url: str, cookie: str = "", proxy: Optional[str] = None,
+              limit: int = 20) -> List[Dict[str, Any]]:
+    from urllib.parse import urlparse, parse_qs
+    q = parse_qs(urlparse(url).query)
+    keyword = (q.get("keyword") or q.get("keywords") or [""])[0].strip()
+    begin = (q.get("begin") or q.get("beginDate") or [""])[0].strip()
+    end = (q.get("end") or q.get("endDate") or [""])[0].strip()
+    stages = (q.get("stages") or q.get("stage") or ["0001,0002"])[0].split(",")
+    max_pages = int((q.get("max_pages") or ["50"])[0])
+    if not keyword:
+        return []
+    from pathlib import Path as _P
+    from .browser import crawl_ggzy_list, CaptchaError, BrowserBridgeError
+    bridge = _P(__file__).resolve().parent.parent / "scripts" / "ggzy_bridge.cjs"
+    stage_labels = {"0001": "招标公告", "0002": "中标公告", "0003": "变更公告"}
+    out: List[Dict[str, Any]] = []
+    import time as _time
+    for st in stages:
+        st = st.strip()
+        recs = None
+        last_err = ""
+        # WAF/限流可能是瞬时的：最多重试 3 次
+        for _attempt in range(1, 4):
+            try:
+                recs = crawl_ggzy_list(bridge, keyword, begin, end, st,
+                                       max_pages=max_pages, settle=1500)
+                break
+            except CaptchaError as e:
+                raise RuntimeError(f"ggzy 触发验证码：{e}（可稍后重试/换网络，或人工打开网页过验证）")
+            except BrowserBridgeError as e:
+                last_err = str(e)
+                _time.sleep(4 * _attempt)
+        if recs is None:
+            raise RuntimeError(f"ggzy 桥错误（重试3次后）：{last_err}")
+        for r in recs or []:
+            if not isinstance(r, dict):
+                continue
+            title = str(r.get("title") or r.get("noticeTitle") or r.get("projectName") or "")
+            link = str(r.get("url") or r.get("link") or r.get("noticeUrl") or "")
+            date = str(r.get("publishTime") or r.get("publishDate") or r.get("date") or r.get("pubDate") or "")
+            region = str(r.get("provinceText") or r.get("cityText") or r.get("region") or r.get("area") or "")
+            row = {
+                "标题": title, "title": title,
+                "链接": link, "link": link,
+                "日期": date, "publish_date": date,
+                "地区": region, "region": region,
+                "类型": stage_labels.get(st, st), "stage": st,
+            }
+            for k, v in r.items():
+                if k not in row:
+                    row[k] = v
+            out.append(row)
+            if len(out) >= limit:
+                break
+    return out
+
+
+register("ggzy", match_ggzy, lambda html, url: [], run=_ggzy_run,
+         desc="全国公共资源交易平台：招标/中标公告（真浏览器过WAF，URL带keyword/begin/end/stages）")
 
 
 # ===========================================================================

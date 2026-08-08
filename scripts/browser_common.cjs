@@ -12,8 +12,15 @@ const os = require("node:os");
 const HOME = process.env.HOME || os.homedir() || "/tmp";
 const CHROMIUM_EXE = process.env.PW_EXECUTABLE || `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 
+// 优先 NODE_PATH 的 playwright（本地 patchright 旧版可能被 WAF 识别），再回退本地 patchright
 function loadChromium() {
-  try { return require("patchright").chromium; } catch (e) { return require("playwright").chromium; }
+  const path = require("node:path");
+  const nps = (process.env.NODE_PATH || "").split(":").filter(Boolean);
+  const cands = nps.map((p) => path.join(p, "playwright")).concat(["patchright", "playwright"]);
+  for (const c of cands) {
+    try { return require(c).chromium; } catch (e) { /* 下一个 */ }
+  }
+  throw new Error("找不到 playwright/patchright");
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

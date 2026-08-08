@@ -11,11 +11,14 @@
  *   {"type":"done"}
  */
 let chromium = null;
-try {
-  chromium = require("patchright").chromium;   // Level 1: 反检测浏览器（可选）
-} catch (e) {
-  chromium = require("playwright").chromium;   // 默认
+// 优先 NODE_PATH 的 playwright（本地 patchright 旧版可能被 WAF 识别），再回退本地 patchright
+const _path = require("node:path");
+const _nps = (process.env.NODE_PATH || "").split(":").filter(Boolean);
+const _cands = _nps.map((p) => _path.join(p, "playwright")).concat(["patchright", "playwright"]);
+for (const _c of _cands) {
+  try { chromium = require(_c).chromium; break; } catch (e) { /* 下一个 */ }
 }
+if (!chromium) throw new Error("找不到 playwright/patchright");
 const fs = require("node:fs");
 // (fs unused)
 
@@ -120,9 +123,10 @@ const out = (obj) => console.log(JSON.stringify(obj));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function getVue(page) {
+  // 只返回布尔（Vue 实例有循环引用，patchright 序列化不可靠）
   return page.evaluate(() => {
     const app = document.querySelector("#app");
-    return app && app.__vue__ ? app.__vue__ : null;
+    return !!(app && app.__vue__);
   });
 }
 
@@ -178,7 +182,13 @@ async function main() {
   try {
     if (captchaDir) fs.mkdirSync(captchaDir, { recursive: true });
     browser = await chromium.launch({ headless: true, executablePath: EXE, args: ["--no-sandbox"] });
-    const page = await browser.newPage();
+    // 关键：WAF 对 HeadlessChrome UA 直接返回拦截页（无 #app），必须用真实 Chrome UA
+    const ctx = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      locale: "zh-CN",
+      viewport: { width: 1440, height: 900 },
+    });
+    const page = await ctx.newPage();
     let lastApi = null;
     globalThis.__lastApi = () => lastApi;
     page.on("response", (res) => {
@@ -187,10 +197,17 @@ async function main() {
       }
     });
     await page.goto(HISTORY_URL, { timeout: 45000, waitUntil: "networkidle" });
-    await sleep(1500);
+    // Vue 挂载可能慢于 networkidle：先给足时间，再按需重载重试
+    await sleep(5000);
 
-    const vm = await getVue(page);
-    if (!vm) { out({ type: "error", message: "无法获取页面 Vue 实例" }); process.exit(1); }
+    let vm = await getVue(page);
+    for (let _r = 1; !vm && _r <= 3; _r++) {
+      await sleep(3000);
+      try { await page.reload({ timeout: 45000, waitUntil: "networkidle" }); } catch (e) {}
+      await sleep(5000);
+      vm = await getVue(page);
+    }
+    if (!vm) { out({ type: "error", message: "无法获取页面 Vue 实例（WAF 拦截页，重试3次后仍失败）" }); process.exit(1); }
 
     // 设置查询条件
     await page.evaluate(({ keyword, begin, end, stage }) => {

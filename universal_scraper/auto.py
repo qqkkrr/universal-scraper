@@ -89,6 +89,7 @@ v3 任务包 config.json 结构（字段含义）：
 - **强风控 SPA（小红书/抖音/知乎/微博等，数据全靠加密接口）**：source.type 用 browser + 登录/CDP，并加 "record_from":"capture_all" 与 "capture_all":true——工具会**自动捕获页面上所有 JSON 接口响应**（不用预先知道接口名），任务结束后记录在 {_api_url, data}，再由 LLM/解析器挑字段。比硬逆向签名省事得多。
 - 如果用户已提供登录 Cookie：source.type 用 http，source.headers 加 "Cookie": "<用户提供的Cookie>"，
   并加 rules/parsers 解析 SSR 页面（如大众点评搜索页 .shop-list li），不要用 browser（Cookie 直抓更快更稳）。
+- **全国公共资源交易平台（ggzy.gov.cn）URL 硬知识（必须遵守）**：旧搜索页 searchtj.jsp 已下线（404）。正确入口是历史交易列表页，并在 URL query 里带参数：`https://www.ggzy.gov.cn/history/dealList.html?keyword=<关键词>&begin=YYYY-MM-DD&end=YYYY-MM-DD&stages=0001,0002`（0001=招标公告/交易公告，0002=中标公告/成交公示；可只写一个）。start_urls 直接写这个带参数的 URL；source.type 用 browser（站点 WAF 对非浏览器返回 404）。工具命中 ggzy 精配后会自己驱动真实浏览器搜索。
 - **入口网址必须真实（硬性规则）**：只能写你知道真实存在的网址；不知道官方域名时**不要编造**（常见错误：把期刊/公司官网猜成 www.xxx.org.cn，DNS 解析直接失败）。工具会自动校验域名：无法解析的域名会被丢弃并自动搜索官方域名替换。
 - **CWAP/WZWS 滑块 WAF**（部分期刊/政务/学校站会 302 到 waf_slider_verify.html）：不需要你手写特殊配置，工具检测到 WAF 拦截会自动升级为 browser + 人工滑块模式（会弹真实浏览器）。
 - 只输出 JSON 对象本身。"""

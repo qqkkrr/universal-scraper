@@ -22,8 +22,12 @@ def resolve_node() -> str:
     if env and Path(env).exists():
         return env
     exe = Path(sys.executable).resolve()
-    for cand in (exe.parent / "node", exe.parent.parent / "bin" / "node",
-                 exe.parent.parent / "node" / "bin" / "node"):
+    # codex runtime 常见布局：<...>/dependencies/node/bin/node
+    for cand in (exe.parent / "node",
+                 exe.parent.parent / "bin" / "node",
+                 exe.parent.parent / "node" / "bin" / "node",
+                 exe.parent.parent.parent / "node" / "bin" / "node",
+                 exe.parent.parent.parent.parent / "node" / "bin" / "node"):
         if cand.exists():
             return str(cand)
     w = shutil.which("node")

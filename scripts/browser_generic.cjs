@@ -19,11 +19,14 @@ const path = require("node:path");
 const { parseProxy } = require("./browser_common.cjs");
 
 let chromium = null;
-if (process.env.US_DISABLE_PATCHRIGHT !== "1") {
-  try { chromium = require("patchright").chromium; } catch (e) { chromium = require("playwright").chromium; }
-} else {
-  chromium = require("playwright").chromium;
+// 优先 NODE_PATH 的 playwright（本地 patchright 旧版可能被 WAF 识别），再回退本地 patchright
+const _path = require("node:path");
+const _nps = (process.env.NODE_PATH || "").split(":").filter(Boolean);
+const _cands = _nps.map((p) => _path.join(p, "playwright")).concat(["patchright", "playwright"]);
+for (const _c of _cands) {
+  try { chromium = require(_c).chromium; break; } catch (e) { /* 下一个 */ }
 }
+if (!chromium) throw new Error("找不到 playwright/patchright");
 
 const os = require("node:os");
 const HOME = process.env.HOME || os.homedir() || "/tmp";
