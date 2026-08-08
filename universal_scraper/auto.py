@@ -49,6 +49,18 @@ v3 任务包 config.json 结构（字段含义）：
     {"type":"filter","field":"时间戳字段","op":"between","min":<unix秒>,"max":<unix秒>},  // 用户提到日期范围时用
     {"type":"dedup","key":"主键"}
   ],
+  "detail": {                       // 列表页缺字段时必配（如发布日期/正文/价格在详情页）
+    "enabled": true,
+    "url_field": "link",            // 列表记录里详情 URL 的字段名
+    "url_transform": [{"prefix": "https://www.zhipin.com"}],  // 相对路径补全域名（必须写对）
+    "extract": [{"name": "publish_time", "type": "css_text", "selector": ".job-banner .time::text"}],
+    "filters": [                    // 详情合并后再过滤（如按发布日期）
+      {"type": "parse_date", "field": "publish_time", "out": "ts"},
+      {"type": "filter", "field": "ts", "op": "between", "min": <unix秒>, "max": <unix秒>}
+    ],
+    "concurrency": 2,
+    "interval": 0.5
+  },
   "storage": {"type":"jsonl","name":"任务名"},
   "output": {"dir":"outputs","base_name":"任务名"},
   "anti_bot": {"min_interval":0.5,"max_retries":2}
@@ -59,6 +71,7 @@ v3 任务包 config.json 结构（字段含义）：
 - 翻页：HTML 用 extract_links，allow 建议写**锚定路径正则**（如 "^/page/\\d+/$"），引擎会按 URL 路径匹配，防止误吃 /tag/xxx/page/1/ 这类同构 URL；JSON 分页用 type=json_paged（records_path/strategy=page_param/page_param/page_size/max_pages/fields）。
 - 选择器要根据网站常见结构推断（.item/.list/table tr 等），宁可宽一点；字段 CSS 可直接写 ".text" 或 ".text::text"，两种都支持。
 - **字段提取规范（必须遵守）**：标题/名称优先选行内第一个带语义的节点（span/heading/首个链接），**禁止**直接用裸 `a::text` 或裸 `a::attr(href)`——列表行常有多个链接（详情+附件），裸 a 会把它们拼成 "d\nf"、"/a /b"。取链接时用首个详情链接：`a:first-of-type::text`、`a[href*='/detail']::text`；href 用 `.u::attr(href)` 或 `a:first-of-type::attr(href)`。只有用户明确要"所有链接"时才用 multiple。
+- **列表缺字段用 detail（必须遵守）**：如果用户要的字段（发布日期/时间/正文/价格/评分等）在列表页没有、只在详情页有（如招聘/电商/资讯站的发布时间、商品详情），必须配 `detail`：`url_field` 用列表记录里存详情 URL 的字段（如 link），`url_transform.prefix` 把相对路径补成完整域名，`extract` 用 css_text/css_attr 抓详情页字段，`filters` 做合并后过滤（日期类先用 parse_date 转 unix 秒再 between）。引擎会自动逐个抓详情页并合并回列表记录。
 - 需要登录的网站（大众点评/小红书/微博/淘宝/京东/知乎等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
 - **京东 URL 硬知识（必须遵守）**：京东店铺页真实格式是 https://mall.jd.com/index-<店铺数字ID>.html；商品页是 https://item.jd.com/<sku数字ID>.html；**绝对不要**把店铺名猜成 "<店铺名>sp.jd.com/list.html"（那是假地址，会 404）。用户只给店铺名没给链接时，start_urls 可以先用京东搜索或直接用已知商品链接，并在任务说明里注明"需先找到店铺/商品真实 URL"。京东搜索页(www.jd.com)、商品页、评论接口(club.jd.com)全都被强风控：公开 HTTP 接口已失效，必须 source.type=browser + 真实扫码登录。京东登录硬校验："login":{"enabled":true,"url":"https://www.jd.com/","wait_selector":".nickname","require_cookie":"pt_key|pt_pin"}——工具会检查登录 cookie 是否真的出现，没有 pt_key/pt_pin 就不会放行，避免"假登录通过"。
 - 验证码/整页验证（大众点评/美团等会跳到验证中心）：source.type=browser 并加 "headless": false 与
@@ -324,6 +337,25 @@ def _rendered_class_hint(task_dir) -> str:
             return _class_stats_text(lp.read_text(encoding="utf-8", errors="replace"))
     except Exception:
         pass
+    return ""
+
+
+_KEY_DATE_WORDS = ("日期", "时间", "发布", "更新", "date", "time", "publish", "上线", "创建")
+
+
+def _missing_key_field(description: str, sample: list) -> str:
+    """检测用户任务里的关键字段是否缺失（如日期/时间类）：缺失时返回字段说明，用于触发自修复。"""
+    if not description or not sample:
+        return ""
+    low = description.lower()
+    if not any(w in low for w in _KEY_DATE_WORDS):
+        return ""
+    time_fields = [k for k in set(k for it in sample for k in it)
+                   if any(w in k.lower() for w in ("date", "time", "publish", "pub", "时间", "日期", "更新"))]
+    if not time_fields:
+        return "发布日期/时间"
+    if all(not str(it.get(k) or "").strip() for it in sample for k in time_fields):
+        return "、".join(sorted(time_fields)[:3])
     return ""
 
 
@@ -685,10 +717,13 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         META = ("_url", "_parser", "_ts", "_id")
         real = [it for it in sample if any(
             str(it.get(k) or "").strip() for k in it if k not in META)]
-        if result.get("total", 0) > 0 and real:
+        _miss = _missing_key_field(description, sample)
+        if result.get("total", 0) > 0 and real and not _miss:
             log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
             break
-        if result.get("total", 0) > 0 and not real:
+        if _miss:
+            log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
+        elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
 
         if round_i < rounds:
@@ -712,7 +747,10 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     f"{_page_context(cfg.get('start_urls', [''])[0]) if cfg.get('start_urls') else ''}\n"
                     f"{_rendered_class_hint(task_dir)}\n"
                     f"运行日志（末尾）：\n{last_log[-2000:]}\n\n"
-                    f"请修正配置（选择器/网址/解析方式/是否升级浏览器等），只输出修正后的完整 config.json。"
+                    f"注意：若日志提示【用户关键字段缺失】，说明列表页没有该字段，"
+                    f"必须在 config 里加 detail 配置（url_field 指向列表记录中的详情 URL 字段，"
+                    f"url_transform.prefix 补全域名，extract 抓详情页字段，filters 做日期过滤）。\n"
+                    f"请修正配置（选择器/网址/解析方式/是否升级浏览器/加 detail 等），只输出修正后的完整 config.json。"
                 )},
             ]
             try:
@@ -895,10 +933,13 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             sample.reverse()
         META = ("_url", "_parser", "_ts", "_id")
         real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
-        if result.get("total", 0) > 0 and real:
+        _miss = _missing_key_field(description, sample)
+        if result.get("total", 0) > 0 and real and not _miss:
             log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
             break
-        if result.get("total", 0) > 0 and not real:
+        if _miss:
+            log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
+        elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
         if round_i < rounds:
             log(f"⚠️ 第 {round_i} 轮 0 条/报错，AI 正在自修复...")
@@ -911,7 +952,10 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                     f"{_page_context((config.get('start_urls') or [''])[0]) if config.get('start_urls') else ''}\n"
                     f"运行日志（末尾）：\n{last_log[-2000:]}\n\n"
                     f"{_rendered_class_hint(task_dir)}\n"
-                    f"请修正配置（选择器/网址/解析方式等），只输出修正后的完整 config.json。"
+                    f"注意：若日志提示【用户关键字段缺失】，说明列表页没有该字段，"
+                    f"必须在 config 里加 detail 配置（url_field 指向列表记录中的详情 URL 字段，"
+                    f"url_transform.prefix 补全域名，extract 抓详情页字段，filters 做日期过滤）。\n"
+                    f"请修正配置（选择器/网址/解析方式/加 detail 等），只输出修正后的完整 config.json。"
                 )},
             ]
             try:

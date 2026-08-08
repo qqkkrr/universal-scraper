@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .log import Logger
-from .selectors import jpath
+from .selectors import jpath, apply_extractor
 
 
 def map_record(raw: dict, fields: dict) -> dict:
@@ -467,6 +467,7 @@ class EngineV3:
                 self.fetcher.close()
             except Exception:
                 pass
+        self._run_details()
         self._finalize()
         self._save_state()
         _done_msg = f"完成: 抓取 {self.stats['fetched']} | 条目 {self.stats['items']} | 错误 {self.stats['errors']}"
@@ -606,6 +607,120 @@ class EngineV3:
                     self._notify(_p)
                 if self.stats["fetched"] % 10 == 0:
                     self._save_pending()
+
+    def _run_details(self) -> None:
+        """详情补抓（列表+详情合并，v2 detail 配置在 v3 原生实现）：
+        列表页字段缺失（发布日期/正文/价格等）时，按 url_field 逐个抓详情页，
+        extract 提取字段合并回列表记录，再按 detail.filters 过滤（如日期区间）。
+        复用当前 fetcher（保留登录态/会话）。"""
+        detail = self.config.get("detail") or {}
+        if not detail.get("enabled"):
+            return
+        from .protocols import Request
+        rows = list(self._all_items)
+        if self._spooling:
+            try:
+                store_cfg = self.config.get("storage", {}) or {}
+                _sd = store_cfg.get("dir", "items")
+                _dir = Path(_sd) if Path(str(_sd)).is_absolute() else self.out_dir / str(_sd)
+                _sp = _dir / f"{self.storage_name}.jsonl"
+                if _sp.exists():
+                    rows = [json.loads(l) for l in
+                            _sp.read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+            except Exception as e:
+                self.logger.warn(f"详情：spool 读取失败（{e}），退回内存数据")
+        if not rows:
+            return
+        url_field = detail.get("url_field", "url")
+        extract = detail.get("extract", []) or []
+        max_pages = int(detail.get("max_pages", 0)) or len(rows)
+        concurrency = max(1, int(detail.get("concurrency", 2)))
+        interval = float(detail.get("interval", 0.5))
+        todo, seen = [], set()
+        for r in rows:
+            u = str(r.get(url_field) or "").strip()
+            if not u:
+                continue
+            for tr in detail.get("url_transform", []) or []:
+                if "replace" in tr:
+                    u = u.replace(tr["replace"][0], tr["replace"][1])
+                elif "prefix" in tr:
+                    u = tr["prefix"] + u
+                elif "suffix" in tr:
+                    u = u + tr["suffix"]
+            if not u or u in seen:
+                continue
+            seen.add(u)
+            todo.append((u, r))
+            if len(todo) >= max_pages:
+                break
+        if not todo:
+            return
+        self.logger.info(f"详情：共 {len(rows)} 条，待抓 {len(todo)}（并发 {concurrency}，字段缺失自动补全）")
+        self._notify(f"📄 详情补抓：{len(todo)} 个详情页（字段缺失自动补全）")
+
+        import concurrent.futures as _cf
+        ok = 0
+
+        def _work(u, r):
+            try:
+                resp = self.fetcher.fetch(Request(url=u))
+                html = resp.text or ""
+                for spec in extract:
+                    try:
+                        r[spec.get("name", "detail")] = apply_extractor(spec, html, html, None)
+                    except Exception:
+                        r[spec.get("name", "detail")] = ""
+                r["detail_status"] = str(resp.status)
+                return True
+            except Exception as e:
+                r["detail_status"] = f"ERR:{type(e).__name__}"
+                self.logger.warn(f"详情失败 {u}: {type(e).__name__}: {str(e)[:100]}")
+                return False
+
+        with _cf.ThreadPoolExecutor(max_workers=concurrency) as ex:
+            futs = [ex.submit(_work, u, r) for u, r in todo]
+            for i, f in enumerate(_cf.as_completed(futs), 1):
+                try:
+                    if f.result():
+                        ok += 1
+                except Exception:
+                    pass
+                if i % 10 == 0 or i == len(futs):
+                    self.logger.info(f"详情进度: {i}/{len(todo)}")
+                if interval:
+                    time.sleep(interval / concurrency)
+
+        # 详情后过滤（如按发布日期区间）：对合并后的记录再跑 detail.filters
+        filters = detail.get("filters") or []
+        if filters:
+            from .modules.pipelines import Pipeline
+            fp = Pipeline(filters, self.vars)
+            before = len(rows)
+            kept = []
+            for r in rows:
+                out = fp.process(r)
+                if out is not None:
+                    kept.append(out)
+            rows = kept
+            self.logger.info(f"详情过滤：{before} -> {len(kept)} 条（{url_field} 详情合并后按条件保留）")
+
+        # 写回内存 / storage jsonl（导出、spool、auto 的 sample 都读最新合并结果）
+        self._all_items = rows
+        try:
+            store_cfg = self.config.get("storage", {}) or {}
+            if store_cfg.get("type", "jsonl") in ("jsonl", "multi"):
+                _sd = store_cfg.get("dir", "items")
+                _dir = Path(_sd) if Path(str(_sd)).is_absolute() else self.out_dir / str(_sd)
+                _sp = _dir / f"{self.storage_name}.jsonl"
+                _sp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+                               encoding="utf-8")
+        except Exception as e:
+            self.logger.warn(f"详情：storage 写回失败（{e}）")
+        with self._lock:
+            self.stats["items"] = len(rows)
+        self.logger.info(f"详情完成：成功 {ok}/{len(todo)}，记录 {len(rows)} 条")
+        self._notify(f"✅ 详情补抓完成：{ok}/{len(todo)}，字段已合并")
 
     def _finalize(self) -> None:
         """把 JSONL/CSV 汇总导出为标准 json/csv/xlsx（与 v2 一致）。resume 时合并历史。"""
