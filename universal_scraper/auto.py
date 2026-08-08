@@ -433,9 +433,11 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         _src = cfg["source"]
 
     # 公开 JSON/Atom 精配站点：确保 source=http 且不改浏览器
-    _http_ok_domains = ("api.github.com", "export.arxiv.org", "leetcode.cn", "leetcode.com",
+    # 只对「纯 API」入口强制 http：leetcode.cn 的 /problem-list/ 是 SPA，必须 browser
+    _http_ok_domains = ("api.github.com", "export.arxiv.org", "leetcode.com",
                         "wttr.in", "weather.com.cn", "api.bilibili.com")
-    if any(_host.endswith(d) for d in _http_ok_domains) or "/api/" in _su0:
+    if any(_host.endswith(d) for d in _http_ok_domains) \
+            or "/api/" in _su0 or ("leetcode.cn" in _host and "/api/" in _su0):
         cfg["source"] = {"type": "http"}
     # 强制 JSON 精配站点用 http + 不弹登录
     cfg.setdefault("anti_bot", {})
