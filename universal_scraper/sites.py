@@ -787,6 +787,66 @@ register("ggzy", match_ggzy, lambda html, url: [], run=_ggzy_run,
 
 
 # ===========================================================================
+# 淘宝/天猫旗舰店精配（CDP 附着用户已登录 Chrome——绕开 AI 猜配置）
+# ===========================================================================
+
+def match_taobao(url: str) -> bool:
+    return "tmall.com" in (url or "") or "taobao.com" in (url or "")
+
+
+def _taobao_run(url: str, cookie: str = "", proxy: Optional[str] = None,
+                limit: int = 20) -> List[Dict[str, Any]]:
+    """附着 CDP 9222（用户已登录的 Chrome）抓店铺商品 + 详情产品参数。
+    前提：先双击「启动淘宝调试Chrome.command」并登录淘宝一次。"""
+    from pathlib import Path as _P
+    from .runtime import resolve_node, resolve_node_path
+    import subprocess, os
+    bridge = _P(__file__).resolve().parent.parent / "scripts/taobao_shop_bridge.cjs"
+    node = os.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
+    npath = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", resolve_node_path())
+    cdp = os.environ.get("US_CDP", "http://127.0.0.1:9222")
+    cmd = [node, str(bridge), "--cdp", cdp, "--shop", url, "--max", str(int(limit or 20))]
+    env = {**os.environ, "NODE_PATH": npath}
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=900)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("淘宝/天猫精配超时（>900s），可能卡在详情页")
+    rows: List[Dict[str, Any]] = []
+    meta = {}
+    for line in (p.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        t = obj.get("type")
+        if t == "meta":
+            meta = {**meta, **{k: v for k, v in obj.items() if k != "type"}}
+        elif t == "item":
+            rows.append({
+                "标题": str(obj.get("title") or obj.get("list_title") or "").strip(),
+                "价格": str(obj.get("price") or "").strip(),
+                "店铺": str(obj.get("shop") or "").strip(),
+                "链接": str(obj.get("url") or "").strip(),
+                "产品参数": "；".join([str(x) for x in (obj.get("params") or []) if str(x).strip()]),
+            })
+        elif t == "login":
+            raise RuntimeError(f"淘宝/天猫需要人工验证：{obj.get('message')}（请在调试 Chrome 里登录/拖滑块）")
+        elif t == "error":
+            raise RuntimeError(f"淘宝/天猫精配失败：{obj.get('message')}")
+    if not rows:
+        err = meta.get("items_found", 0) if meta else 0
+        raise RuntimeError(f"淘宝/天猫精配 0 条（页面商品链接 {err} 个；请确认已登录淘宝且店铺 URL 正确）")
+    return rows
+
+
+register("tmall_taobao", match_taobao, lambda html, url: [], run=_taobao_run,
+         desc="淘宝/天猫店铺：CDP 附着已登录 Chrome 抓商品列表+详情产品参数（需先开调试 Chrome 并登录一次）")
+
+
+# ===========================================================================
 # 浏览器渲染精配（京东/知乎/微博/抖音/快手：SSR 无数据，需要真实浏览器）
 # ===========================================================================
 
