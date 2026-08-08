@@ -197,8 +197,10 @@ async function main() {
     // 指纹随机化：视口/UA/时区/语言（反检测，patchright/camoufox 思路的轻量版）
     const fp = spec.fingerprint || {};
     if (fp.enabled !== false) {
-      const viewports = [[1366,768],[1440,900],[1536,864],[1920,1080],[1280,720]];
-      const vp = viewports[Math.floor(Math.random() * viewports.length)];
+      // 有头(人工操作验证)固定用大视口，避免滑块按钮超出屏幕；无头抓取保持随机指纹
+      const vp = arg("headless", "0") !== "0"
+        ? [1366, 768 + Math.floor(Math.random() * 300)]
+        : [[1920, 1080], [1536, 864], [1440, 900]][Math.floor(Math.random() * 3)];
       ctxOpts.viewport = { width: vp[0], height: vp[1] };
       ctxOpts.timezoneId = "Asia/Shanghai";
       ctxOpts.locale = "zh-CN";
@@ -409,6 +411,15 @@ async function main() {
         // 取前 5000 字符（原 500 会让 txtLen>2000 的"长页面=登录成功"兜底永远不成立）
         try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 5000) : "")); } catch (e) {}
         const hitMarker = gateMarkers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
+        // 验证码元素常被顶出视口（用户点不到按钮）：自动滚到屏幕中央
+        try {
+          await page.evaluate(() => {
+            const sel = ".yidun_slider,.nc_scale,.nc_wrapper,.nc_iconfont,.btn_ok,[class*='yidun'],[class*='nc_'],[class*='verify'],[class*='captcha'],[class*='slider']";
+            const el = document.querySelector(sel);
+            if (el) { el.scrollIntoView({ block: "center", inline: "center" }); return true; }
+            return false;
+          }).catch(() => {});
+        } catch (e) {}
         const hitLogin = loginTxt.some(m => txt.includes(m))
           && !(u.includes("m.dianping.com") && !u.includes("/login"));  // 移动版首页不算登录页（登录后常跳这里）
         // Cloudflare/Turnstile：先尝试自动点击（无需人工）
