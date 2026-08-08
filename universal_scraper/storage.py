@@ -37,9 +37,11 @@ class SeenStore:
     """增量去重：跨任务保存已见 key（基于 key 的哈希集合，避免内存爆炸）。"""
 
     def __init__(self, path: Path, flush_every: int = 200):
+        import threading
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._flush_every = max(1, flush_every)
+        self._lock = threading.Lock()  # 多 worker 并发 mark/is_seen
         self._pending: list = []
         self._seen: set = set()
         if self.path.exists():
@@ -52,17 +54,24 @@ class SeenStore:
                 pass
 
     def is_seen(self, key: str) -> bool:
-        return key in self._seen
+        with self._lock:
+            return key in self._seen
 
     def mark(self, key: str) -> None:
-        if key not in self._seen:
-            self._seen.add(key)
-            self._pending.append(key)
-            # 批量 flush：避免 10 万条 = 10 万次文件 open/write
-            if len(self._pending) >= self._flush_every:
-                self.flush()
+        with self._lock:
+            if key not in self._seen:
+                self._seen.add(key)
+                self._pending.append(key)
+                # 批量 flush：避免 10 万条 = 10 万次文件 open/write
+                # 注意：已持有 _lock，必须调 _flush_locked（flush() 会再次加锁→死锁）
+                if len(self._pending) >= self._flush_every:
+                    self._flush_locked()
 
     def flush(self) -> None:
+        with self._lock:
+            self._flush_locked()
+
+    def _flush_locked(self) -> None:
         if not self._pending:
             return
         try:

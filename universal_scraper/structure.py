@@ -28,7 +28,7 @@ def _fetch(url: str, timeout: Optional[int] = None) -> Optional[Dict[str, Any]]:
         # 显式直连（绕过 Clash 等系统代理，避免探测被代理挂起/干扰）
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(req, timeout=timeout) as r:
-            raw = r.read()
+            raw = r.read(5 * 1024 * 1024)  # 探测只看结构，最多 5MB
             ctype = (r.headers.get("Content-Type") or "").lower()
             if "json" in ctype:
                 try:

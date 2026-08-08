@@ -25,7 +25,8 @@ if (process.env.US_DISABLE_PATCHRIGHT !== "1") {
   chromium = require("playwright").chromium;
 }
 
-const HOME = process.env.HOME || "/Users/kairanqin";
+const os = require("node:os");
+const HOME = process.env.HOME || os.homedir() || "/tmp";
 const USER_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const HEADLESS_SHELL = process.env.PW_EXECUTABLE
   || `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
