@@ -387,6 +387,7 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             "https://fund.eastmoney.com/data/rankhandler.aspx?op=ph&dt=kf&ft=all&sc=6yzf&st=desc&pi=1&pn=50&dx=1",
         "leetcode.cn/api/problems/lcof2/": "https://leetcode.cn/api/problems/all/",
         "leetcode.cn/api/problems/lcof/": "https://leetcode.cn/api/problems/all/",
+        "fgj.hangzhou.gov.cn/col/col1229066785": "https://fgj.hangzhou.gov.cn/col/col1229404539/index.html",
     }
     for _k, _v in _API_REWRITE.items():
         if _k in _su0:
@@ -409,6 +410,34 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     _src = cfg.get("source") or {}
     _st = (_src.get("type") or "http").lower()
     _host = (_su0.split("//")[-1].split("/")[0] if "//" in _su0 else _su0).lower()
+
+    # 已知强反爬站：即使 AI 配了 browser 但没配 verify/login，也自动补 verify
+    # （否则浏览器打开看到验证页/登录墙就直接 0 条，用户也不知道要人工操作）
+    _ANTIBOT_VERIFY = {
+        "58.com": ["58.com", "antibot", "安全验证", "验证码", "拖动"],
+        "ke.com": ["captcha", "验证", "安全认证"],
+        "zu.ke.com": ["captcha", "验证", "安全认证"],
+        "anjuke.com": ["antibot", "验证码", "安全验证"],
+        "5i5j.com": ["请点击", "验证", "authentication"],
+        "liepin.com": ["验证", "captcha", "登录"],
+        "youzan.com": ["验证", "登录", "captcha"],
+        "fgj.hangzhou.gov.cn": ["预售", "公示"],
+        "tujia.com": ["验证", "captcha"],
+        "guazi.com": ["验证", "captcha", "登录"],
+        "dongchedi.com": ["验证", "captcha"],
+    }
+    for _dom, _mk in _ANTIBOT_VERIFY.items():
+        if _dom in _host and _src.get("type") == "browser" \
+                and not (_src.get("verify") or {}).get("enabled"):
+            cfg["source"].setdefault("verify", {
+                "enabled": True, "markers": _mk, "max_wait_ms": 600000,
+                "success_selector": "body",
+            })
+            break
+    # 杭州房管局预售公示页是 JS 壳：http 拿不到列表，强制 browser
+    if "fgj.hangzhou.gov.cn" in _su0 and _src.get("type") == "http":
+        cfg["source"] = {"type": "browser", "headless": False, "scroll_count": 4, "scroll_wait_ms": 800}
+        _src = cfg["source"]
     if _st == "http" and not (_src.get("headers") or {}).get("Cookie") \
             and any(_host.endswith(d) for d in _login_domains):
         cfg["source"] = {
@@ -1457,7 +1486,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         cfg = _reused_cfg
         name = f"auto_{_h}"
         task_dir = _task_dir0
-        log("♻️ 复用已落盘配置（US_REUSE_CONFIG=1）")
+        log("♻️ 复用已落盘配置（US_REUSE_CONFIG=1），并重新过校验规则（新修复自动套用旧配置）")
+        try:
+            cfg = _validate_and_fix(cfg, description, log)
+        except Exception as _e:
+            log(f"⚠️ 复用配置校验失败，退回原配置：{_e}")
         (task_dir / "modules").mkdir(parents=True, exist_ok=True)
     else:
         cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
@@ -1582,11 +1615,14 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
 
-        # 🛡️ WAF 滑块拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
-        # 注意：即使本轮有真实行，只要 WAF 拦截导致关键字段缺失/详情失败，也必须升级
+        # 🛡️ 反爬/验证拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
+        # 覆盖 waf/cloudflare/verify/captcha/anti_bot/rate_limit 等：http 硬刚只会一直 0 条
         _blk = (result or {}).get("block_stats") or {}
-        if _blk.get("waf") and ((cfg.get("source") or {}).get("type") == "http"):
-            log("🛡️ 检测到 WAF 滑块验证（CWAP/wzws），自动升级为浏览器模式——请在弹出的浏览器窗口中完成滑块拼图，完成后自动继续...")
+        _BLOCK_UPGRADE_KINDS = ("waf", "cloudflare", "verify", "captcha", "anti_bot", "rate_limit")
+        _any_block = any(_blk.get(k) for k in _BLOCK_UPGRADE_KINDS)
+        if _any_block and ((cfg.get("source") or {}).get("type") == "http"):
+            log("🛡️ 检测到反爬拦截（" + "、".join(f"{k}×{_blk[k]}" for k in _BLOCK_UPGRADE_KINDS if _blk.get(k))
+                + "），自动升级为浏览器模式——请在弹出的浏览器窗口中完成验证/登录，完成后自动继续...")
             cfg = _force_browser_waf(cfg)
             continue
 

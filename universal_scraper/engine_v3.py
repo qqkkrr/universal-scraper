@@ -757,9 +757,21 @@ class EngineV3:
                 self.logger.warn(f"详情失败 {u}: {type(e).__name__}: {str(e)[:100]}")
                 return False
 
+        def _stop_pending():
+            try:
+                return self._stop or (Path(self.task.root) / ".stop").exists()
+            except Exception:
+                return False
+
         with _cf.ThreadPoolExecutor(max_workers=concurrency) as ex:
             futs = [ex.submit(_work, u, r) for u, r in todo]
             for i, f in enumerate(_cf.as_completed(futs), 1):
+                if _stop_pending():
+                    # 停止/超时：取消剩余详情（避免孤儿线程继续抓几十页）
+                    for _f in futs:
+                        _f.cancel()
+                    self.logger.warn("收到停止信号，详情补抓提前结束")
+                    break
                 try:
                     if f.result():
                         ok += 1

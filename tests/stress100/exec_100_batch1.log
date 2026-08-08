@@ -1,1 +1,320 @@
 执行测试 25 个任务（limit=5, timeout=75s, workers=4, reuse=False, headless=True）
+[22:59:48] [INFO] 任务启动: auto_2262cba5a6 | 队列 1 | 规则 1
+[23:00:07] [INFO] 任务启动: auto_7babf9c4cc | 队列 1 | 规则 1
+✅ #  1 ok            total=5 117.4s | 从淘宝搜索“露营帐篷”按销量排序，每日凌晨3点抓取前50个商品的标题、价格、月销量、店铺 | err:
+[23:00:55] [INFO] 任务启动: auto_e3deb1c180 | 队列 1 | 规则 1
+[23:01:12] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:01:12] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:01:22] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+✅ #  3 ok            total=1 163.7s | 拼多多“百亿补贴”频道每天10点、18点抓取所有数码类商品名称、补贴价、原价、已拼件数， | err:运行超时（>75s）
+[23:02:11] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:02:18] [INFO] 任务启动: auto_73d684af6e | 队列 1 | 规则 1
+Exception in thread Thread-18 (_worker_loop):
+Traceback (most recent call last):
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 617, in _worker_loop
+    self._handle(req)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 250, in _handle
+    resp = self.fetcher.fetch(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 408, in fetch
+    return self._fetch_interactive(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 501, in _fetch_interactive
+    raise KeyboardInterrupt("任务已停止（浏览器桥收到停止信号）")
+KeyboardInterrupt: 任务已停止（浏览器桥收到停止信号）
+[23:02:33] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+Exception in thread Thread-23 (_worker_loop):
+Traceback (most recent call last):
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 617, in _worker_loop
+    self._handle(req)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 250, in _handle
+    resp = self.fetcher.fetch(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 408, in fetch
+    return self._fetch_interactive(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 501, in _fetch_interactive
+    raise KeyboardInterrupt("任务已停止（浏览器桥收到停止信号）")
+KeyboardInterrupt: 任务已停止（浏览器桥收到停止信号）
+[23:02:54] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:03:12] [INFO] 任务启动: auto_37313c110e | 队列 2 | 规则 2
+🔒 #  4 blocked_login total=0 257.8s | 1688搜索“定制帆布袋”按成交额排名，采集前80个供应商的公司名称、经营模式、单价、起 | err:运行超时（>75s）
+[23:03:35] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+Exception in thread Thread-30 (_worker_loop):
+Traceback (most recent call last):
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 617, in _worker_loop
+    self._handle(req)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 250, in _handle
+    resp = self.fetcher.fetch(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 408, in fetch
+    return self._fetch_interactive(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 501, in _fetch_interactive
+    raise KeyboardInterrupt("任务已停止（浏览器桥收到停止信号）")
+KeyboardInterrupt: 任务已停止（浏览器桥收到停止信号）
+[23:03:55] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:03:58] [INFO] 任务启动: auto_e15b30a043 | 队列 1 | 规则 1
+[23:04:08] [INFO] 延迟重试 1/2: https://www.kaola.com/（2s 后）
+[23:04:08] [WARN] 请求失败 https://www.kaola.com/: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+🔒 #  5 blocked_login total=0 209.1s | 闲鱼监测关键词“富士XT-5 套机”，每15分钟抓取最新发布的30条闲置信息，包含价格、 | err:运行超时（>75s）
+🔒 #  2 blocked_login total=0 349.9s | 京东自营“婴儿奶粉”类目全部在售商品，每周一抓取品牌、规格、价格、好评率、评价总数，监控 | err:运行超时（>75s）
+🔒 #  7 blocked_login total=0 198.5s | 网易考拉“日本面膜”分类热销榜，每日抓取前20名商品名称、售价、税费、用户评分，与日本亚 | err:运行超时（>75s）
+[23:05:06] [INFO] 延迟重试 1/2: https://www.amazon.co.jp/s?k=%E6%97%A5%E6%9C%AC%E9%9D%A2%E8%86%9C（2s 后）
+[23:05:06] [WARN] 请求失败 https://www.amazon.co.jp/s?k=%E6%97%A5%E6%9C%AC%E9%9D%A2%E8%86%9C: RuntimeError: page.goto: net::ERR_NAME_NOT_RESOLVED at https://www.kaola.com/
+Call log:
+[2m  - navigating to "https://www.kaola.com/"
+[23:05:06] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:05:14] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:05:15] [INFO] 延迟重试 1/3: https://www.smzdm.com/jingxuan/（2s 后）
+[23:05:15] [WARN] 请求失败 https://www.smzdm.com/jingxuan/: TypeError: 'in <string>' requires string as left operand, not NoneType
+[23:05:15] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+🔒 #  8 blocked_login total=0 127.4s | 什么值得买“好价”频道实时流，抓取所有带有“绝对值”标签的爆料商品名称、价格、商城、值率 | err:运行超时（>75s）
+[23:05:41] [INFO] 任务启动: auto_718e56f8e4 | 队列 1 | 规则 1
+[23:05:56] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:05:56] [INFO] 任务启动: auto_a2bf58eda3 | 队列 1 | 规则 1
+⚠️ #  9 empty         total=0 99.9s | 有赞微商城“故宫淘宝”店铺全部商品列表页，每日抓取商品名称、价格、销量、库存状态，监控文 | err:
+[23:06:24] [INFO] 任务启动: auto_d348a4765a | 队列 1 | 规则 1
+[23:06:26] [INFO] 延迟重试 1/3: https://sh.lianjia.com/ershoufang/pudong/（2s 后）
+[23:06:26] [WARN] 请求失败 https://sh.lianjia.com/ershoufang/pudong/: RateLimitedError: 限流 200: https://sh.lianjia.com/ershoufang/pudong/ (retry_after=0.0s) | 反爬拦截[captcha] /",         captchadomain: "htt
+[23:06:29] [INFO] 延迟重试 2/3: https://sh.lianjia.com/ershoufang/pudong/（4s 后）
+[23:06:29] [WARN] 请求失败 https://sh.lianjia.com/ershoufang/pudong/: RateLimitedError: 限流 200: https://sh.lianjia.com/ershoufang/pudong/ (retry_after=0.0s) | 反爬拦截[captcha] /",         captchadomain: "htt
+[23:06:34] [INFO] 延迟重试 3/3: https://sh.lianjia.com/ershoufang/pudong/（8s 后）
+[23:06:34] [WARN] 请求失败 https://sh.lianjia.com/ershoufang/pudong/: RateLimitedError: 限流 200: https://sh.lianjia.com/ershoufang/pudong/ (retry_after=0.0s) | 反爬拦截[captcha] /",         captchadomain: "htt
+[23:06:42] [WARN] 放弃重试 https://sh.lianjia.com/ershoufang/pudong/（已达 3 次）
+[23:06:42] [WARN] 请求失败 https://sh.lianjia.com/ershoufang/pudong/: RateLimitedError: 限流 200: https://sh.lianjia.com/ershoufang/pudong/ (retry_after=0.0s) | 反爬拦截[captcha] /",         captchadomain: "htt
+[23:06:43] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[23:06:43] [INFO] 反爬拦截统计: captcha×4
+⚠️ # 11 empty         total=0 106.0s | 链家上海二手房“浦东新区”房源，每日抓取所有新上架房源的挂牌价、面积、户型、楼层、是否学 | err:
+[23:06:51] [INFO] 详情：交互模式改用浏览器池并发（1），失败页自动回退交互串行
+[23:06:51] [INFO] 详情：共 1 条，待抓 1（并发 1，字段缺失自动补全）
+[23:06:53] [INFO] 任务启动: auto_621d65384e | 队列 1 | 规则 1
+[23:06:55] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 13 empty         total=0 63.1s | 安居客“成都·天府新区”新楼盘列表，每周抓取楼盘名称、均价、主力户型、交房时间、剩余套数 | err:
+[23:07:12] [INFO] 任务启动: auto_b3aad49089 | 队列 1 | 规则 1
+Exception in thread Thread-62 (_run_round):
+Traceback (most recent call last):
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 729, in _work
+    resp = pool_fetcher.fetch(Request(url=u))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 414, in fetch
+    return self._fetch_pool(pool, req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 578, in _fetch_pool
+    raise RuntimeError(obj["error"])
+RuntimeError: 动作[0] click 失败: locator.click: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.search-icon, .header-search, input[placeholder*=\'搜索\']').first()[22m
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/auto.py", line 1526, in _run_round
+    _box["r"] = run_task(task_dir, limit=limit, log_file=log_file, log_cb=log_cb)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 889, in run_task
+    log_cb=log_cb).run()
+                   ^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 372, in run
+    return self._run_locked()
+           ^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 487, in _run_locked
+    self._run_details()
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 764, in _run_details
+    if f.result():
+       ^^^^^^^^^^
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/concurrent/futures/thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 734, in _work
+    resp = self.fetcher.fetch(Request(url=u))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 403, in fetch
+    raise KeyboardInterrupt("任务已停止（WebUI 停止信号）")
+KeyboardInterrupt: 任务已停止（WebUI 停止信号）
+[23:07:18] [INFO] 延迟重试 2/2: https://www.kaola.com/（4s 后）
+[23:07:18] [WARN] 请求失败 https://www.kaola.com/: RuntimeError: browserType.launchPersistentContext: Timeout 180000ms exceeded.
+Call log:
+[2m  - <launching> /Applications/Google Chrom
+[23:07:18] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+🔒 #  6 blocked_login total=0 153.3s | 得物App（Web端）指定鞋款“Air Jordan 1 High OG 芝加哥”，每小 | err:运行超时（>75s）
+[23:07:51] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 12 empty         total=0 160.3s | 贝壳找房“深圳·南山区”整租房源，每周四抓取租金在3000-6000元的所有房源信息，包 | err:
+[23:08:02] [INFO] 任务启动: auto_af9bb320fb | 队列 1 | 规则 1
+[23:08:37] [INFO] 任务启动: auto_be90f2293f | 队列 1 | 规则 1
+[23:08:42] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 15 empty         total=0 120.3s | 58同城“杭州·个人急售”二手房板块，每两小时抓取最新发布的20条信息，提取标题、总价、 | err:
+[23:09:10] [INFO] 任务启动: auto_dbddccc334 | 队列 1 | 规则 2
+[23:09:12] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 16 empty         total=0 75.2s | 我爱我家“南京”站，爬取所有可交易小区详情页，抓取建筑年代、绿化率、物业费、停车位数量， | err:
+[23:09:29] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:09:36] [INFO] 任务启动: auto_b3364d457a | 队列 1 | 规则 1
+✅ # 17 ok            total=1 151.2s | 贝壳“必看好房”标签房源，抓取北京所有带该标签的房源信息、好房上榜理由，分析好房共性特征 | err:
+[23:09:37] [INFO] 任务启动: auto_12aa376e2b | 队列 2 | 规则 1
+[23:09:54] [INFO] 延迟重试 1/3: https://www.amazon.com/s?k=electric+toothbrush&s=exact-aware-popularity-rank&page=2（2s 后）
+[23:09:54] [WARN] 请求失败 https://www.amazon.com/s?k=electric+toothbrush&s=exact-aware-popularity-rank&page=2: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+[23:10:52] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+Exception in thread Thread-114 (_worker_loop):
+Traceback (most recent call last):
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 617, in _worker_loop
+    self._handle(req)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 250, in _handle
+    resp = self.fetcher.fetch(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 408, in fetch
+    return self._fetch_interactive(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 501, in _fetch_interactive
+    raise KeyboardInterrupt("任务已停止（浏览器桥收到停止信号）")
+KeyboardInterrupt: 任务已停止（浏览器桥收到停止信号）
+[23:10:54] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 19 blocked_login total=0 131.9s | BOSS直聘“全国·算法工程师”搜索结果，每周一抓取前200条职位，包含公司名称、融资阶 | err:运行超时（>75s）
+[23:11:08] [INFO] 任务启动: auto_4a7b8b06df | 队列 3 | 规则 1
+[23:11:10] [INFO] 任务启动: auto_2149e6f8fb | 队列 1 | 规则 1
+[23:11:11] [INFO] 完成: 抓取 3 | 条目 0 | 错误 0
+⚠️ # 21 empty         total=0 99.6s | 猎聘网“年薪50万以上·市场总监”职位，每三天抓取一次，提取公司名称、行业、职责中的管理 | err:
+✅ # 10 ok            total=1 283.3s | 亚马逊美国站“best seller in electric toothbrush”榜单 | err:运行超时（>75s）
+[23:12:25] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+Exception in thread Thread-138 (_worker_loop):
+Traceback (most recent call last):
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 617, in _worker_loop
+    self._handle(req)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 250, in _handle
+    resp = self.fetcher.fetch(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 408, in fetch
+    return self._fetch_interactive(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 501, in _fetch_interactive
+    raise KeyboardInterrupt("任务已停止（浏览器桥收到停止信号）")
+KeyboardInterrupt: 任务已停止（浏览器桥收到停止信号）
+[23:12:27] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 20 blocked_login total=0 196.0s | 拉勾网“广州·产品经理”职位列表，每日抓取前100条，记录公司规模、行业、岗位职责前三条 | err:运行超时（>75s）
+[23:12:41] [INFO] 任务启动: auto_aca877aa7e | 队列 1 | 规则 1
+[23:12:51] [INFO] 任务启动: auto_8db4d3e3f1 | 队列 1 | 规则 1
+[23:12:53] [INFO] 延迟重试 1/2: https://www.ziroom.com/z/nl/z1.html（2s 后）
+[23:12:53] [WARN] 请求失败 https://www.ziroom.com/z/nl/z1.html: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[23:13:01] [INFO] 延迟重试 2/3: https://www.amazon.com/s?k=electric+toothbrush&s=exact-aware-popularity-rank&page=2（4s 后）
+[23:13:01] [WARN] 请求失败 https://www.amazon.com/s?k=electric+toothbrush&s=exact-aware-popularity-rank&page=2: RuntimeError: browserType.launchPersistentContext: Timeout 180000ms exceeded.
+Call log:
+[2m  - <launching> /Applications/Google Chrom
+[23:13:02] [INFO] 完成: 抓取 3 | 条目 0 | 错误 2
+[23:13:12] [INFO] 延迟重试 2/2: https://www.ziroom.com/z/nl/z1.html（4s 后）
+[23:13:12] [WARN] 请求失败 https://www.ziroom.com/z/nl/z1.html: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[23:13:14] [INFO] 延迟重试 1/2: https://s.weibo.com/top/summary（2s 后）
+[23:13:14] [WARN] 请求失败 https://s.weibo.com/top/summary: RuntimeError: page.goto: Navigation to "https://s.weibo.com/top/summary" is interrupted by another navigation to "https://s.weibo.com/
+[23:13:45] [INFO] 任务启动: auto_3adce930ce | 队列 1 | 规则 1
+[23:13:59] [INFO] 重试成功（冲销 1 错误）: https://s.weibo.com/top/summary
+[23:13:59] [INFO] 重试成功（冲销 2 错误）: https://www.ziroom.com/z/nl/z1.html[23:13:59] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+
+[23:13:59] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[23:13:59] [INFO] 详情：交互模式改用浏览器池并发（1），失败页自动回退交互串行
+[23:13:59] [INFO] 详情：共 78 条，待抓 74（并发 1，字段缺失自动补全）
+💥 # 23 exception     total=None 200.0s | 应届生求职网BBS“华为2025校招”版块，抓取所有面经帖子的标题、内容摘要、回复数，汇 | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络/Key
+[23:14:29] [INFO] 详情：交互模式改用浏览器池并发（1），失败页自动回退交互串行
+[23:14:29] [INFO] 详情：共 5 条，待抓 5（并发 1，字段缺失自动补全）
+❌ # 14 error         total=0 149.6s | 自如北京“整租·一居室”房源，每日抓取房间面积、价格、楼层、距离最近地铁站步行分钟数，分 | err:运行超时（>75s）
+✅ # 25 ok            total=50 237.1s | 微博热搜榜，每5分钟抓取一次前50条热搜词、热度值、话题主持人，用于突发新闻监控。 | err:
+🔒 # 24 blocked_login total=0 181.3s | 看准网“腾讯”公司主页，抓取员工匿名评分、好评标签、差评标签、典型评价文本，做雇主品牌情 | err:运行超时（>75s）
+[23:15:42] [INFO] 详情进度: 10/74
+Exception in thread Thread-162 (_run_round):
+Traceback (most recent call last):
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 729, in _work
+    resp = pool_fetcher.fetch(Request(url=u))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 414, in fetch
+    return self._fetch_pool(pool, req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 578, in _fetch_pool
+    raise RuntimeError(obj["error"])
+RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/auto.py", line 1526, in _run_round
+    _box["r"] = run_task(task_dir, limit=limit, log_file=log_file, log_cb=log_cb)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 889, in run_task
+    log_cb=log_cb).run()
+                   ^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 372, in run
+    return self._run_locked()
+           ^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 487, in _run_locked
+    self._run_details()
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 764, in _run_details
+    if f.result():
+       ^^^^^^^^^^
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/concurrent/futures/thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/engine_v3.py", line 734, in _work
+    resp = self.fetcher.fetch(Request(url=u))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 408, in fetch
+    return self._fetch_interactive(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 501, in _fetch_interactive
+    raise KeyboardInterrupt("任务已停止（浏览器桥收到停止信号）")
+KeyboardInterrupt: 任务已停止（浏览器桥收到停止信号）
+[23:16:01] [INFO] 任务启动: auto_f45d038c8d | 队列 1 | 规则 1
+[23:16:02] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 18 empty         total=0 91.2s | 杭州市住房保障和房产管理局官网“商品房预售证公示”，每日抓取新发预售证的项目名称、开发商 | err:
+[23:17:05] [INFO] 详情进度: 20/74
+[23:17:40] [INFO] 任务启动: auto_c70563902b | 队列 1 | 规则 1
+[23:18:29] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[23:18:50] [INFO] 详情进度: 30/74
+✅ # 22 ok            total=11 177.1s | 智联招聘“校园招聘”频道，每年9月10日抓取所有宣讲会安排，包括公司、学校、时间、场地， | err:
+
+完成 25：{'ok': 6, 'blocked_login': 9, 'empty': 8, 'exception': 1, 'error': 1}
+[23:20:16] [INFO] 详情进度: 40/74
+[23:21:39] [INFO] 详情进度: 50/74
+[23:23:08] [INFO] 详情进度: 60/74
+[23:24:49] [INFO] 详情进度: 70/74
+[23:25:46] [INFO] 详情进度: 74/74
