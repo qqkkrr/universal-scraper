@@ -395,6 +395,14 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             cfg["source"] = {"type": "http"}
             _su0 = _v
             break
+    # 东财 rankhandler 接口不带 Referer 会返回 41 字节空壳 → 自动注入
+    if "fund.eastmoney.com/data/rankhandler" in _su0:
+        _hdrs = cfg.setdefault("source", {}).setdefault("headers", {})
+        _hdrs.setdefault("Referer", "https://fund.eastmoney.com/data/fundranking.html")
+    # 巨潮公告查询接口必须 POST（GET 会 500）→ 交给 run 型精配（_cninfo_run）
+    if "cninfo.com.cn/new/hisAnnouncement/query" in _su0:
+        cfg["source"] = {"type": "http"}
+        cfg["_force_run_site"] = "cninfo"
 
     # 上交所 vs 上海交大：AI 常混淆（sjtu.cn 是上海交大）。任务含"上交所/科创板"就强制换入口
     # 注意 kcb.sse.com.cn 域名在本网络 NXDOMAIN，用 www.sse.com.cn/listing/renewal/ipo/
@@ -752,7 +760,7 @@ def _try_precise_first(description: str, cfg: dict, limit, log, out_name: str = 
         return None
     try:
         from .sites import match_site, run_site, SITES
-        site = match_site(su)
+        site = cfg.get("_force_run_site") or match_site(su)
         if not site or not (SITES.get(site) or {}).get("run"):
             return None
         _ch = ((cfg.get("source") or {}).get("headers") or {}).get("Cookie") or ""

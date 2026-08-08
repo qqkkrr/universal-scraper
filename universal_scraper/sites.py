@@ -1448,3 +1448,65 @@ def match_douban_events(url: str) -> bool:
 
 
 register("douban_events", match_douban_events, parse_douban_events, desc="豆瓣同城：活动列表（SSR）")
+
+
+# ---------- 巨潮资讯公告查询（POST 接口，GET 必 500） ----------
+def _cninfo_run(url: str, cookie: str = "", proxy: Optional[str] = None,
+                limit: int = 20) -> List[Dict[str, Any]]:
+    """巨潮公告查询：http://www.cninfo.com.cn/new/fulltextSearch/full?searchkey=<代码>
+    用全文搜索接口（hisAnnouncement/query 的 stock 过滤实测不生效），返回目标证券公告。"""
+    from urllib.parse import urlparse, parse_qs
+    import time as _t
+    q = parse_qs(urlparse(url).query)
+    stock = (q.get("searchkey") or q.get("stock") or [""])[0].strip() or "600519"
+    stock = stock.strip(",")
+    page_size = min(int((q.get("pageSize") or ["30"])[0]), 50)
+    pages = min(int((q.get("max_pages") or ["5"])[0]), 20)
+    out = []
+    try:
+        from curl_cffi import requests as creq
+        s = creq.Session(impersonate="chrome")
+        for page in range(1, pages + 1):
+            r = s.get("http://www.cninfo.com.cn/new/fulltextSearch/full",
+                      params={"searchkey": stock, "sdate": "", "edate": "", "isfulltext": "false",
+                              "sortName": "pubdate", "sortType": "desc",
+                              "pageNum": str(page), "pageSize": str(page_size)},
+                      headers={"Referer": "http://www.cninfo.com.cn/new/commonUrl?url=disclosure/list/notice"},
+                      timeout=20)
+            try:
+                j = r.json()
+            except Exception:
+                break
+            anns = j.get("announcements") or []
+            for a in anns:
+                # 客户端按证券代码过滤（searchkey 可能匹配标题含代码的其它公告）
+                if stock and (a.get("secCode") or "") not in (stock.split(",")):
+                    continue
+                title = (a.get("announcementTitle") or "").replace("<em>", "").replace("</em>", "")
+                out.append({
+                    "标题": title,
+                    "公告类型": a.get("announcementType") or "",
+                    "发布时间": _t.strftime("%Y-%m-%d %H:%M", _t.localtime((a.get("announcementTime") or 0) / 1000)) if a.get("announcementTime") else "",
+                    "PDF链接": ("http://static.cninfo.com.cn/" + a.get("adjunctUrl")) if a.get("adjunctUrl") else "",
+                    "证券代码": a.get("secCode") or "",
+                    "证券名称": a.get("secName") or "",
+                })
+            if not anns:
+                break
+            if len(out) >= int(limit or 20):
+                break
+            import time
+            time.sleep(0.5)
+    except Exception as e:
+        raise RuntimeError(f"巨潮公告抓取失败：{e}")
+    if not out:
+        raise RuntimeError("巨潮公告 0 条（接口可能已变更，或需要验证）")
+    return out
+
+
+def match_cninfo(url: str) -> bool:
+    return "cninfo.com.cn/new/hisAnnouncement/query" in url or "cninfo.com.cn/new/fulltextSearch" in url
+
+
+register("cninfo", match_cninfo, lambda html, url: [], run=_cninfo_run,
+         desc="巨潮资讯：上市公司公告查询（POST 接口）")

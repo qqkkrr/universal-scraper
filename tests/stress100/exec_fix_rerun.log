@@ -8,3 +8,85 @@
 [00:20:37] [INFO] 详情进度: 30/54
 [00:20:51] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
 [00:20:54] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[00:21:10] [INFO] 详情进度: 40/54
+[00:21:20] [INFO] 详情进度: 50/54
+[00:21:22] [WARN] 收到停止信号，详情补抓提前结束
+[00:21:24] [INFO] 详情完成：成功 51/54，记录 54 条
+[00:21:26] [INFO] 导出: json=auto_96c0c9ca70.json, csv=auto_96c0c9ca70.csv, xlsx=auto_96c0c9ca70.xlsx
+[00:21:26] [INFO] 完成: 抓取 1 | 条目 54 | 错误 0
+? # 34 ok_late       total=54 99.9s | 虎扑“步行街”板块首页热帖，每30分钟抓取一次标题、作者、回复数、亮评数，捕捉直男社区热 | err:超时但已产出数据
+[00:21:30] [INFO] 任务启动: auto_73de84af7e | 队列 1 | 规则 1
+[00:21:30] [INFO] 详情：共 2 条，待抓 1（并发 2，字段缺失自动补全）
+[00:21:31] [INFO] 详情进度: 1/1
+[00:21:32] [INFO] 详情过滤：2 -> 1 条（link 详情合并后按条件保留）
+[00:21:32] [INFO] 详情完成：成功 1/1，记录 1 条
+[00:21:32] [INFO] 导出: json=auto_73de84af7e.json, csv=auto_73de84af7e.csv, xlsx=auto_73de84af7e.xlsx
+[00:21:32] [INFO] 完成: 抓取 1 | 条目 1 | 错误 0
+✅ # 42 ok            total=20 12.1s | 中国人民银行“货币政策司”公开市场操作公告，每个交易日抓取逆回购规模、中标利率、期限，自 | err:
+[00:22:15] [INFO] 任务启动: auto_a3e3874f59 | 队列 1 | 规则 1
+[00:22:16] [INFO] 任务启动: auto_a82945f607 | 队列 1 | 规则 1
+[00:22:57] [INFO] 任务启动: auto_a04e29c21e | 队列 1 | 规则 1
+[00:23:46] [WARN] 任务停止信号已生效，本轮请求中断
+[00:23:46] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:23:46] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[00:23:46] [WARN] 任务停止信号已生效，本轮请求中断
+[00:23:46] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:23:47] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[00:23:49] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 47 blocked_login total=0 128.3s | 携程“长沙-重庆”机票，出发日期为未来第30天，每天10点、16点抓取所有直飞航班航司、 | err:运行超时（>90s）
+✅ # 33 ok            total=5 259.1s | B站“每周必看”第200期视频列表，抓取所有视频的BV号、标题、UP主、播放量、弹幕数、 | err:
+[00:24:12] [INFO] 任务启动: auto_ec8723c4c4 | 队列 1 | 规则 2
+[00:24:15] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 # 27 blocked_login total=0 294.5s | 知乎“热榜·科技”分类下的所有问题，每日9点、21点各抓取一次，记录问题标题、关注数、浏 | err:运行超时（>90s）
+[00:24:45] [INFO] 任务启动: auto_7357eab5b1 | 队列 1 | 规则 1
+[00:25:43] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[00:26:00] [INFO] 任务启动: auto_ec8723c4c4 | 队列 1 | 规则 2
+[00:26:01] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ # 41 empty         total=0 115.5s | 天天基金网“偏股型基金”近六月收益排行，每月初抓取前50名基金代码、名称、基金经理、重仓 | err:
+[00:27:02] [INFO] 任务启动: auto_7357eab5b1 | 队列 1 | 规则 1
+[00:27:29] [INFO] 任务启动: auto_7424e0fda6 | 队列 1 | 规则 1
+[00:27:30] [WARN]   curl_cffi 请求失败 500，2.0s 后重试
+[00:27:33] [WARN]   curl_cffi 请求失败 500，4.2s 后重试
+[00:27:37] [INFO] 延迟重试 1/2: http://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&column=sse&tabName=fulltext&stock=600519&searchkey=&secid=&category=&trade=&seDate=&sortName=&sortType=&isHLtitle=true（2s 后）
+[00:27:37] [WARN] 请求失败 http://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&column=sse&tabName=fulltext&stock=600519&searchkey=&secid=&category=&trade=&seDate=&sortName=&sortType=&isHLtitle=true: RuntimeError: HTTP 500: HTTP 500
+[00:27:40] [WARN]   curl_cffi 请求失败 500，2.8s 后重试
+[00:27:43] [WARN]   curl_cffi 请求失败 500，4.4s 后重试
+[00:27:47] [INFO] 延迟重试 2/2: http://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&column=sse&tabName=fulltext&stock=600519&searchkey=&secid=&category=&trade=&seDate=&sortName=&sortType=&isHLtitle=true（4s 后）
+[00:27:47] [WARN] 请求失败 http://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&column=sse&tabName=fulltext&stock=600519&searchkey=&secid=&category=&trade=&seDate=&sortName=&sortType=&isHLtitle=true: RuntimeError: HTTP 500: HTTP 500
+[00:27:52] [WARN]   curl_cffi 请求失败 500，2.7s 后重试
+[00:27:55] [WARN]   curl_cffi 请求失败 500，4.6s 后重试
+[00:27:59] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[00:28:00] [WARN] 放弃重试 http://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&column=sse&tabName=fulltext&stock=600519&searchkey=&secid=&category=&trade=&seDate=&sortName=&sortType=&isHLtitle=true（已达 2 次）
+[00:28:00] [WARN] 请求失败 http://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&column=sse&tabName=fulltext&stock=600519&searchkey=&secid=&category=&trade=&seDate=&sortName=&sortType=&isHLtitle=true: RuntimeError: HTTP 500: HTTP 500
+[00:28:00] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+🔒 # 39 blocked_login total=0 196.7s | 雪球“悬赏话题”列表，抓取所有待回答的话题标题、赏金、关注数，寻找投资话题热点。 | err:
+[00:28:02] [INFO] 任务启动: auto_10c6a78e5a | 队列 1 | 规则 2
+[00:29:31] [INFO] 任务启动: auto_7424e0fda6 | 队列 1 | 规则 1
+[00:29:33] [WARN]   curl_cffi 请求失败 500，2.6s 后重试
+[00:29:36] [WARN]   curl_cffi 请求失败 500，4.2s 后重试
+[00:29:37] [WARN] 任务停止信号已生效，本轮请求中断
+[00:29:37] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[00:29:37] [INFO] 完成: 抓取 3 | 条目 0 | 错误 0
+[00:29:41] [WARN]   curl_cffi 请求失败 500，8.5s 后重试
+❌ # 45 error         total=0 104.2s | 上交所科创板“项目动态”页面，每周抓取所有问询中企业的名称、受理日期、当前状态，监控IP | err:运行超时（>90s）
+[00:29:49] [INFO] 延迟重试 1/3: http://www.cninfo.com.cn/new/hisAnnouncement/query（2s 后）
+[00:29:49] [WARN] 请求失败 http://www.cninfo.com.cn/new/hisAnnouncement/query: RuntimeError: HTTP 500: HTTP 500
+[00:29:51] [WARN]   curl_cffi 请求失败 500，2.4s 后重试
+[00:29:54] [WARN]   curl_cffi 请求失败 500，4.1s 后重试
+[00:29:59] [WARN]   curl_cffi 请求失败 500，8.5s 后重试
+[00:30:07] [INFO] 延迟重试 2/3: http://www.cninfo.com.cn/new/hisAnnouncement/query（4s 后）
+[00:30:07] [WARN] 请求失败 http://www.cninfo.com.cn/new/hisAnnouncement/query: RuntimeError: HTTP 500: HTTP 500
+[00:30:12] [WARN]   curl_cffi 请求失败 500，2.0s 后重试
+[00:30:14] [WARN]   curl_cffi 请求失败 500，4.1s 后重试
+[00:30:19] [WARN]   curl_cffi 请求失败 500，8.6s 后重试
+[00:30:27] [INFO] 延迟重试 3/3: http://www.cninfo.com.cn/new/hisAnnouncement/query（8s 后）
+[00:30:27] [WARN] 请求失败 http://www.cninfo.com.cn/new/hisAnnouncement/query: RuntimeError: HTTP 500: HTTP 500
+[00:30:36] [WARN]   curl_cffi 请求失败 500，2.5s 后重试
+[00:30:39] [WARN]   curl_cffi 请求失败 500，4.4s 后重试
+[00:30:44] [WARN]   curl_cffi 请求失败 500，8.5s 后重试
+[00:30:52] [WARN] 放弃重试 http://www.cninfo.com.cn/new/hisAnnouncement/query（已达 3 次）
+[00:30:52] [WARN] 请求失败 http://www.cninfo.com.cn/new/hisAnnouncement/query: RuntimeError: HTTP 500: HTTP 500
+[00:30:53] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+⚠️ # 46 empty         total=0 288.8s | 巨潮资讯网“贵州茅台”公告，抓取所有PDF公告标题与摘要，对关键词如“分红”触发通知。  | err:
+
+完成 9：{'ok_late': 1, 'ok': 2, 'blocked_login': 3, 'empty': 2, 'error': 1}
