@@ -254,8 +254,13 @@ class EngineV3:
             pname = self.route_parser(resp.url or req.url)
             parser = self.get_parser(pname)
             result = parser.parse(resp, self.ctx)
-            # 🏆 精配兜底：AI 解析器 0 条但命中注册表站点（期刊/门户等）→ 用精配解析器
-            if not result.items:
+            # 🏆 精配兜底：AI 解析器 0 条或全是空壳（字段无值）但命中注册表站点
+            # （期刊/门户/API 等）→ 用精配解析器。空壳判断防 AI 的 json 解析器
+            # 没写 records_path 时把顶层对象当记录、生成一堆空字段"成功"条目跳过兜底。
+            _META = ("_url", "_parser", "_ts", "_id")
+            _real_items = [it for it in (result.items or []) if any(
+                str(v or "").strip() for k, v in it.items() if k not in _META)]
+            if not _real_items:
                 try:
                     from .sites import parse_site_html
                     _rows = parse_site_html(resp.url or req.url, resp.text or "")

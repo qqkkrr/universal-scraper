@@ -368,6 +368,8 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             "https://fund.eastmoney.com/data/rankhandler.aspx?op=ph&dt=kf&ft=all&sc=6yzf&st=desc&pi=1&pn=50&dx=1",
         "pypi.org/trending":
             "https://pypistats.org/top",
+        "api.fund.eastmoney.com/FundRank/GetFundRankList":
+            "https://fund.eastmoney.com/data/rankhandler.aspx?op=ph&dt=kf&ft=all&sc=6yzf&st=desc&pi=1&pn=50&dx=1",
     }
     for _k, _v in _API_REWRITE.items():
         if _k in _su0:
