@@ -83,8 +83,10 @@ v3 任务包 config.json 结构（字段含义）：
 - **论坛类站点（Discuz 等，如 bbs.mountblade.com.cn）硬知识（必须遵守）**：
   "最新发表/最新回复" guide 列表页（forum.php?mod=guide）通常**没有板块列**——只有 标题/作者/回复数/查看数/最后回复时间，**不要把板块名配成列表字段**（td.common 在 guide 页不存在，会得到空字段）。
   正确做法：板块名从详情页面包屑取倒数第二个链接 `div#pt a:nth-last-of-type(2)::text`（Discuz 面包屑是 首页>板块>帖子标题，last-of-type 是标题，别抓错；字段名用 forum_name 或 forum 均可）。
-  发帖时间【优先从列表页取，不要依赖详情页】：Discuz 板块列表每行的作者列带绝对发帖时间 `td.by em span[title]::attr(title)`（格式如 2026-8-8 18:47，parse_date 可直接转 Unix 秒）；不要用列表页 `em span` 里显示的相对文本（如"5 小时前"），要用 span[title] 的绝对时间属性。详情页 em[id^='authorposton'] 只在列表页没有时才用（详情页易触发验证码，会导致整批时间缺失）。
-  **Discuz 排序硬知识**：板块列表默认按【最后回复】排序（老帖会被顶上来），用户要"今天新发布"时，入口 URL 必须加 `orderby=dateline`（如 forum-53-1.html?orderby=dateline），并翻页抓取。
+  发帖时间（精确）：
+  - 列表页发帖日期（发帖者列，作者链接含 uid=）：`xpath:.//td[contains(@class,'by') and cite/a[contains(@href,'uid')]]//em//span/@title`（如 2026-8-8；**不要用** `td.by em span[title]`，那会同时抓到"最后回复时间"）
+  - 详情页发帖时间（精确到秒）：`em[id^='authorposton']::text`（如「发表于 2025-8-22 09:47:13」/「发表于 昨天 22:47」，parse_date 都能转）；详情页易触发验证码，所以列表日期留作兜底。
+  **Discuz 排序硬知识**：板块列表默认按【最后回复】排序；`orderby=dateline`/`filter=dateline` 参数在很多站无效（实测 mountblade 无效）。用户要"今天新发布"时，正确做法：抓列表（按默认排序翻前几页）→ 每条进详情页取发帖时间 em[id^='authorposton'] → detail.filters 用 parse_date + between 只保留发帖时间在今天的；列表页发帖日期（uid 列）作为详情页失败时的兜底。
 - 需要登录的网站（大众点评/小红书/微博/淘宝/京东/知乎等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
 - **京东 URL 硬知识（必须遵守）**：京东店铺页真实格式是 https://mall.jd.com/index-<店铺数字ID>.html；商品页是 https://item.jd.com/<sku数字ID>.html；**绝对不要**把店铺名猜成 "<店铺名>sp.jd.com/list.html"（那是假地址，会 404）。用户只给店铺名没给链接时，start_urls 可以先用京东搜索或直接用已知商品链接，并在任务说明里注明"需先找到店铺/商品真实 URL"。京东搜索页(www.jd.com)、商品页、评论接口(club.jd.com)全都被强风控：公开 HTTP 接口已失效，必须 source.type=browser + 真实扫码登录。京东登录硬校验："login":{"enabled":true,"url":"https://www.jd.com/","wait_selector":".nickname","require_cookie":"pt_key|pt_pin"}——工具会检查登录 cookie 是否真的出现，没有 pt_key/pt_pin 就不会放行，避免"假登录通过"。
 - 验证码/整页验证（大众点评/美团等会跳到验证中心）：source.type=browser 并加 "headless": false 与
