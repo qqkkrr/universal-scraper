@@ -8,7 +8,9 @@
  */
 const fs = require("node:fs");
 
-const CHROMIUM_EXE = process.env.PW_EXECUTABLE || "/Users/kairanqin/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell";
+const os = require("node:os");
+const HOME = process.env.HOME || os.homedir() || "/tmp";
+const CHROMIUM_EXE = process.env.PW_EXECUTABLE || `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 
 function loadChromium() {
   try { return require("patchright").chromium; } catch (e) { return require("playwright").chromium; }
