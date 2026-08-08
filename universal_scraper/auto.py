@@ -1179,8 +1179,11 @@ def plan_task(description: str, limit: Optional[int] = None, proxy: Optional[str
 def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
               log_cb=None, round_timeout: Optional[int] = None,
               proxy: Optional[str] = None,
-              cookie: Optional[str] = None) -> Dict[str, Any]:
-    """执行一次自动任务。返回 {config, result, log, sample, files}。"""
+              cookie: Optional[str] = None,
+              agent_fallback: Optional[bool] = None) -> Dict[str, Any]:
+    """执行一次自动任务。返回 {config, result, log, sample, files}。
+    agent_fallback: 常规解析/LLM 抽取都没结果时，是否启用 LLM 浏览器代理兜底
+    （None=自动：无人工验证/登录的任务默认启用，有 verify/login 的不启用避免重复弹窗）。"""
     if limit is not None:
         limit = int(limit) or None
 
@@ -1398,6 +1401,43 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             total = fb["total"]
             real = sample
             log("✅ LLM 兜底成功，任务视为完成")
+
+    # 🕹️ LLM 浏览器代理兜底（browser-use 路线）：常规解析+LLM抽取都没结果、
+    # 且任务不需要人工验证/登录时，让 LLM 看真实页面自己点/翻/抽（对没精配/结构怪的站自适应）
+    if not (total > 0 and real) and agent_fallback is not False:
+        _src_now = cfg.get("source", {}) or {}
+        _need_human = bool((_src_now.get("verify") or {}).get("enabled")
+                           or (_src_now.get("login") or {}).get("enabled")
+                           or _src_now.get("headless") is False)
+        if not _need_human:
+            log("🕹️ 常规解析未命中，尝试 LLM 浏览器代理模式（AI 看页面自己点/翻/抽）...")
+            try:
+                from .agent import agent_task
+                _u0 = (cfg.get("start_urls") or [""])[0]
+                _cdp0 = str(_src_now.get("cdp") or "")
+                ag = agent_task(description, start_url=_u0, max_steps=10,
+                                cdp=_cdp0, limit=limit, log_cb=log)
+                if ag.get("items"):
+                    sample = ag["items"][:5]
+                    total = ag["total"]
+                    real = sample
+                    last_result = dict(last_result or {})
+                    last_result["total"] = ag["total"]
+                    last_result["agent_mode"] = True
+                    # 落盘
+                    try:
+                        import hashlib as _hl
+                        _n = f"auto_{_hl.md5(description.encode()).hexdigest()[:10]}"
+                        _fp = ROOT / "outputs" / f"{_n}.json"
+                        _fp.write_text(json.dumps(ag["items"], ensure_ascii=False, indent=2), encoding="utf-8")
+                        files = {"json": f"outputs/{_n}.json"}
+                    except Exception:
+                        pass
+                    log(f"✅ LLM 浏览器代理成功：{ag['total']} 条")
+                else:
+                    log(f"⚠️ LLM 浏览器代理未收集到条目：{ag.get('error','')[:120]}")
+            except Exception as _e:
+                log(f"⚠️ LLM 浏览器代理不可用：{_e}")
 
     # 🏆 精配解析器覆盖（高频网站注册表）：检测到命中即用精配解析器，字段干净
     # run 型直达精配已在首轮前跑过（_precise_attempted），末尾只兜底 fetch+parse 型精配

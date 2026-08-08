@@ -159,6 +159,13 @@ def main() -> int:
     ap_auto.add_argument("desc", nargs="+", help="任务描述，如：抓取某网站的名言、作者和标签，翻 2 页")
     ap_auto.add_argument("--limit", type=int, default=None, help="最多条数（可选）")
 
+    ap_agent = sub.add_parser("agent", help="🕹️ LLM 浏览器代理：不写选择器，AI 看页面自己点/翻/抽（browser-use 路线）")
+    ap_agent.add_argument("desc", nargs="+", help="任务描述")
+    ap_agent.add_argument("--url", default="", help="入口 URL（可选，留空用当前页面）")
+    ap_agent.add_argument("--max-steps", type=int, default=12, help="最大操作步数（默认 12）")
+    ap_agent.add_argument("--cdp", default="", help="附着已登录 Chrome：http://127.0.0.1:9222（淘宝/登录站必用）")
+    ap_agent.add_argument("--limit", type=int, default=None, help="最多条数（可选）")
+
     mcp_p = sub.add_parser("mcp", help="🤖 启动 MCP Server（stdio，供 Claude/Cursor/Codex 调用）")
     mcp_p.add_argument("--once", action="store_true", help="自测：读一次输入即退出")
 
@@ -335,6 +342,11 @@ def main() -> int:
     if args.cmd == "auto":
         from .auto import run_auto_cli
         out = run_auto_cli(" ".join(args.desc), limit=args.limit)
+
+    if args.cmd == "agent":
+        from .agent import run_agent_cli
+        out = run_agent_cli(" ".join(args.desc), url=args.url,
+                            max_steps=args.max_steps, cdp=args.cdp, limit=args.limit)
         if out.get("error"):
             print(f"❌ {out['error']}", file=sys.stderr)
             return 1
