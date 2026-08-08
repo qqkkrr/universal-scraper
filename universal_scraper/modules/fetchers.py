@@ -410,10 +410,22 @@ class BrowserFetcher(BaseFetcher):
             out_dir.mkdir()
             spec_file.write_text(_json.dumps(spec, ensure_ascii=False), encoding="utf-8")
             ss = self.session_dir / "session.json"
+            # 按任务隔离 profile：不同任务不抢同一浏览器档案（之前全局 .browser_profile
+            # 被残留进程锁住 → 新任务 launchPersistentContext 直接 browser closed）
+            _task_name = self._task_dir.name if self._task_dir else "default"
+            _prof_root = Path(self.scripts_dir).parent / "outputs" / ".browser_profiles"
+            _profile_dir = _prof_root / _task_name
+            _profile_dir.mkdir(parents=True, exist_ok=True)
+            # 启动前清锁：残留进程留下的 SingletonLock/SingletonCookie 会让启动失败
+            for _lk in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                try:
+                    (_profile_dir / _lk).unlink(missing_ok=True)
+                except Exception:
+                    pass
             cmd = [_NODE_BIN, str(self.scripts_dir / "browser_generic.cjs"),
                    "--spec", str(spec_file), "--out", str(out_dir),
                    "--headless", "0",
-                   "--profile", str(Path(self.scripts_dir).parent / "outputs" / ".browser_profile"),
+                   "--profile", str(_profile_dir),
                    "--storageState", str(ss),
                    "--scrollCount", str(self.config.get("scroll_count", 0)),
                    "--scrollWait", str(self.config.get("scroll_wait_ms", 2000)),
@@ -462,17 +474,25 @@ class BrowserFetcher(BaseFetcher):
                     proc.terminate()
                     raise RuntimeError(msg or "浏览器交互桥错误")
             proc.wait(timeout=30 if finished else 600)
-            if not html:
-                files = sorted(out_dir.glob("*.html"))
-                if files:
-                    html = files[0].read_text(encoding="utf-8", errors="replace")
-            # 诊断保留：最近一次交互页面的 HTML（排查"抓了但0条"）
             try:
-                debug_html = Path(self.scripts_dir).parent / "outputs" / ".debug" / "last_interactive_page.html"
-                debug_html.parent.mkdir(parents=True, exist_ok=True)
-                debug_html.write_text(html or "", encoding="utf-8")
-            except Exception:
-                pass
+                if not html:
+                    files = sorted(out_dir.glob("*.html"))
+                    if files:
+                        html = files[0].read_text(encoding="utf-8", errors="replace")
+                # 诊断保留：最近一次交互页面的 HTML（排查"抓了但0条"）
+                try:
+                    debug_html = Path(self.scripts_dir).parent / "outputs" / ".debug" / "last_interactive_page.html"
+                    debug_html.parent.mkdir(parents=True, exist_ok=True)
+                    debug_html.write_text(html or "", encoding="utf-8")
+                except Exception:
+                    pass
+            finally:
+                # 必杀：子进程绝不允许残留（卡验证的进程会锁住 profile，害死下一个任务）
+                try:
+                    if proc.poll() is None:
+                        proc.kill()
+                except Exception:
+                    pass
         return Response(request=req, status=200, body=html.encode("utf-8"),
                         text=html, json=None, url=final_url)
 
@@ -567,22 +587,28 @@ class BrowserFetcher(BaseFetcher):
                         text=html, json=None, url=obj.get("url") or req.url)
 
     def close(self) -> None:
-        if self._pool is not None and self._stopped():
-            try:
-                self._pool.terminate()
-            except Exception:
-                pass
+        # 无论是否 stopped：自己的 pool 一律 terminate + kill，绝不留孤儿进程锁资源
         if self._pool is not None:
             try:
                 if self._pool.stdin:
                     self._pool.stdin.write('{"type":"close"}\n')
                     self._pool.stdin.flush()
-                self._pool.wait(timeout=10)
-            except Exception:
                 try:
-                    self._pool.terminate()
+                    self._pool.wait(timeout=3)
                 except Exception:
                     pass
+            except Exception:
+                pass
+            try:
+                if self._pool.poll() is None:
+                    self._pool.terminate()
+            except Exception:
+                pass
+            try:
+                if self._pool.poll() is None:
+                    self._pool.kill()
+            except Exception:
+                pass
             self._pool = None
 
 

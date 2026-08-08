@@ -269,6 +269,10 @@ function centerCaptcha(page) {
       // 持久档案模式：登录态保存在档案目录，登录一次永久复用（最接近真实浏览器）
       // headless 默认有头（登录需要），可显式 --headless 1 无头（登录态已存在时抓取用）
       fs.mkdirSync(profileDir, { recursive: true });
+      // 清残留锁（Python 侧已按任务隔离 profile，双保险防 SingletonLock 卡启动）
+      for (const _lk of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+        try { fs.rmSync(path.join(profileDir, _lk), { force: true }); } catch (e) {}
+      }
       context = await chromium.launchPersistentContext(profileDir, {
         ...ctxOpts,
         headless: arg("headless", "0") !== "0",
