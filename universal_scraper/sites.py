@@ -796,50 +796,80 @@ def match_taobao(url: str) -> bool:
 
 def _taobao_run(url: str, cookie: str = "", proxy: Optional[str] = None,
                 limit: int = 20) -> List[Dict[str, Any]]:
-    """附着 CDP 9222（用户已登录的 Chrome）抓店铺商品 + 详情产品参数。
-    前提：先双击「启动淘宝调试Chrome.command」并登录淘宝一次。"""
+    """淘宝/天猫精配：优先走快引擎（店铺移动端接口 / MTOP 搜索 / CDP 并行详情），
+    失败时兜底旧桥。前提：先双击「启动淘宝调试Chrome.command」并登录淘宝一次。"""
     from pathlib import Path as _P
-    from .runtime import resolve_node, resolve_node_path
-    import subprocess, os
-    bridge = _P(__file__).resolve().parent.parent / "scripts/taobao_shop_bridge.cjs"
-    node = os.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
-    npath = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", resolve_node_path())
+    from urllib.parse import urlparse as _up, parse_qs as _pq
+    import subprocess, os, sys
+    root = _P(__file__).resolve().parent.parent
+    engine = root / "scripts" / "taobao_tmall_engine.py"
     cdp = os.environ.get("US_CDP", "http://127.0.0.1:9222")
-    cmd = [node, str(bridge), "--cdp", cdp, "--shop", url, "--max", str(int(limit or 20))]
-    env = {**os.environ, "NODE_PATH": npath}
+    limit = int(limit or 20)
+    mode, target = None, url
+    host = (_up(url).netloc or "").lower()
+    if "tmall.com" in host and not host.startswith("s.") and "search" not in url:
+        mode = "shop"
+    elif "s.taobao.com" in host or "search" in url.lower():
+        mode = "search"
+        q = _pq(_up(url).query).get("q") or _pq(_up(url).query).get("keyword")
+        if q:
+            target = q[0]
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=900)
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("淘宝/天猫精配超时（>900s），可能卡在详情页")
-    rows: List[Dict[str, Any]] = []
-    meta = {}
-    for line in (p.stdout or "").splitlines():
-        line = line.strip()
-        if not line:
-            continue
+        cmd = [sys.executable, str(engine), "--mode", mode or "shop", "--target", target,
+               "--max", str(limit), "--workers", "2", "--json"]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        for line in (p.stdout or "").splitlines():
+            if line.startswith("RESULT_JSON "):
+                res = json.loads(line[len("RESULT_JSON "):])
+                rows = res.get("rows") or []
+                if rows:
+                    return rows
+                raise RuntimeError("淘宝/天猫精配 0 条（请确认调试 Chrome 已登录淘宝，且店铺/关键词正确）")
+        raise RuntimeError((p.stderr or p.stdout or "").strip().splitlines()[-1][-200:]
+                           if (p.stderr or p.stdout or "").strip() else "引擎无输出")
+    except RuntimeError as e:
+        # 快引擎不可用（如 CDP 未开）→ 兜底旧桥（店铺页 DOM 收集链接）
+        if mode == "search" or not url or "tmall.com" not in host:
+            raise RuntimeError(str(e))
+        from .runtime import resolve_node, resolve_node_path
+        bridge = root / "scripts" / "taobao_shop_bridge.cjs"
+        node = os.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
+        npath = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", resolve_node_path())
+        cmd2 = [node, str(bridge), "--cdp", cdp, "--shop", url, "--max", str(limit)]
+        env = {**os.environ, "NODE_PATH": npath}
         try:
-            obj = json.loads(line)
-        except Exception:
-            continue
-        t = obj.get("type")
-        if t == "meta":
-            meta = {**meta, **{k: v for k, v in obj.items() if k != "type"}}
-        elif t == "item":
-            rows.append({
-                "标题": str(obj.get("title") or obj.get("list_title") or "").strip(),
-                "价格": str(obj.get("price") or "").strip(),
-                "店铺": str(obj.get("shop") or "").strip(),
-                "链接": str(obj.get("url") or "").strip(),
-                "产品参数": "；".join([str(x) for x in (obj.get("params") or []) if str(x).strip()]),
-            })
-        elif t == "login":
-            raise RuntimeError(f"淘宝/天猫需要人工验证：{obj.get('message')}（请在调试 Chrome 里登录/拖滑块）")
-        elif t == "error":
-            raise RuntimeError(f"淘宝/天猫精配失败：{obj.get('message')}")
-    if not rows:
-        err = meta.get("items_found", 0) if meta else 0
-        raise RuntimeError(f"淘宝/天猫精配 0 条（页面商品链接 {err} 个；请确认已登录淘宝且店铺 URL 正确）")
-    return rows
+            p2 = subprocess.run(cmd2, capture_output=True, text=True, env=env, timeout=900)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("淘宝/天猫精配超时（>900s），可能卡在详情页")
+        rows: List[Dict[str, Any]] = []
+        meta = {}
+        for line in (p2.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            t = obj.get("type")
+            if t == "meta":
+                meta = {**meta, **{k: v for k, v in obj.items() if k != "type"}}
+            elif t == "item":
+                rows.append({
+                    "标题": str(obj.get("title") or obj.get("list_title") or "").strip(),
+                    "价格": str(obj.get("price") or "").strip(),
+                    "店铺": str(obj.get("shop") or "").strip(),
+                    "链接": str(obj.get("url") or "").strip(),
+                    "产品参数": "；".join([str(x) for x in (obj.get("params") or []) if str(x).strip()]),
+                })
+            elif t == "login":
+                raise RuntimeError(f"淘宝/天猫需要人工验证：{obj.get('message')}（请在调试 Chrome 里登录/拖滑块）")
+            elif t == "error":
+                raise RuntimeError(f"淘宝/天猫精配失败：{obj.get('message')}")
+        if not rows:
+            err = meta.get("items_found", 0) if meta else 0
+            raise RuntimeError(f"淘宝/天猫精配 0 条（页面商品链接 {err} 个；请确认已登录淘宝且店铺 URL 正确）")
+        return rows
 
 
 register("tmall_taobao", match_taobao, lambda html, url: [], run=_taobao_run,
@@ -937,3 +967,484 @@ for _name, _dom in SITE_DOMAINS.items():
         return matcher, parse
     _m, _p = _mk(_name, _dom)
     register(_name, _m, _p, fetch=browser_fetch, desc=f"{_name}（浏览器渲染）")
+
+
+# ===========================================================================
+# 高频站点补充精配（100 实战任务覆盖）
+# ===========================================================================
+
+# ---------- GitHub Trending（SSR） ----------
+def parse_github_trending(html: str, url: str) -> List[Dict[str, Any]]:
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    out = []
+    for art in doc.cssselect("article.Box-row"):
+        a = art.cssselect("h2 a")
+        if not a:
+            continue
+        name = re.sub(r"\s+", " ", a[0].text_content()).strip().replace(" / ", "/")
+        href = a[0].get("href") or ""
+        desc = _css_text(art, "p")
+        stars = _css_text(art, "a[href*='stargazers']") or _css_text(art, ".Link--muted")
+        lang = _css_text(art, "[itemprop='programmingLanguage']")
+        out.append({"repo": name, "url": "https://github.com" + href if href.startswith("/") else href,
+                    "description": desc[:200], "stars": stars.strip(), "language": lang, "_site": "github_trending"})
+        if len(out) >= 30:
+            break
+    return out
+
+
+def match_github_trending(url: str) -> bool:
+    return "github.com/trending" in url
+
+
+register("github_trending", match_github_trending, parse_github_trending,
+         desc="GitHub Trending：每周/每日热门仓库（SSR）")
+
+
+# ---------- arXiv（Atom API / list HTML） ----------
+def parse_arxiv(html: str, url: str) -> List[Dict[str, Any]]:
+    import xml.etree.ElementTree as ET
+    from lxml import html as lh
+    out = []
+    if "export.arxiv.org" in url or "arxiv.org/api" in url:
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        try:
+            root = ET.fromstring(html)
+            for e in root.findall("a:entry", ns):
+                title = re.sub(r"\s+", " ", "".join((e.findtext("a:title", "", ns) or "").split()))
+                link = (e.findtext("a:id", "", ns) or "").strip()
+                authors = [au.findtext("a:name", "", ns) for au in e.findall("a:author", ns)]
+                summary = re.sub(r"\s+", " ", (e.findtext("a:summary", "", ns) or "")).strip()
+                published = (e.findtext("a:published", "", ns) or "").strip()
+                out.append({"title": title, "url": link, "authors": "、".join(authors)[:200],
+                            "abstract": summary[:300], "published": published, "_site": "arxiv"})
+        except Exception:
+            pass
+        return out
+    # HTML 列表（arxiv.org/list/...）
+    try:
+        doc = lh.fromstring(html)
+        for li in doc.cssselect("dl dt")[:50]:
+            a = li.cssselect("a[href*='/abs/']")
+            if not a:
+                continue
+            out.append({"id": (a[0].get("href") or "").split("/abs/")[-1],
+                        "url": "https://arxiv.org" + a[0].get("href", ""), "_site": "arxiv"})
+        for dd in doc.cssselect("dl dd")[:50]:
+            if len(out) > len(dd.cssselect("")):
+                pass
+        # 简化：只抓标题行
+        if not out:
+            for dd in doc.cssselect("dl dd")[:50]:
+                title = _css_text(dd, ".list-title")
+                if title:
+                    out.append({"title": title[:200], "_site": "arxiv"})
+    except Exception:
+        pass
+    return out
+
+
+def match_arxiv(url: str) -> bool:
+    return ("arxiv.org" in url and ("export.arxiv.org" in url or "/list/" in url or "/api/" in url)) or "export.arxiv.org" in url
+
+
+register("arxiv", match_arxiv, parse_arxiv, desc="arXiv：每日新提交论文（Atom API / 列表）")
+
+
+# ---------- LeetCode 题库（官方 JSON API） ----------
+def parse_leetcode(html: str, url: str) -> List[Dict[str, Any]]:
+    try:
+        data = json.loads(html)
+    except Exception:
+        return []
+    out = []
+    for p in (data.get("stat_status_pairs") or [])[:100]:
+        st = p.get("stat") or {}
+        title = st.get("question__title") or ""
+        if not title:
+            continue
+        total_acs = st.get("total_acs") or 0
+        total_sub = st.get("total_submitted") or 0
+        rate = round(total_acs * 100.0 / total_sub, 2) if total_sub else ""
+        diff = {1: "简单", 2: "中等", 3: "困难"}.get((p.get("difficulty") or {}).get("level"), "")
+        out.append({
+            "title": title,
+            "frontend_id": st.get("frontend_question_id") or st.get("question_id") or "",
+            "difficulty": diff,
+            "acceptance": rate,
+            "url": f"https://leetcode.cn/problems/{st.get('question__title_slug') or ''}/",
+            "status": "已解决" if p.get("status") == "ac" else "",
+            "_site": "leetcode",
+        })
+    return out
+
+
+def match_leetcode(url: str) -> bool:
+    return "leetcode.cn/api/problems" in url or "leetcode.com/api/problems" in url
+
+
+register("leetcode", match_leetcode, parse_leetcode, desc="LeetCode：题库全量（官方 JSON API）")
+
+
+# ---------- B站每周必看（官方 API JSON） ----------
+def parse_bilibili_weekly(html: str, url: str) -> List[Dict[str, Any]]:
+    try:
+        data = json.loads(html)
+    except Exception:
+        return []
+    lst = ((data.get("data") or {}).get("list")) or []
+    out = []
+    for v in lst[:50]:
+        st = v.get("stat") or {}
+        out.append({
+            "bv": v.get("bvid") or "",
+            "title": v.get("title") or "",
+            "up": (v.get("owner") or {}).get("name") or "",
+            "url": f"https://www.bilibili.com/video/{v.get('bvid') or ''}",
+            "view": st.get("view") or 0,
+            "danmaku": st.get("danmaku") or 0,
+            "coin": st.get("coin") or 0,
+            "favorite": st.get("favorite") or 0,
+            "_site": "bilibili_weekly",
+        })
+    return out
+
+
+def match_bilibili_weekly(url: str) -> bool:
+    return "api.bilibili.com/x/web-interface/popular/series/one" in url
+
+
+# 停用（风控/JS渲染，交给通用浏览器流程）
+# register("bilibili_weekly", match_bilibili_weekly, parse_bilibili_weekly,
+#          desc="B站每周必看：指定期号视频列表（官方 API）")
+
+
+# ---------- 中国天气网（JSON） ----------
+def parse_weathercn(html: str, url: str) -> List[Dict[str, Any]]:
+    # 旧 JSON 接口已下线（返回加载页），改为解析 weather1d/weather SSR 页面
+    try:
+        data = json.loads(html)
+    except Exception:
+        data = None
+    if isinstance(data, dict) and data.get("weatherinfo"):
+        wi = data["weatherinfo"]
+        return [{
+            "city": wi.get("city") or wi.get("cityname") or "",
+            "temp": wi.get("temp") or wi.get("temp1") or "",
+            "temp_min": wi.get("tempn") or wi.get("temp2") or "",
+            "weather": wi.get("weather") or "",
+            "wind": (wi.get("WD") or "") + (wi.get("WS") or ""),
+            "humidity": wi.get("SD") or "",
+            "update": wi.get("time") or wi.get("ptime") or "",
+            "_site": "weathercn",
+        }]
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    mt = re.search(r"([\u4e00-\u9fa5]{2,6})天气预报", html or "")
+    city = mt.group(1) if mt else _css_text(doc, ".cityName, h1")
+    temps = []
+    for e in doc.cssselect("#today .tem i"):
+        t = re.sub(r"[^0-9℃°]", "", e.text_content() or "").strip()
+        if t:
+            temps.append(t)
+    wea = _css_text(doc, "#today .wea")
+    wind = _css_text(doc, "#today .win") or _css_text(doc, "#today .win i")
+    if not temps and not wea:
+        return []
+    return [{
+        "city": city or "",
+        "temp": "/".join(temps[:2]),
+        "weather": wea,
+        "wind": wind[:40],
+        "update": "",
+        "_site": "weathercn",
+    }]
+
+
+def match_weathercn(url: str) -> bool:
+    return "weather.com.cn" in url and any(k in url for k in ("weather", "data"))
+
+
+register("weathercn", match_weathercn, parse_weathercn, desc="中国天气网：城市实时/预报 JSON")
+
+
+# ---------- 中国政府网·政策文件库（SSR） ----------
+def parse_govcn(html: str, url: str) -> List[Dict[str, Any]]:
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    out = []
+    for a in doc.cssselect("ul li a, .news_box li a, .list li a")[:40]:
+        title = re.sub(r"\s+", " ", a.text_content()).strip()
+        href = a.get("href") or ""
+        if not title or len(title) < 6:
+            continue
+        if not href.startswith("http"):
+            href = "https://www.gov.cn" + href if href.startswith("/") else href
+        out.append({"title": title[:120], "url": href, "_site": "govcn"})
+    return out
+
+
+def match_govcn(url: str) -> bool:
+    return "gov.cn" in url and any(k in url for k in ("zhengce", "policy", "zuixin", "最新"))
+
+
+# 停用（风控/JS渲染，交给通用浏览器流程）
+# register("govcn", match_govcn, parse_govcn, desc="中国政府网：政策文件库/最新文件（SSR）")
+
+
+# ---------- 什么值得买·好价（SSR） ----------
+def parse_smzdm(html: str, url: str) -> List[Dict[str, Any]]:
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    out = []
+    for it in doc.cssselect(".feed-item, .list_item")[:40]:
+        a = it.cssselect(".feed-block-title a, .itemName a, h2 a")
+        if not a:
+            continue
+        title = re.sub(r"\s+", " ", a[0].text_content()).strip()
+        if not title:
+            continue
+        price = _css_text(it, ".z-highlight, .red, .price, .itemName strong")
+        mall = _css_text(it, ".feed-block-merchant, .mall, .itemMall")
+        out.append({"title": title[:120], "url": a[0].get("href") or "",
+                    "price": price, "mall": mall, "_site": "smzdm"})
+    return out
+
+
+def match_smzdm(url: str) -> bool:
+    return "smzdm.com" in url and any(k in url for k in ("jingxuan", "fenlei", "/hot", "/hao", "youhui"))
+
+
+# 停用（风控/JS渲染，交给通用浏览器流程）
+# register("smzdm", match_smzdm, parse_smzdm, desc="什么值得买：好价/精选（SSR）")
+
+
+# ---------- 虎扑·步行街（SSR） ----------
+def parse_hupu(html: str, url: str) -> List[Dict[str, Any]]:
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    out = []
+    for it in doc.cssselect(".bbs-sl-web-post-body, .list-item, li[class*='thread']")[:40]:
+        a = it.cssselect("a")
+        if not a:
+            continue
+        title = re.sub(r"\s+", " ", a[0].text_content()).strip()
+        if not title or len(title) < 4:
+            continue
+        href = a[0].get("href") or ""
+        if href.startswith("//"):
+            href = "https:" + href
+        elif href.startswith("/"):
+            href = "https://bbs.hupu.com" + href
+        out.append({"title": title[:120], "url": href,
+                    "author": _css_text(it, ".bbs-sl-web-post-author, .author"),
+                    "replies": _css_text(it, ".bbs-sl-web-post-reply, .reply, .num"),
+                    "_site": "hupu"})
+    return out
+
+
+def match_hupu(url: str) -> bool:
+    return "bbs.hupu.com" in url
+
+
+register("hupu", match_hupu, parse_hupu, desc="虎扑：步行街热帖（SSR）")
+
+
+# ---------- 百度贴吧（SSR） ----------
+def parse_tieba(html: str, url: str) -> List[Dict[str, Any]]:
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    out = []
+    for li in doc.cssselect("li.j_thread_list")[:50]:
+        a = li.cssselect(".j_th_tit")
+        if not a:
+            continue
+        title = a[0].text_content().strip()
+        if not title:
+            continue
+        out.append({"title": title[:120],
+                    "url": "https://tieba.baidu.com" + (a[0].get("href") or ""),
+                    "replies": _css_text(li, ".threadlist_rep_num"),
+                    "time": _css_text(li, ".threadlist_reply_date, .pull-right"),
+                    "_site": "tieba"})
+    return out
+
+
+def match_tieba(url: str) -> bool:
+    return "tieba.baidu.com/f" in url
+
+
+# 停用（风控/JS渲染，交给通用浏览器流程）
+# register("tieba", match_tieba, parse_tieba, desc="百度贴吧：帖子列表（SSR）")
+
+
+# ---------- CSDN 热门（SSR） ----------
+def parse_csdn(html: str, url: str) -> List[Dict[str, Any]]:
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    out = []
+    for it in doc.cssselect(".blog-list-box, .article-item-box, .list-item, li[class*='article']")[:40]:
+        a = it.cssselect("a[href*='blog.csdn.net']") or it.cssselect(".title a") or it.cssselect("a")
+        if not a:
+            continue
+        title = re.sub(r"\s+", " ", a[0].text_content()).strip()
+        if not title or len(title) < 4:
+            continue
+        out.append({"title": title[:120], "url": a[0].get("href") or "",
+                    "author": _css_text(it, ".nickname, .name, .author"),
+                    "stats": _css_text(it, ".read-num, .view, .statistics")[:60],
+                    "_site": "csdn"})
+    return out
+
+
+def match_csdn(url: str) -> bool:
+    return "csdn.net" in url and any(k in url for k in ("nav", "hot", "list", "articles"))
+
+
+register("csdn", match_csdn, parse_csdn, desc="CSDN：热门/分类文章（SSR）")
+
+
+# ---------- 东方财富数据中心（通用 JSON API） ----------
+_EM_RENAME = {
+    "SECURITY_CODE": "代码", "SECURITY_NAME_ABBR": "名称", "SECURITY_NAME": "名称",
+    "TRADE_DATE": "日期", "EXPLAIN": "上榜原因", "BILLBOARD_NET_AMT": "龙虎榜净买额",
+    "BILLBOARD_BUY_AMT": "买入额", "BILLBOARD_SELL_AMT": "卖出额", "CLOSE_PRICE": "收盘价",
+    "CHANGE_RATE": "涨跌幅", "TURNOVER_RATE": "换手率", "DEAL_AMOUNT_RATIO": "成交占比",
+    "FUND_CODE": "基金代码", "FUND_NAME": "基金名称", "FUND_MANAGER": "基金经理",
+    "REWARD": "近六月收益", "DATE": "日期", "CURRENT_PRICE": "现价", "PREMIUM_RATE": "转股溢价率",
+    "PURE_BOND_VALUE": "纯债价值", "YIELD": "到期税后收益", "BOND_CODE": "转债代码",
+    "BOND_NAME": "转债名称", "PROJECT_NAME": "项目名称", "STATUS": "状态",
+    "ACCEPTANCE_DATE": "受理日期", "LATEST_STATUS": "最新状态", "ORG_NAME": "公司名称",
+}
+
+
+def parse_eastmoney(html: str, url: str) -> List[Dict[str, Any]]:
+    out = []
+    try:
+        data = json.loads(html)
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        rows = (((data.get("result") or {}).get("data")) or [])
+        for r in rows[:50]:
+            row = {}
+            for k, v in r.items():
+                if v is None or v == "":
+                    continue
+                row[_EM_RENAME.get(k, k)] = str(v) if not isinstance(v, (int, float)) else v
+            if row:
+                out.append({**row, "_site": "eastmoney"})
+        if out:
+            return out
+    # HTML 表格兜底（data.eastmoney.com 页面）
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    for tr in doc.cssselect("table tbody tr")[:50]:
+        tds = [re.sub(r"\s+", " ", td.text_content()).strip() for td in tr.cssselect("td")]
+        if len(tds) < 2:
+            continue
+        if not any(tds):
+            continue
+        out.append({"row": " | ".join(t for t in tds if t), "_site": "eastmoney"})
+    return out
+
+
+def match_eastmoney(url: str) -> bool:
+    return "eastmoney.com" in url and ("api/data/v1/get" in url or "stock/lhb" in url or "fundranking" in url)
+
+
+register("eastmoney", match_eastmoney, parse_eastmoney,
+         desc="东方财富数据中心：龙虎榜/基金/转债等 JSON API")
+
+
+# ---------- 天天基金排行（rankhandler JSONP） ----------
+def parse_fundrank(html: str, url: str) -> List[Dict[str, Any]]:
+    m = re.search(r"datas:\s*\[(.*?)\]\s*,\s*allRecords", html, re.S)
+    if not m:
+        m = re.search(r"datas:\s*\[(.*?)\]", html, re.S)
+    if not m:
+        return []
+    names = ["代码", "名称", "拼音", "日期", "单位净值", "累计净值", "日增长率",
+             "近1周", "近1月", "近3月", "近6月", "近1年", "近2年", "近3年", "近5年",
+             "今年来", "成立来", "成立日期", "自定义"]
+    out = []
+    for raw in re.findall(r'"([^"]+)"', m.group(1)):
+        parts = raw.split(",")
+        row = {}
+        for i, p in enumerate(parts):
+            if i < len(names) and p:
+                row[names[i]] = p
+        if row.get("代码"):
+            out.append({**row, "_site": "fundrank"})
+        if len(out) >= 100:
+            break
+    return out
+
+
+def match_fundrank(url: str) -> bool:
+    return "fund.eastmoney.com/data/rankhandler" in url
+
+
+register("fundrank", match_fundrank, parse_fundrank, desc="天天基金：基金排行（rankhandler JSONP）")
+
+
+# ---------- 豆瓣同城活动（SSR） ----------
+def parse_douban_events(html: str, url: str) -> List[Dict[str, Any]]:
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    out = []
+    for li in doc.cssselect(".events-list li")[:50]:
+        txt = re.sub(r"\s+", " ", li.text_content()).strip()
+        if not txt:
+            continue
+        a = li.cssselect("a")
+        link = a[0].get("href") if a else ""
+        m_time = re.search(r"时间：\s*(.+?)\s+地点：", txt)
+        m_place = re.search(r"地点：\s*(.+?)\s+费用：", txt)
+        m_fee = re.search(r"费用：\s*(.+?)\s+发起", txt)
+        m_want = re.search(r"(\d+)人感兴趣", txt)
+        out.append({
+            "title": txt.split("时间：")[0].strip()[:120],
+            "url": link,
+            "time": (m_time.group(1) if m_time else "")[:80],
+            "place": (m_place.group(1) if m_place else "")[:80],
+            "fee": (m_fee.group(1) if m_fee else ""),
+            "interested": m_want.group(1) if m_want else "",
+            "_site": "douban_events",
+        })
+    return out
+
+
+def match_douban_events(url: str) -> bool:
+    return "douban.com/location" in url and "events" in url
+
+
+register("douban_events", match_douban_events, parse_douban_events, desc="豆瓣同城：活动列表（SSR）")

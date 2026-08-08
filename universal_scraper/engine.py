@@ -65,6 +65,8 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
         if st == "filter":
             field, op, value = step["field"], step.get("op", "contains"), step.get("value")
             before = len(rows)
+            # AI 配置防御：value 缺失/为 None 时按空串处理，避免 `None in str` 直接炸掉整单
+            value = "" if value is None else str(value)
             if op == "contains":
                 rows = [r for r in rows if value in str(r.get(field) or "")]
             elif op == "eq":

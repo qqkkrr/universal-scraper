@@ -1,0 +1,198 @@
+[
+ {
+  "id": 56,
+  "ok": true,
+  "total": 1,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 5,
+  "first": {
+   "repo": "AUTOMATIC1111/stable-diffusion-webui",
+   "url": "https://github.com/AUTOMATIC1111/stable-diffusion-webui",
+   "description": "Stable Diffusion web UI",
+   "stars": 164445,
+   "language": "Python",
+   "_site": "github"
+  },
+  "secs": 36.0,
+  "desc": "GitHub搜索“stable diffusion”，按star数降序，抓取前100仓库的名称、简介、Star数、语言、最近更新日期，挖掘新兴项目。"
+ },
+ {
+  "id": 58,
+  "ok": true,
+  "total": 500,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 5,
+  "first": {
+   "title": "LearningWhentoTrustviaSelectiveContextPreferenceOptimization",
+   "url": "http://arxiv.org/abs/2608.06377v1",
+   "authors": "Xian Sun、Wei Chow、Yingshuo Wang、Junhao Liu、Wei Gao、Qing Wu、Lingdong Kong",
+   "abstract": "Language models increasingly condition their answers on external signals, and a single misleading one can turn a correct answer wrong. The obvious remedy, training models to resist such signals, hides a failure mode: a model that ignores all context looks robust yet is useless when the context is wo",
+   "published": "2026-08-06T17:59:58Z",
+   "_site": "arxiv"
+  },
+  "secs": 68.7,
+  "desc": "arXiv “cs.CL”分类下每日新提交论文，抓取标题、作者列表、摘要，自动推送到NLP学习群。"
+ },
+ {
+  "id": 61,
+  "ok": true,
+  "total": 7,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 5,
+  "first": {
+   "日期": "8日",
+   "天气现象": "多云",
+   "最高温度": "26℃",
+   "最低温度": null,
+   "风力": "3-4级",
+   "_url": "https://www.weather.com.cn/weather/101200101.shtml",
+   "_parser": "llm_fallback"
+  },
+  "secs": 79.0,
+  "desc": "中国天气网“武汉”历史天气，每日抓取当天实况（最高温、最低温、天气现象、风力），用于训练本地化预测模型。"
+ },
+ {
+  "id": 37,
+  "ok": true,
+  "total": 3,
+  "fetched": 3,
+  "error": "",
+  "sample_n": 3,
+  "first": {
+   "标题": "被HR说经历不垂直？夸克AI三个指令，写出对口简历",
+   "链接": "https://blog.csdn.net/wtyuong/article/details/163309166",
+   "作者": "晓雨的笔记本",
+   "阅读量": "1.9w",
+   "收藏数": "136",
+   "_url": "https://www.csdn.net/nav/ai",
+   "_parser": "llm_fallback"
+  },
+  "secs": 80.8,
+  "desc": "CSDN“人工智能”分类下24小时热门文章，抓取标题、作者、阅读量、收藏数，发现技术圈内传播内容。 **金融与财经**"
+ },
+ {
+  "id": 57,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 0,
+  "first": {},
+  "secs": 76.2,
+  "desc": "LeetCode中国“剑指Offer”专项练习题目列表，抓取所有题目名称、难度、通过率、标签，提供给备考小组。"
+ },
+ {
+  "id": 42,
+  "ok": true,
+  "total": 20,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 5,
+  "first": {
+   "标题": "公开市场业务交易公告 [2026]第152号",
+   "时间": "2026-08-07",
+   "_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125431/125475/index.html",
+   "_parser": "llm_fallback"
+  },
+  "secs": 175.9,
+  "desc": "中国人民银行“货币政策司”公开市场操作公告，每个交易日抓取逆回购规模、中标利率、期限，自动计算净投放量。"
+ },
+ {
+  "id": 66,
+  "ok": true,
+  "total": 10,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 5,
+  "first": {
+   "影片名称": "蜘蛛侠：崭新之日",
+   "综合票房": ".万",
+   "票房占比": "30.5%",
+   "排片场次": "106063",
+   "_url": "https://piaofang.maoyan.com/dashboard",
+   "_parser": "llm_fallback"
+  },
+  "secs": 106.3,
+  "desc": "猫眼专业版“实时票房”，每日20点抓取当天票房前10影片名称、综合票房、排片占比、上座率，做票房速报。"
+ },
+ {
+  "id": 71,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "error": "运行超时（>75s）",
+  "sample_n": 0,
+  "first": {},
+  "secs": 158.1,
+  "desc": "竞彩网“竞彩足球”胜平负赔率，抓取当日所有受注赛事的赛事编号、主队、客队、初始赔率、即时赔率，做套利分析。"
+ },
+ {
+  "id": 73,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 0,
+  "first": {},
+  "secs": 73.9,
+  "desc": "PyPI“trending projects”页面，每周抓取最近一周热门Python包名称、简介、版本号、发布者，发现新工具。"
+ },
+ {
+  "id": 81,
+  "ok": false,
+  "total": 0,
+  "fetched": 3,
+  "error": "",
+  "sample_n": 0,
+  "first": {},
+  "secs": 127.3,
+  "desc": "滴滴出行/高德地图公开的“北京区域”实时拥堵延时指数（通过Web页面），每半小时抓取一次，记录交通脉搏。 **其他专业领域**"
+ },
+ {
+  "id": 90,
+  "ok": false,
+  "total": 0,
+  "fetched": 4,
+  "error": "",
+  "sample_n": 0,
+  "first": {},
+  "secs": 151.9,
+  "desc": "百度地图“北京·五环内”充电桩POI搜索，通过公开地点搜索抓取所有充电站名称、快慢充数量、经纬度，生成充电地图。"
+ },
+ {
+  "id": 94,
+  "ok": true,
+  "total": 4,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 5,
+  "first": {
+   "title": "【深空未来】8K超高清沉浸探索(3D)《海洋系列:蔚蓝归途》(展演)",
+   "url": "https://www.douban.com/event/37618029/",
+   "time": "08月08日 周六 12:30 ~ 08月23日 周日 16:15",
+   "place": "徐汇区 上海西岸美术馆 龙腾大道2600号",
+   "fee": "138.0元起",
+   "interested": "21",
+   "_site": "douban_events"
+  },
+  "secs": 86.3,
+  "desc": "豆瓣同城“上海·展览”活动列表，每周抓取活动名称、时间、地点、费用、感兴趣人数，编辑城市周末指南。"
+ },
+ {
+  "id": 41,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 1,
+  "first": {
+   "row": "自选基金基金比较稳健理财收益计算主题基金基金经理基金研究基 金 吧 | 基金净值投顾管家基金排行定投排行基金评级基金分红基金公司私募基金 | 活 期 宝私 募 宝指 数 宝高端理财基金导购收益排行稳健理财基金优选 | 帮助中心机构指南意见反馈安全保障",
+   "_site": "eastmoney"
+  },
+  "secs": 151.0,
+  "desc": "天天基金网“偏股型基金”近六月收益排行，每月初抓取前50名基金代码、名称、基金经理、重仓行业，筛选持续优秀基金。"
+ }
+]

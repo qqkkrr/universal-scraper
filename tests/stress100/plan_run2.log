@@ -1,0 +1,104 @@
+共 97 个待测（4-100），workers=6
+✅ #  9 分3  65.4s | https://h5.youzan.com/v2/showcase/homepage?alias=gugong | 商品/文创 | err:
+✅ #  4 分3  90.7s | https://s.1688.com/selloffer/offer_search.htm | 供应商/商品 | err:
+✅ #  5 分3 113.3s | https://www.goofish.com/search?q=%E5%AF%8C%E5%A3%ABXT-5 | 二手闲置商品（闲鱼） | err:
+✅ # 15 分3  59.3s | https://hz.58.com/ershoufang/personal/ | 二手房房源信息列表（个人急售） | err:
+✅ #  7 分3 131.2s | https://www.163.com/ | 商品列表（跨境电商） | err:
+⛔ #  6 分0 142.0s |  |  | err:ConfigError: 配置错误 [source.actions[0].typ
+✅ #  8 分3 161.6s | https://www.smzdm.com/haojia/ | 好价爆料商品信息（带绝对值标签） | err:
+✅ # 13 分3  71.9s | https://cd.fang.anjuke.com/loupan/tianfu/ | 新房楼盘列表 | err:
+✅ # 11 分3  95.9s | https://sh.lianjia.com/ershoufang/pudong/ | 二手房房源挂牌记录 | err:
+✅ # 10 分3 119.4s | https://www.amazon.com/gp/bestsellers/hpc/681526011 | 商品榜单 | err:
+✅ # 21 分3 152.0s | https://www.liepin.com/zhaopin/?key=%E5%B8%82%E5%9C%BA% | 职位列表 | err:
+✅ # 12 分3 140.5s | https://sz.zu.ke.com/zufang/nanshan/rt200600000001rp300 | 租房房源 | err:
+✅ # 19 分3  92.4s | https://www.zhipin.com/web/geek/job?query=%E7%AE%97%E6% | 招聘职位（BOSS直聘算法工程师 | err:
+✅ # 16 分3  93.4s | https://nj.5i5j.com/xiaoqu/ | 小区详情 | err:
+✅ # 14 分3 163.1s | https://www.ziroom.com/z/nl/z2.html?qwd=%E4%B8%80%E5%B1 | 租房房源（自如·北京·整租一居室 | err:
+✅ # 20 分3  56.4s | https://www.lagou.com/wn/zhaopin?city=%E5%B9%BF%E5%B7%9 | 职位招聘列表 | err:
+✅ # 22 分3  87.1s | https://xiaoyuan.zhaopin.com/lecture | 校园宣讲会/招聘会信息（公司、学 | err:
+✅ # 27 分3 130.5s | https://www.zhihu.com/hot?category=tech | 知乎热榜·科技分类下的问题列表 | err:
+⛔ # 17 分0 200.0s |  |  | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络
+✅ # 18 分3 140.4s | https://fgj.hangzhou.gov.cn/ | 公示公告/行政许可（商品房预售证 | err:
+✅ # 25 分3 127.9s | https://s.weibo.com/top/summary?cate=realtimehot | news/hot_search | err:
+✅ # 33 分3  36.2s | https://api.bilibili.com/x/web-interface/popular/series | 视频 | err:
+✅ # 24 分3  35.4s | https://www.kanzhun.com/search/?query=腾讯 | 员工匿名评分、好评标签、差评标签 | err:
+✅ # 28 分3 116.6s | https://www.zhihu.com/search?type=content&q=%E5%A6%82%E | 知乎问题下的回答（文本内容 +  | err:
+⛔ # 31 分0  85.8s |  |  | err:ConfigError: 配置错误 [source.actions[1].typ
+✅ # 26 分3 145.9s | https://weibo.com/u/1813049541 | 微博原创微博（含发布时间/文本/ | err:
+✅ # 23 分3 120.1s | https://bbs.yingjiesheng.com/forum.php?mod=forumdisplay | 论坛帖子（面试经验） | err:
+✅ # 39 分3 105.2s | https://xueqiu.com/ask?tab=reward | 悬赏话题/问答列表 | err:
+✅ # 32 分3  66.5s | https://www.douyin.com/search/%E6%8C%91%E6%88%98%E5%85% | 抖音话题视频列表（含点赞量、评论 | err:
+✅ # 30 分3 145.4s | https://movie.douban.com/ty/rank?tag_name=%E6%9A%91%E6% | 电影片单/榜单 | err:
+✅ # 34 分3 120.5s | https://bbs.hupu.com/bxj | 帖子 | err:
+✅ # 45 分3 123.0s | https://www.sjtu.cn/ | IPO审核项目动态（企业列表/状 | err:
+✅ # 37 分3 170.0s | https://www.csdn.net/nav/ai | 技术博客文章/社区热文 | err:
+✅ # 29 分3 161.0s | https://www.douban.com/search?q=%E4%B9%B0%E7%BB%84 | 帖子 | err:
+✅ # 40 分3  64.4s | https://basic.10jqka.com.cn/300750/announcement.html | 上市公司公告 | err:
+✅ # 38 分3 122.0s | https://datacenter-web.eastmoney.com/api/data/v1/get?re | 东方财富龙虎榜每日上榜股票及买卖 | err:
+✅ # 36 分3 130.6s | https://weixin.sogou.com/weixin?type=1&query=%E4%BA%BA% | 微信公众号文章 | err:
+✅ # 43 分3  67.8s | https://www.jisilu.cn/data/cbnew/cb_list/ | 可转债行情数据表 | err:
+✅ # 51 分3  81.2s | https://www.mafengwo.cn/search/q.php?q=%E5%9F%83%E5%8F% | 旅行游记 | err:
+✅ # 35 分3  71.4s | https://tieba.baidu.com/f?kw=%E7%9B%B8%E6%9C%BA&ie=utf- | 百度贴吧帖子列表 | err:
+✅ # 44 分3  52.8s | https://cn.investing.com/economic-calendar/ | 经济日历数据（中国CPI发布事件 | err:
+✅ # 42 分3  59.6s | https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125 | 公告/文档 | err:
+✅ # 57 分3  72.4s | https://leetcode.cn/problem-list/xb9nqhhg/ | 题目列表（LeetCode 题单 | err:
+✅ # 49 分3  86.2s | https://www.meituan.com/s/%E5%9B%9E%E6%B0%91%E8%A1%97/ | 餐厅/美食商家列表 | err:
+✅ # 46 分3 191.7s | https://www.cninfo.com.cn/new/fulltextSearch/full | PDF公告（标题+摘要） | err:
+✅ # 50 分3 119.2s | https://www.dianping.com/chengdu/ch10/g110 | 大众点评商户列表与商户详情（成都 | err:
+✅ # 56 分3  12.0s | https://api.github.com/search/repositories?q=stable+dif | GitHub仓库列表 | err:
+✅ # 48 分3 125.8s | https://hotel.fliggy.com/hotel_search.htm?city=330127&k | 酒店基础房型未来60天价格日历 | err:
+⛔ # 63 分0  97.3s |  |  | err:ConfigError: 配置错误 [source.actions[1].typ
+✅ # 41 分3 167.7s | https://fund.eastmoney.com/data/fundranking.html#all;c0 | 基金数据 | err:
+⛔ # 62 分0  35.7s |  |  | err:ConfigError: 配置错误 [source.actions[0].typ
+✅ # 52 分3 102.1s | https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc | 交通出行-列车时刻与票价 | err:
+✅ # 69 分3  66.7s | https://u.y.qq.com/cgi-bin/musicu.fcg | 音乐排行榜歌曲列表（QQ音乐内地 | err:
+✅ # 55 分3 169.2s | https://kns.cnki.net/kns8s/defaultresult/index?kw=%E8%8 | 学术论文文献（知网核心期刊） | err:
+✅ # 47 分3  94.8s | https://flights.ctrip.com/online/list/oneway-csx-ckg?de | 机票航班信息 | err:
+✅ # 68 分3 101.4s | https://www.huya.com/g/lol | 直播列表（直播间） | err:
+✅ # 58 分3  70.7s | http://export.arxiv.org/api/query?search_query=cat:cs.C | 论文 | err:
+✅ # 54 分3 153.7s | https://bbs.16fan.com/forum.php?mod=forumdisplay&fid=11 | 论坛直播帖（曼谷） | err:
+✅ # 53 分3  50.9s | https://www.tujia.com/search?keyword=%E5%AE%89%E5%90%89 | 民宿房源列表（途家） | err:
+✅ # 75 分3 100.5s | https://www.npmjs.com/browse/depended | NPM包榜单数据（被依赖最多的包 | err:
+✅ # 74 分3  56.0s | https://stackoverflow.com/questions/tagged/python?sort= | Stack Overflow 问 | err:
+✅ # 61 分3  98.8s | http://d1.weather.com.cn/calendar_new/2026/101200101_20 | 天气历史数据 | err:
+✅ # 64 分3  70.5s | https://www.landchina.com/default.aspx?tabid=262 | 土地成交结果公告（结构化表格） | err:
+✅ # 81 分3  41.3s | https://report.amap.com/detail.do?city=110000 | 实时交通拥堵指数 | err:
+✅ # 59 分3  70.4s | https://www.icourse163.org/category/computer | 在线课程（MOOC）课程评价库 | err:
+✅ # 80 分3  88.4s | https://www.guazi.com/tesla-model-3/o4/ | 二手车车源列表（瓜子二手车·特斯 | err:
+✅ # 67 分3 105.7s | https://www.dongqiudi.com/data/1 | 足球联赛数据（积分榜/射手榜） | err:
+✅ # 87 分3  86.8s | https://www.cfachina.org/xyfw/qhgsflpj/ | 期货公司分类评级结果（公司名称+ | err:
+✅ # 73 分3  56.5s | https://pypi.org/trending/ | 软件资源/热门Python包列表 | err:
+⛔ # 60 分0 200.0s |  |  | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络
+⛔ # 65 分0 135.2s |  |  | err:ConfigError: 配置错误 [source.actions[1].typ
+✅ # 86 分3 117.0s | https://search.ccgp.gov.cn/bxsearch?searchtype=1&page_i | 政府采购公开招标公告（商机信息） | err:
+✅ # 93 分3  88.9s | https://www.huke88.com/course/list-0-0-0-0-0-0-0-0-0-0- | 免费视频课程资源 | err:
+⛔ # 70 分0 200.4s |  |  | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络
+✅ # 66 分3  71.6s | https://piaofang.maoyan.com/ | 实时票房排行数据 | err:
+✅ # 99 分3  59.5s | https://play.google.com/store/apps/top/category/GAME?hl | 应用榜单数据 | err:
+✅ # 79 分3 108.0s | https://www.dongchedi.com/sales/suv?energy_type=2 | 销量榜数据 | err:
+✅ # 71 分3  96.3s | https://www.sporttery.cn/jc/jczq/spf/ | 竞彩足球胜平负赔率数据 | err:
+✅ # 72 分3  55.9s | https://www.taptap.cn/ranking/hot | 游戏榜单数据（Android热玩 | err:
+⛔ # 92 分0 109.9s |  |  | err:ConfigError: 配置错误 [source.actions[1].typ
+✅ # 76 分3  89.9s | https://hub.docker.com/v2/repositories/library/python/t | Docker镜像版本信息 | err:
+✅ # 77 分3  51.6s | https://top.chinaz.com/ | 行业Top500网站建站技术栈（ | err:
+✅ # 85 分3  65.7s | https://www.wkinfo.com.cn/ | 法律典型案例（劳动法） | err:
+✅ # 98 分3  35.2s | https://github.com/trending?since=weekly | GitHub Trending  | err:
+✅ # 82 分3  84.9s | https://www.qimai.cn/rank/app/free/country/cn/device/ip | App榜单数据（iOS免费榜-工 | err:
+⛔ # 83 分0  89.1s |  |  | err:ConfigError: 配置错误 [source.actions[0].typ
+✅ # 78 分3 157.3s | https://so.autohome.com.cn/koubei/?q=Model%20Y | 口碑/用户评价 | err:
+✅ # 89 分3  45.1s | https://www.xiaohongshu.com/search_result?keyword=%E8%8 | 小红书笔记 | err:
+✅ # 91 分3 143.8s | https://www.qcc.com/filter/company?listedStatus=1 | A股上市公司工商信息 | err:
+✅ # 88 分3  99.2s | https://www.binance.com/bapi/composite/v1/public/cms/ar | 公告（新币上线通告） | err:
+⛔ # 84 分0  70.8s |  |  | err:ConfigError: 配置错误 [source.actions[0].typ
+✅ # 97 分3  76.8s | https://aiqicha.baidu.com/trademark/search?q={company_n | 商标注册信息（爱企查“商标查询” | err:
+⛔ # 95 分0  98.3s |  |  | err:ConfigError: 配置错误 [source.actions[0].typ
+✅ # 94 分3  87.1s | https://www.douban.com/location/shanghai/events/?type=e | 同城线下活动列表（展览） | err:
+✅ # 90 分3  98.4s | https://map.baidu.com/search/%E5%8C%97%E4%BA%AC%E5%85%8 | POI/地点 | err:
+✅ #100 分3  88.1s | http://search.ccgp.gov.cn/bxsearch | 政府采购中标公告 | err:
+✅ # 96 分3 120.8s | https://sousuo.gov.cn/zcwjk.htm | 政策文件/文档 | err:
+
+完成 100 条。按分数统计：
+  分3: 85
+  分2: 0
+  分1: 0
+  分0: 12

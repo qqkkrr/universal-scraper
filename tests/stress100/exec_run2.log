@@ -1,0 +1,68 @@
+执行测试 8 个任务（limit=5, timeout=75s, workers=2）
+[21:48:33] [INFO] 任务启动: auto_73de84af7e | 队列 1 | 规则 1
+[21:48:34] [INFO] 详情：共 2 条，待抓 2（并发 2，字段缺失自动补全）
+[21:48:34] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (3) URL rejected: Port number was not a decimal number between 0 and 65535. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[21:48:36] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (3) URL rejected: Port number was not a decimal number between 0 and 65535. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[21:48:40] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (3) URL rejected: Port number was not a decimal number between 0 and 65535. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[21:48:48] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (3) URL rejected: Port number was not a decimal number between 0 and 65535. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[21:48:50] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (3) URL rejected: Port number was not a decimal number between 0 and 65535. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[21:48:54] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (3) URL rejected: Port number was not a decimal number between 0 and 65535. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[21:49:02] [WARN] 详情失败 https://www.pbc.gov.cnjavascript:;: RuntimeError: HTTP 0: Failed to perform, curl: (3) URL rejected: Port number was not a decimal number between 0 an
+[21:49:02] [INFO] 详情进度: 2/2
+[21:49:03] [INFO] 详情过滤：2 -> 1 条（link 详情合并后按条件保留）
+[21:49:03] [INFO] 详情完成：成功 1/2，记录 1 条
+[21:49:03] [INFO] 导出: json=auto_73de84af7e.json, csv=auto_73de84af7e.csv, xlsx=auto_73de84af7e.xlsx
+[21:49:03] [INFO] 完成: 抓取 1 | 条目 1 | 错误 0
+✅ # 42 total=20 175.9s | 中国人民银行“货币政策司”公开市场操作公告，每个交易日抓取逆回购规模、中标利率、期限，自动计算净投放 | err:
+❌ # 41 total=None 200.0s | 天天基金网“偏股型基金”近六月收益排行，每月初抓取前50名基金代码、名称、基金经理、重仓行业，筛选持 | err:RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络/Key
+[21:50:22] [INFO] 任务启动: auto_cb7909b460 | 队列 1 | 规则 1
+[21:50:35] [INFO] 任务启动: auto_dafafe87ce | 队列 1 | 规则 1
+[21:50:35] [WARN]   curl_cffi 请求失败 403，2.1s 后重试
+[21:50:38] [WARN]   curl_cffi 请求失败 403，4.5s 后重试
+[21:50:43] [WARN]   curl_cffi 请求失败 403，8.6s 后重试
+[21:50:48] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[21:50:51] [INFO] 延迟重试 1/3: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-08-08&matchPage=1&pageSize=50（2s 后）
+[21:50:51] [WARN] 请求失败 https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-08-08&matchPage=1&pageSize=50: RateLimitedError: 限流 403: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-0
+[21:50:54] [WARN]   curl_cffi 请求失败 403，2.4s 后重试
+[21:50:56] [WARN]   curl_cffi 请求失败 403，4.2s 后重试
+[21:51:01] [WARN]   curl_cffi 请求失败 403，8.1s 后重试
+[21:51:09] [INFO] 延迟重试 2/3: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-08-08&matchPage=1&pageSize=50（4s 后）
+[21:51:09] [WARN] 请求失败 https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-08-08&matchPage=1&pageSize=50: RateLimitedError: 限流 403: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-0
+[21:51:14] [WARN]   curl_cffi 请求失败 403，2.9s 后重试
+[21:51:17] [WARN]   curl_cffi 请求失败 403，4.4s 后重试
+[21:51:22] [WARN]   curl_cffi 请求失败 403，8.9s 后重试
+✅ # 66 total=10 106.3s | 猫眼专业版“实时票房”，每日20点抓取当天票房前10影片名称、综合票房、排片占比、上座率，做票房速报 | err:
+[21:51:30] [INFO] 延迟重试 3/3: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-08-08&matchPage=1&pageSize=50（8s 后）
+[21:51:30] [WARN] 请求失败 https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-08-08&matchPage=1&pageSize=50: RateLimitedError: 限流 403: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-0
+[21:51:39] [WARN]   curl_cffi 请求失败 403，2.7s 后重试
+[21:51:42] [WARN]   curl_cffi 请求失败 403，4.0s 后重试
+[21:51:47] [WARN]   curl_cffi 请求失败 403，8.7s 后重试
+[21:51:50] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[21:51:55] [WARN] 放弃重试 https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-08-08&matchPage=1&pageSize=50（已达 3 次）
+[21:51:55] [WARN] 请求失败 https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-08-08&matchPage=1&pageSize=50: RateLimitedError: 限流 403: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?matchBeginDate=2026-08-08&matchEndDate=2026-0
+[21:51:55] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[21:51:55] [INFO] 反爬拦截统计: 403×4
+❌ # 71 total=0 158.1s | 竞彩网“竞彩足球”胜平负赔率，抓取当日所有受注赛事的赛事编号、主队、客队、初始赔率、即时赔率，做套利 | err:运行超时（>75s）
+[21:52:03] [INFO] 任务启动: auto_09ad8468fc | 队列 1 | 规则 1
+[21:52:03] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ # 94 total=0 9.6s | 豆瓣同城“上海·展览”活动列表，每周抓取活动名称、时间、地点、费用、感兴趣人数，编辑城市周末指南。 | err:
+[21:52:38] [INFO] 任务启动: auto_abf5c4a52a | 队列 1 | 规则 1
+[21:52:39] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ # 73 total=0 73.9s | PyPI“trending projects”页面，每周抓取最近一周热门Python包名称、简介、版 | err:
+[21:53:40] [INFO] 任务启动: auto_81bf8e33d8 | 队列 3 | 规则 2
+[21:54:10] [INFO] 完成: 抓取 3 | 条目 0 | 错误 0
+❌ # 81 total=0 127.3s | 滴滴出行/高德地图公开的“北京区域”实时拥堵延时指数（通过Web页面），每半小时抓取一次，记录交通脉 | err:
+[21:54:59] [INFO] 任务启动: auto_835d044fec | 队列 1 | 规则 1
+[21:54:59] [INFO] 延迟重试 1/3: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api（2s 后）
+[21:54:59] [WARN] 请求失败 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api: RateLimitedError: 限流 200: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api (retry_after=
+[21:55:01] [INFO] 延迟重试 2/3: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api（4s 后）
+[21:55:01] [WARN] 请求失败 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api: RateLimitedError: 限流 200: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api (retry_after=
+[21:55:05] [INFO] 延迟重试 3/3: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api（8s 后）
+[21:55:05] [WARN] 请求失败 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api: RateLimitedError: 限流 200: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api (retry_after=
+[21:55:14] [WARN] 放弃重试 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api（已达 3 次）
+[21:55:14] [WARN] 请求失败 https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api: RateLimitedError: 限流 200: https://map.baidu.com/?qt=s&wd=%E5%85%85%E7%94%B5%E6%A1%A9&c=131&pn=0&rn=20&ie=utf-8&oue=1&res=api (retry_after=
+[21:55:14] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[21:55:14] [INFO] 反爬拦截统计: captcha×4
+❌ # 90 total=0 151.9s | 百度地图“北京·五环内”充电桩POI搜索，通过公开地点搜索抓取所有充电站名称、快慢充数量、经纬度，生 | err:
+
+完成 8 个：成功 2

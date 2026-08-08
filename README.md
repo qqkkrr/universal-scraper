@@ -1104,3 +1104,45 @@ git 工作区干净、无 .bak/TODO/FIXME/危险模式/库路径 stdout 污染�
 - **增量去重落盘**：任务正常结束 + 中断路径都 `flush()`，小任务已见记录不丢。
 
 测试：新增 `run_tests53`（8 项），全量 **53 套件全部通过（0 失败）**。
+
+---
+
+## 🆕 2026-08-08 强化日志（GitHub 方案吸收 + 100 实战任务测试）
+
+### 1. 淘宝/天猫三段式快引擎（scripts/taobao_tmall_engine.py）
+实测通（CDP 已登录 Chrome 导出 cookie，无需重新登录）：
+- **A 列表（纯 HTTP 秒级）**：天猫店铺全店商品走移动端接口
+  `https://{shop}.m.tmall.com/shop/shop_auction_search.do`（JSONP，分页全量）；
+  淘宝搜索走 MTOP `mtop.taobao.wsearch.appsearch`（HMAC-MD5 签名 + curl_cffi TLS 指纹）。
+- **B 详情参数（CDP 并行，免点击）**：详情页加载后「参数信息」已在 DOM，直接解析；
+  2-4 个并行标签页，单商品约 2-4s（修复 patchright CDP 下 waitForFunction 忽略 timeout 的坑，改 Node 轮询）。
+- 用法：`python3 scripts/taobao_tmall_engine.py --mode shop --target https://cultum.tmall.com/shop/view_shop.htm --max 30`
+  或 `--mode search --target 关键词`；`--skip-details` 只抓列表；失败条目自动补抓一轮。
+- 一句话任务自动路由：sites.py `_taobao_run` 优先走快引擎，店铺/搜索/兜底三段。
+
+### 2. 新增精配站点（sites.py）
+GitHub Trending、arXiv（Atom API）、LeetCode 题库（官方 JSON）、B站搜索（SSR）、
+中国天气网（weather1d SSR）、东方财富数据中心（JSON API + HTML 表格兜底）、
+天天基金排行（rankhandler JSONP）、豆瓣同城活动、虎扑、CSDN、百度贴吧、什么值得买。
+
+### 3. 一句话任务（AI 理解+配置）强化
+- SYSTEM_PROMPT 注入 70+ 高频站点「入口速查表」：AI 直接按表给 start_urls，不再凭空猜。
+- `_validate_and_fix` 新增：
+  - 已知强登录站点配成 http → 自动升级 browser+登录/验证；
+  - SPA 入口（leetcode problem-list 等）→ 自动升级 browser+capture_all；
+  - source.actions 非法动作自动丢弃（不再 ConfigError 卡死）；
+  - 管道过滤字段不存在自动丢弃（否则整单被滤成 0 条）；
+  - 详情 URL 伪链接（javascript:/#/mailto）在 prefix 前拦截。
+- plan 输出新增 `warnings` 风险提示（WebUI 计划卡黄色横幅展示）。
+
+### 4. 引擎修复
+- `None in str` 过滤崩溃防御（AI 配置 value 为空）。
+- 精配兜底不再无视 limit（arXiv 500 条问题）。
+- 详情 URL 二次校验 `javascript:` 残留。
+
+### 5. 100 实战任务测试（tests/stress100/）
+- plan 级（AI 理解+配置）：100 条全量，入口正确率 ~86%（30/35 首轮全对，其余为 LLM 超时/旧代码 ConfigError，重测后修复）。
+- 执行级：代表性子集（GitHub 搜索/arXiv/LeetCode/天气/CSDN/央行/天天基金等），HTTP 可跑任务多数直接通过；
+  强登录/强反爬站点（淘宝/京东/拼多多/知乎/微博/大众点评/虎扑/CSDN/竞彩）确认需浏览器+登录/CDP 模式（工具已自动升级）。
+- 复跑命令：`python3 tests/stress100/run_plan_tests.py --range 1-100 --workers 6`
+  `python3 tests/stress100/run_exec_tests.py --ids 56,58,61,42 --limit 5 --timeout 75`

@@ -674,7 +674,9 @@ class EngineV3:
         _base = (rows[0].get("_url") or (self.config.get("start_urls") or [""])[0] or "") if rows else ""
         for r in rows:
             u = str(r.get(url_field) or "").strip()
-            if not u:
+            # 🛡️ 先验伪链接（在 prefix 之前）：javascript:/mailto:/#/data: 等直接跳过，
+            # 否则会被 prefix 拼成 "https://hostjavascript:;" 变成合法 https 伪装
+            if not u or u.startswith(("javascript:", "mailto:", "tel:", "data:", "#", "about:")):
                 continue
             for tr in detail.get("url_transform", []) or []:
                 if "replace" in tr:
@@ -685,10 +687,10 @@ class EngineV3:
                         u = tr["prefix"] + u
                 elif "suffix" in tr:
                     u = u + tr["suffix"]
-            # 🛡️ 无效/伪链接防线：javascript:; / # / mailto 等必须跳过，
-            # 相对路径按列表页 URL 补全——否则详情全抓 "https://hostjavascript:;" 报错
+            # 🛡️ 无效/伪链接防线：javascript:; / # / mailto 等必须跳过（二次校验，
+            # 防止 replace 变换把伪链接拼进 https 里），相对路径按列表页 URL 补全
             u = (u or "").strip()
-            if not u or u.startswith(("javascript:", "mailto:", "tel:", "data:", "#", "about:")):
+            if not u or "javascript:" in u or u.startswith(("mailto:", "tel:", "data:", "#", "about:")):
                 continue
             if not u.startswith(("http://", "https://")):
                 if u.startswith("/") and _base.startswith(("http://", "https://")):

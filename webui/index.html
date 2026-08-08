@@ -435,6 +435,7 @@ async function planAuto(){
   lastPlan=d;
   let html='<div class="card">'
     +'<div class="card-title"><span class="idx">PLAN</span><h2>AI 的任务理解与技术路线</h2><span class="hint">请确认</span></div>'
+    +'<div id="a_warns"></div>'
     +intentBlock(d.config)
     +'<h4>任务摘要</h4><pre>'+esc(d.summary||'')+'</pre>'
     +'<h4>技术路线</h4><pre>'+esc(d.route||'')+'</pre>'
@@ -445,6 +446,10 @@ async function planAuto(){
     +'<button class="btn btn-primary" style="flex:1" onclick="confirmAuto()">确认无误，开始执行</button>'
     +'<button class="btn btn-ghost" style="flex:1" onclick="planAuto()">重新生成</button>'
     +'</div></div>';
+  if(d.warnings && d.warnings.length){
+    const wb=document.getElementById('a_warns');
+    if(wb) wb.innerHTML=d.warnings.map(w=>'<div class="banner warn">'+esc(w)+'</div>').join('');
+  }
   box.innerHTML=html;
 }
 async function confirmAuto(){

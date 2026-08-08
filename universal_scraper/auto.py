@@ -88,6 +88,78 @@ v3 任务包 config.json 结构（字段含义）：
   - 详情页发帖时间（精确到秒）：`em[id^='authorposton']::text`（如「发表于 2025-8-22 09:47:13」/「发表于 昨天 22:47」，parse_date 都能转）；详情页易触发验证码，所以列表日期留作兜底。
   **Discuz 排序硬知识**：板块列表默认按【最后回复】排序；`orderby=dateline`/`filter=dateline` 参数在很多站无效（实测 mountblade 无效）。用户要"今天新发布"时，正确做法：抓列表（按默认排序翻前几页）→ 每条进详情页取发帖时间 em[id^='authorposton'] → detail.filters 用 parse_date + between 只保留发帖时间在今天的；列表页发帖日期（uid 列）作为详情页失败时的兜底。
 - 需要登录的网站（大众点评/小红书/微博/淘宝/京东/知乎等）：source.type 用 browser，并加 "headless": false（弹出真实浏览器供人工登录）与 "login":{"enabled":true,"url":"入口页","wait_selector":"登录成功后页面上才会出现的元素选择器（如 .user-info、.avatar、用户名节点）"}。工具会在首次运行时弹出浏览器让用户登录一次，自动保存登录态，之后自动复用。
+-- **高频站点入口速查表（必须优先按此给 start_urls；禁止凭空猜不存在的路径）**：
+  - 淘宝搜索: https://s.taobao.com/search?q=<关键词>（JS 页面，browser 模式；或已登录 CDP 精配）
+  - 京东搜索: https://search.jd.com/Search?keyword=<关键词>（browser+登录）
+  - 拼多多: https://mobile.yangkeduo.com/ads.html（百亿补贴频道，browser+登录）
+  - 1688搜索: https://s.1688.com/selloffer/offer_search.htm?keywords=<关键词>
+  - 闲鱼: https://www.goofish.com/（browser+登录）
+  - 得物: https://www.dewu.com/（browser+登录）
+  - 网易考拉: https://www.kaola.com/（browser+登录，跨境海淘；注意别用 www.163.com 门户）
+  - 什么值得买好价: https://www.smzdm.com/jingxuan/（JS 挑战，browser）
+  - 链家二手房: https://sh.lianjia.com/ershoufang/pudong/（城市拼音+ershoufang+区域拼音）
+  - 贝壳: https://sz.ke.com/zufang/（城市拼音+zufang 整租）
+  - 安居客: https://chengdu.anjuke.com/loupan/（城市拼音+loupan 新盘）
+  - 自如: https://www.ziroom.com/z/nl/z1.html（整租一居）
+  - 58二手房: https://hz.58.com/ershoufang/（城市拼音+ershoufang）
+  - BOSS直聘: https://www.zhipin.com/web/geek/job?query=<关键词>&city=100010000（browser+登录）
+  - 拉勾: https://www.lagou.com/wn/zhaopin?kd=<关键词>（browser）
+  - 猎聘: https://www.liepin.com/zhaopin/?key=<关键词>
+  - 智联: https://www.zhaopin.com/sou/jl<城市编号>?kw=<关键词>
+  - 微博热搜: https://s.weibo.com/top/summary（browser+登录）
+  - 知乎搜索: https://www.zhihu.com/search?type=content&q=<关键词>（browser+登录）
+  - 小红书: https://www.xiaohongshu.com/search_result?keyword=<关键词>（browser+登录）
+  - 抖音: https://www.douyin.com/search/<关键词>（browser+登录）
+  - B站搜索: https://search.bilibili.com/all?keyword=<关键词>（SSR 可 http）
+  - 虎扑: https://bbs.hupu.com/（SSR 可 http）
+  - 百度贴吧: https://tieba.baidu.com/f?kw=<吧名>（403 风控，browser）
+  - CSDN热门: https://www.csdn.net/nav/ai（SSR 可 http）
+  - 东方财富龙虎榜: https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_DAILYBILLBOARD_DETAILSNEW&columns=ALL&pageNumber=1&pageSize=50&sortColumns=TRADE_DATE,SECURITY_CODE&sortTypes=-1,-1（公开 JSON）
+  - 天天基金排行: https://fund.eastmoney.com/data/rankhandler.aspx?op=ph&dt=kf&ft=all&sc=6yzf&st=desc&pi=1&pn=50&dx=1（公开 JSONP）
+  - 集思录: https://www.jisilu.cn/data/cbnew/（browser）
+  - 上交所科创板项目动态: https://kcb.sse.com.cn/renewal/（browser；注意上交所=sse.com.cn，不是上海交大 sjtu）
+  - 巨潮公告: http://www.cninfo.com.cn/new/commonUrl?url=disclosure/list/notice（browser）
+  - 携程机票: https://flights.ctrip.com/online/list/oneway-changsha-chongqing?depdate=<日期>（browser）
+  - 大众点评: https://www.dianping.com/search/keyword/<城市ID>/0_<关键词>（browser+登录）
+  - 美团: https://www.meituan.com/s/<关键词>/（browser+登录）
+  - 马蜂窝: https://www.mafengwo.cn/travel-scenic-spot/mafengwo/<id>.html（browser）
+  - 12306: https://kyfw.12306.cn/otn/leftTicket/init（browser+登录）
+  - 途家: https://www.tujia.com/（browser）
+  - 知网: https://kns.cnki.net/kns8s/defaultresult/index?kw=<关键词>（browser+登录）
+  - GitHub Trending: https://github.com/trending（SSR 可 http）
+  - GitHub 搜索: https://api.github.com/search/repositories?q=<关键词>&sort=stars（公开 JSON）
+  - LeetCode 题库: https://leetcode.cn/api/problems/all/（公开 JSON）
+  - arXiv: http://export.arxiv.org/api/query?search_query=cat:cs.CL&sortBy=submittedDate&sortOrder=descending（公开 Atom）
+  - 中国天气网: https://www.weather.com.cn/weather1d/<城市编码>.shtml（SSR 可 http，武汉=101200101）
+  - 猫眼票房: https://piaofang.maoyan.com/dashboard（browser）
+  - 网易云音乐: https://music.163.com/#/discover/toplist（browser）
+  - QQ音乐: https://y.qq.com/n/ryqq/toplist（browser）
+  - TapTap: https://www.taptap.cn/top/board（browser）
+  - 汽车之家口碑: https://k.autohome.com.cn/<车系ID>/（browser）
+  - 懂车帝: https://www.dongchedi.com/sales（browser）
+  - 瓜子二手车: https://www.guazi.com/tesla/（browser）
+  - 企查查: https://www.qcc.com/（browser+登录）
+  - 国家统计局: https://www.stats.gov.cn/sj/zxfb/（browser）
+  - 中国政府网政策: https://www.gov.cn/zhengce/zuixin/（JS 加载，browser）
+  - 中国政府采购网: https://www.ccgp.gov.cn/cggg/zygg/（browser）
+  - 豆瓣同城: https://www.douban.com/location/beijing/events/（SSR 可 http）
+  - 丁香园用药: https://www.drugs.dxy.cn/（browser）
+  - 爱企查: https://aiqicha.baidu.com/（browser+登录）
+  - Google Play: https://play.google.com/store/apps/category/GAME/collection/topselling_free（browser）
+  - 币安公告: https://www.binance.com/zh-CN/support/announcement（browser）
+  - 中国裁判文书网: https://wenshu.court.gov.cn/（browser+登录）
+  - 中国执行信息: http://zxgk.court.gov.cn/（browser）
+  - 中国专利: https://epub.cnipa.gov.cn/（browser）
+  - 七麦数据: https://www.qimai.cn/rank（browser+登录）
+  - 国家药监局: https://www.nmpa.gov.cn/（browser）
+  - PyPI: https://pypi.org/project/<包名>/（公开 JSON 详情；趋势可 https://pypistats.org/top）
+  - Stack Overflow: https://stackoverflow.com/questions/tagged/python?sort=votes（browser）
+  - NPM: https://www.npmjs.com/browse/depended（browser）
+  - Docker Hub: https://hub.docker.com/_/python（browser）
+  - Wappalyzer: https://www.wappalyzer.com/technologies/（browser）
+  - 虎课网: https://www.huke88.com/（browser）
+  - 强登录站（得物/闲鱼/抖音/快手/小红书/微博/知乎/淘宝/京东/拼多多）：一律 browser + login/verify，注明需要人工登录一次。
+
 - **京东 URL 硬知识（必须遵守）**：京东店铺页真实格式是 https://mall.jd.com/index-<店铺数字ID>.html；商品页是 https://item.jd.com/<sku数字ID>.html；**绝对不要**把店铺名猜成 "<店铺名>sp.jd.com/list.html"（那是假地址，会 404）。用户只给店铺名没给链接时，start_urls 可以先用京东搜索或直接用已知商品链接，并在任务说明里注明"需先找到店铺/商品真实 URL"。京东搜索页(www.jd.com)、商品页、评论接口(club.jd.com)全都被强风控：公开 HTTP 接口已失效，必须 source.type=browser + 真实扫码登录。京东登录硬校验："login":{"enabled":true,"url":"https://www.jd.com/","wait_selector":".nickname","require_cookie":"pt_key|pt_pin"}——工具会检查登录 cookie 是否真的出现，没有 pt_key/pt_pin 就不会放行，避免"假登录通过"。
 - 验证码/整页验证（大众点评/美团等会跳到验证中心）：source.type=browser 并加 "headless": false 与
   "verify":{"enabled":true,"markers":["verify.meituan.com","验证中心","spiderindefence","安全验证","滑动验证","访问过于频繁"],
@@ -231,6 +303,119 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         cfg = _fix_dead_domains(cfg, description, log)
     except Exception:
         pass
+
+    # source.actions 规范化：AI 偶发把 action.type 写错/写空，直接丢弃非法动作，避免 ConfigError 卡死整单
+    _actions = (cfg.get("source") or {}).get("actions")
+    if isinstance(_actions, list) and _actions:
+        _valid_actions = {"click", "type", "fill", "press", "select", "wait", "wait_time",
+                          "wait_for_selector", "waitfor", "scroll", "exec", "js", "execute_javascript",
+                          "screenshot", "noop"}
+        _kept = []
+        for _a in _actions:
+            if not isinstance(_a, dict):
+                continue
+            _t = str(_a.get("type") or _a.get("action") or "").lower()
+            if _t not in _valid_actions:
+                continue
+            if _t in ("wait", "wait_time") and not _a.get("ms") and not _a.get("milliseconds"):
+                _a["ms"] = 1000
+            if _t == "click" and not _a.get("selector") and not _a.get("xpath"):
+                continue
+            _kept.append(_a)
+        cfg.setdefault("source", {})["actions"] = _kept
+
+    # 管道过滤字段校验：AI 常把过滤字段写成解析器里不存在的名字（如 published/时间），
+    # 不存在的字段过滤会把整单滤成 0 条——直接丢弃这类过滤（ts 是 detail 合并后的日期字段，保留）
+    _known = set()
+    for _p in (cfg.get("parsers") or {}).values():
+        if isinstance(_p, dict):
+            _known.update((_p.get("fields") or {}).keys())
+    _det = cfg.get("detail") or {}
+    for _ex in (_det.get("extract") or []):
+        if isinstance(_ex, dict) and _ex.get("name"):
+            _known.add(_ex["name"])
+    _kept_pl = []
+    for _pl in (cfg.get("pipelines") or []):
+        if not isinstance(_pl, dict):
+            continue
+        if _pl.get("type") == "filter" and _pl.get("field") and _pl.get("field") not in _known \
+                and _pl.get("field") != "ts":
+            continue  # 字段不存在 → 丢弃
+        if _pl.get("type") == "parse_date" and _pl.get("field") and _pl.get("field") not in _known \
+                and _pl.get("field") != "ts":
+            continue
+        _kept_pl.append(_pl)
+    cfg["pipelines"] = _kept_pl
+    if _det.get("filters"):
+        _kept_df = []
+        for _pl in _det.get("filters") or []:
+            if not isinstance(_pl, dict):
+                continue
+            if _pl.get("type") == "filter" and _pl.get("field") and _pl.get("field") not in _known \
+                    and _pl.get("field") != "ts":
+                continue
+            if _pl.get("type") == "parse_date" and _pl.get("field") and _pl.get("field") not in _known \
+                    and _pl.get("field") != "ts":
+                continue
+            _kept_df.append(_pl)
+        _det["filters"] = _kept_df
+
+    # 已知「HTML 壳页 → 公开 API」改写：这些页面本体是 JS 壳，静态抓 0 条，
+    # 直接换成可直抓的 JSON/JSONP 接口（比让 AI 猜更稳）
+    _API_REWRITE = {
+        "fund.eastmoney.com/data/fundranking.html":
+            "https://fund.eastmoney.com/data/rankhandler.aspx?op=ph&dt=kf&ft=all&sc=6yzf&st=desc&pi=1&pn=50&dx=1",
+        "pypi.org/trending":
+            "https://pypistats.org/top",
+    }
+    for _k, _v in _API_REWRITE.items():
+        if _k in _su0:
+            cfg["start_urls"] = [_v]
+            cfg["source"] = {"type": "http"}
+            _su0 = _v
+            break
+
+    # 已知强登录/反爬站点：AI 若配成 http 直抓，自动升为 browser+登录（否则必 0 条）
+    _login_domains = ("xiaohongshu.com", "zhihu.com", "weibo.com", "douyin.com", "kuaishou.com",
+                      "taobao.com", "tmall.com", "jd.com", "yangkeduo.com", "pinduoduo.com",
+                      "dianping.com", "meituan.com", "goofish.com", "dewu.com", "zhipin.com",
+                      "qcc.com", "tianyancha.com", "aiqicha.baidu.com", "qimai.cn",
+                      "wenshu.court.gov.cn", "zxgk.court.gov.cn", "kns.cnki.net", "bilibili.com")
+    _src = cfg.get("source") or {}
+    _st = (_src.get("type") or "http").lower()
+    _su0 = (cfg.get("start_urls") or [""])[0]
+    _host = (_su0.split("//")[-1].split("/")[0] if "//" in _su0 else _su0).lower()
+    if _st == "http" and not (_src.get("headers") or {}).get("Cookie") \
+            and any(_host.endswith(d) for d in _login_domains):
+        cfg["source"] = {
+            "type": "browser", "headless": False,
+            "login": {"enabled": True, "url": _su0,
+                      "wait_selector": ".user-info, .avatar, .nickname, a[href*='/member/'], .nav-user"},
+            "verify": {"enabled": True, "max_wait_ms": 600000,
+                       "markers": ["验证", "安全", "滑块", "登录", "captcha"],
+                       "success_selector": "body"},
+        }
+        _src = cfg["source"]
+    # SPA/JS 单页应用入口：AI 常把这类配成 http 直抓（拿到的是空壳 HTML，0 条）。
+    # 识别常见 SPA 入口 → 强制浏览器渲染
+    _spa = any(k in _su0 for k in ("/problem-list/", "leetcode.cn", "/explore/", "xiaohongshu.com/explore",
+                                   "api.zhihu.com") if k != "leetcode.cn/api")
+    if _st == "http" and _spa and "leetcode.cn/api" not in _su0:
+        cfg["source"] = {
+            "type": "browser", "headless": False,
+            "scroll_count": 4, "scroll_wait_ms": 800,
+            "record_from": "capture_all", "capture_all": True,
+            "actions": [{"type": "scroll", "direction": "down", "amount": 1200, "ms": 600}],
+        }
+        _src = cfg["source"]
+
+    # 公开 JSON/Atom 精配站点：确保 source=http 且不改浏览器
+    _http_ok_domains = ("api.github.com", "export.arxiv.org", "leetcode.cn", "leetcode.com",
+                        "wttr.in", "weather.com.cn", "api.bilibili.com")
+    if any(_host.endswith(d) for d in _http_ok_domains) or "/api/" in _su0:
+        cfg["source"] = {"type": "http"}
+    # 强制 JSON 精配站点用 http + 不弹登录
+    cfg.setdefault("anti_bot", {})
 
     # 路由修正：rules 若指向空解析器，自动改指"最有内容"的解析器（避免抓到一堆空壳）
     def parser_richness(pc):
@@ -1154,8 +1339,33 @@ def describe_route(cfg: dict) -> Dict[str, str]:
                 summary_parts.append(f"日期过滤: {t0} ~ {t1}")
             except Exception:
                 pass
+    # 配置风险提示：帮用户在确认前一眼发现 AI 配置问题
+    warnings = []
+    _login_need = ("xiaohongshu.com", "zhihu.com", "weibo.com", "douyin.com", "kuaishou.com",
+                   "taobao.com", "tmall.com", "jd.com", "yangkeduo.com", "pinduoduo.com",
+                   "dianping.com", "meituan.com", "goofish.com", "dewu.com", "zhipin.com",
+                   "qcc.com", "tianyancha.com", "qimai.cn", "wenshu.court.gov.cn",
+                   "zxgk.court.gov.cn", "kns.cnki.net")
+    _host = ((su or "").split("//")[-1].split("/")[0] if "//" in (su or "") else (su or "")).lower()
+    if st == "http" and not cookie and any(_host.endswith(d) for d in _login_need):
+        warnings.append("⚠️ 该站点通常需要登录，AI 却配成了 HTTP 直抓——大概率 0 条，建议改为浏览器+登录")
+    if st == "browser" and not (src.get("login") or {}).get("enabled") \
+            and not (src.get("verify") or {}).get("enabled"):
+        warnings.append("ℹ️ 浏览器模式但没配 login/verify：若页面有登录墙会失败")
+    row_css_ok = any(isinstance(pcfg, dict) and (pcfg.get("row_css") or pcfg.get("row_xpath") or pcfg.get("records_path") is not None)
+                     for pcfg in (cfg.get("parsers") or {}).values())
+    if not row_css_ok and st in ("http", "browser"):
+        warnings.append("⚠️ 解析器没写 row_css/records_path，列表可能 0 条")
+    if len(fields) < 3:
+        warnings.append("⚠️ 字段少于 3 个，可能漏抓用户要的信息")
+    if (cfg.get("detail") or {}).get("enabled") and not any(
+            isinstance(pl, dict) and pl.get("type") in ("parse_date", "filter") and pl.get("field") == "ts"
+            for pl in (cfg.get("detail") or {}).get("filters") or []):
+        if re.search(r"日期|时间|今天|昨天|发布", description or ""):
+            warnings.append("⚠️ 任务含时间要求，但 detail 没配 parse_date 日期过滤，可能把旧内容也收进来")
     return {"route": "；".join(parts) if parts else "通用 AI 流程",
-            "summary": "；".join(summary_parts)}
+            "summary": "；".join(summary_parts),
+            "warnings": warnings}
 
 
 def plan_task(description: str, limit: Optional[int] = None, proxy: Optional[str] = None,
@@ -1171,6 +1381,7 @@ def plan_task(description: str, limit: Optional[int] = None, proxy: Optional[str
         plan = describe_route(cfg)
         return {"ok": True, "name": name, "task_dir": str(task_dir),
                 "config": cfg, "route": plan["route"], "summary": plan["summary"],
+                "warnings": plan.get("warnings") or [],
                 "messages": lines, "description": description}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "messages": lines}
@@ -1452,9 +1663,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                 _dr = run_site(su, cookie=_ch, proxy=_px or None, limit=int(limit or 20),
                                out_name=name)
                 if _dr.get("rows"):
-                    sample = _dr["rows"][:5]
+                    _lim = int(limit or 20)
+                    _rows = _dr["rows"][:_lim]
+                    sample = _rows[:5]
                     files = _dr["files"]
-                    total = _dr["total"]
+                    total = min(int(_dr["total"] or 0), _lim)
                     real = sample
                     log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
                 elif _dr.get("error"):
@@ -1686,9 +1899,11 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                 _dr = run_site(su, cookie=_ch, proxy=_px or None, limit=int(limit or 20),
                                out_name=name)
                 if _dr.get("rows"):
-                    sample = _dr["rows"][:5]
+                    _lim = int(limit or 20)
+                    _rows = _dr["rows"][:_lim]
+                    sample = _rows[:5]
                     files = _dr["files"]
-                    total = _dr["total"]
+                    total = min(int(_dr["total"] or 0), _lim)
                     real = sample
                     log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
                 elif _dr.get("error"):

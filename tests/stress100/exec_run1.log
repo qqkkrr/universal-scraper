@@ -1,0 +1,47 @@
+执行测试 7 个任务（limit=5, timeout=75s, workers=2）
+[21:38:35] [INFO] 任务启动: auto_509abf7061 | 队列 1 | 规则 1
+[21:38:38] [INFO] 导出: json=auto_509abf7061.json, csv=auto_509abf7061.csv, xlsx=auto_509abf7061.xlsx
+[21:38:38] [INFO] 完成: 抓取 1 | 条目 1 | 错误 0
+✅ # 56 total=1 36.0s | GitHub搜索“stable diffusion”，按star数降序，抓取前100仓库的名称、简介 | err:
+[21:39:13] [INFO] 任务启动: auto_7e3b5bdb4f | 队列 1 | 规则 1
+[21:39:15] [INFO] 延迟重试 1/2: https://github.com/trending?since=weekly（2s 后）
+[21:39:15] [WARN] 请求失败 https://github.com/trending?since=weekly: RateLimitedError: 限流 200: https://github.com/trending?since=weekly (retry_after=0.0s) | 反爬拦截[captcha] ction","octocaptcha_origin_opti
+[21:39:18] [INFO] 延迟重试 2/2: https://github.com/trending?since=weekly（4s 后）
+[21:39:18] [WARN] 请求失败 https://github.com/trending?since=weekly: RateLimitedError: 限流 200: https://github.com/trending?since=weekly (retry_after=0.0s) | 反爬拦截[captcha] ction","octocaptcha_origin_opti
+[21:39:22] [WARN] 放弃重试 https://github.com/trending?since=weekly（已达 2 次）
+[21:39:22] [WARN] 请求失败 https://github.com/trending?since=weekly: RateLimitedError: 限流 200: https://github.com/trending?since=weekly (retry_after=0.0s) | 反爬拦截[captcha] ction","octocaptcha_origin_opti
+[21:39:22] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[21:39:22] [INFO] 反爬拦截统计: captcha×3
+❌ # 98 total=0 73.8s | GitHub Trending “All languages”本周榜单，每周一抓取前20项目的名称、 | err:
+[21:39:53] [INFO] 任务启动: auto_fbce314a49 | 队列 1 | 规则 1
+[21:39:56] [INFO] 导出: json=auto_fbce314a49.json, csv=auto_fbce314a49.csv, xlsx=auto_fbce314a49.xlsx
+[21:39:56] [INFO] 完成: 抓取 1 | 条目 500 | 错误 0
+[21:39:56] [INFO] 流水线统计: filter:published:无法解析=500
+✅ # 58 total=500 68.7s | arXiv “cs.CL”分类下每日新提交论文，抓取标题、作者列表、摘要，自动推送到NLP学习群。 | err:
+[21:41:07] [INFO] 任务启动: auto_a6a8a103e3 | 队列 1 | 规则 1
+[21:41:08] [INFO] 延迟重试 1/2: https://www.weather.com.cn/weather/101200101.shtml（2s 后）
+[21:41:08] [WARN] 请求失败 https://www.weather.com.cn/weather/101200101.shtml: TypeError: 'in <string>' requires string as left operand, not NoneType
+[21:41:08] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+✅ # 61 total=7 79.0s | 中国天气网“武汉”历史天气，每日抓取当天实况（最高温、最低温、天气现象、风力），用于训练本地化预测模 | err:
+[21:41:25] [INFO] 任务启动: auto_dd5ad672fe | 队列 1 | 规则 2
+[21:41:25] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ # 57 total=0 116.8s | LeetCode中国“剑指Offer”专项练习题目列表，抓取所有题目名称、难度、通过率、标签，提供给 | err:
+[21:42:06] [INFO] 任务启动: auto_96c0c9ca70 | 队列 1 | 规则 1
+[21:42:22] [INFO] 进度: 抓取 25 | 条目 0 | 队列 106
+[21:42:24] [INFO] 任务启动: auto_c19994d127 | 队列 1 | 规则 1
+[21:42:25] [INFO] 延迟重试 1/2: https://www.csdn.net/nav/ai（2s 后）
+[21:42:25] [WARN] 请求失败 https://www.csdn.net/nav/ai: RuntimeError: HTTP 521: <html><body><script language="javascript"> window.onload=setTimeout("eq(239)", 200); function eq(YD) {var qo, 
+[21:42:28] [INFO] 延迟重试 2/2: https://www.csdn.net/nav/ai（4s 后）
+[21:42:28] [WARN] 请求失败 https://www.csdn.net/nav/ai: RateLimitedError: 限流 200: https://www.csdn.net/nav/ai (retry_after=0.0s) | 反爬拦截[captcha] /cdn_cgi_bs_captcha/static/js/w
+[21:42:32] [WARN] 放弃重试 https://www.csdn.net/nav/ai（已达 2 次）
+[21:42:32] [WARN] 请求失败 https://www.csdn.net/nav/ai: RuntimeError: HTTP 521: <html><body><script language="javascript"> window.onload=setTimeout("hy(8)", 200); function hy(YD) {var qo, mo
+[21:42:32] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[21:42:32] [INFO] 反爬拦截统计: captcha×1
+[21:42:38] [INFO] 进度: 抓取 50 | 条目 0 | 队列 195
+✅ # 37 total=3 80.8s | CSDN“人工智能”分类下24小时热门文章，抓取标题、作者、阅读量、收藏数，发现技术圈内传播内容。  | err:
+[21:42:54] [INFO] 进度: 抓取 75 | 条目 0 | 队列 201
+[21:43:10] [INFO] 进度: 抓取 100 | 条目 0 | 队列 176
+[21:43:10] [INFO] 完成: 抓取 100 | 条目 0 | 错误 0
+❌ # 34 total=0 108.1s | 虎扑“步行街”板块首页热帖，每30分钟抓取一次标题、作者、回复数、亮评数，捕捉直男社区热点。 | err:
+
+完成 7 个：成功 4
