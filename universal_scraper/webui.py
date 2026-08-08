@@ -43,11 +43,12 @@ AUTH_TOKEN = ""
 # 后台任务
 # --------------------------------------------------------------------------
 
-def _new_job(kind: str, title: str) -> dict:
+def _new_job(kind: str, title: str, description: str = "") -> dict:
     job = {
         "id": uuid.uuid4().hex[:12],
         "kind": kind,
         "title": title,
+        "description": description,
         "task_dir": "",
         "status": "running",
         "messages": ["▶️ 任务已创建，开始执行..."],
@@ -102,8 +103,11 @@ def run_journal_job(job: dict, site: str, since: int, out: str, workers: int, wi
                         "files": {"pdf_dir": summary.get("pdf_dir", ""), "csv": summary.get("csv", ""),
                                   "index": summary.get("index", "")}},
                   f"🎉 {summary.get('journal','')} 完成：{summary.get('pdf_ok')}/{summary.get('articles_total')} 篇 PDF（{summary.get('total_mb')} MB），输出 {summary.get('out_dir','')}")
-    except Exception as e:
-        _job_error(job, f"{type(e).__name__}: {e}")
+    except BaseException as e:
+        if isinstance(e, KeyboardInterrupt):
+            _job_error(job, "任务已被手动停止（KeyboardInterrupt）")
+        else:
+            _job_error(job, f"{type(e).__name__}: {e}")
 
 
 def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie="",
@@ -121,8 +125,11 @@ def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie=
                             round_timeout=timeout, log_cb=lambda m: _job_log(job, m),
                             proxy=proxy or None, cookie=cookie or None)
         _job_done(job, out.get("result"), out.get("summary"), out.get("verify"))
-    except Exception as e:
-        _job_error(job, f"{type(e).__name__}: {e}")
+    except BaseException as e:
+        if isinstance(e, KeyboardInterrupt):
+            _job_error(job, "任务已被手动停止（KeyboardInterrupt）")
+        else:
+            _job_error(job, f"{type(e).__name__}: {e}")
 
 
 def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
@@ -187,8 +194,11 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
             summary = "⚠️ 任务结束：页面无正文（可能需浏览器渲染或需要登录）"
         _job_done(job, {"status": r.get("status"), "len": len(text)}, summary,
                   _auto_verify(rows, None))
-    except Exception as e:
-        _job_error(job, f"{type(e).__name__}: {e}")
+    except BaseException as e:
+        if isinstance(e, KeyboardInterrupt):
+            _job_error(job, "任务已被手动停止（KeyboardInterrupt）")
+        else:
+            _job_error(job, f"{type(e).__name__}: {e}")
 
 
 def _auto_verify(rows, cfg):
@@ -315,7 +325,7 @@ class Handler(BaseHTTPRequestHandler):
                 task_dir = body.get("task_dir", "")
                 if config and name and task_dir:
                     desc = body.get("description", "") or desc
-                job = _new_job("auto", desc[:60])
+                job = _new_job("auto", desc[:60], description=desc)
                 limit = body.get("limit") or None
                 rounds = int(body.get("rounds") or 2)
                 timeout = int(body.get("timeout") or 0) or None
@@ -357,6 +367,19 @@ class Handler(BaseHTTPRequestHandler):
                 with JOBS_LOCK:
                     job = JOBS.get(jid)
                     td = job.get("task_dir", "") if job else ""
+                    desc = job.get("description", "") if job else ""
+                td = td or ""
+                # 无 task_dir（auto_task 直跑路径）：用描述哈希定位 tasks/auto_<md5[:10]>
+                if not td and desc:
+                    try:
+                        import hashlib as _hl
+                        from pathlib import Path as _P2
+                        _n = f"auto_{_hl.md5(desc.encode()).hexdigest()[:10]}"
+                        _cand = ROOT / "tasks" / _n
+                        if _cand.exists():
+                            td = str(_cand)
+                    except Exception:
+                        pass
                 if not td:
                     self._json({"error": "该任务不支持停止（无任务目录）"})
                     return
@@ -367,7 +390,14 @@ class Handler(BaseHTTPRequestHandler):
                     if job:
                         with JOBS_LOCK:
                             job["messages"].append("⏹ 已发送停止信号，正在保存检查点并退出...")
-                    self._json({"ok": True, "message": "已发送停止信号"})
+                    # 兜底：直接终止工具浏览器子进程（单任务模式安全），防止桥卡验证不退出
+                    import subprocess as _sp
+                    for _pat in ("browser_generic.cjs", "browser_pool.cjs", "browser_single.cjs"):
+                        try:
+                            _sp.run(["pkill", "-f", _pat], capture_output=True, timeout=5)
+                        except Exception:
+                            pass
+                    self._json({"ok": True, "message": "已发送停止信号，并已终止浏览器进程"})
                 except Exception as e:
                     self._json({"error": f"{type(e).__name__}: {e}"})
             elif u.path == "/api/journal/start":
@@ -386,7 +416,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not url.startswith(("http://", "https://")):
                     self._json({"error": "请填写 http/https 开头的完整网址"})
                     return
-                job = _new_job("paste", url[:60])
+                job = _new_job("paste", url[:60], description=url)
                 mode = body.get("mode", "auto")
                 browser = bool(body.get("browser"))
                 depth = int(body.get("depth") or 2)
