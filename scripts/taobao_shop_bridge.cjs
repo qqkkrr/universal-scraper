@@ -30,16 +30,42 @@ function parseArgs(argv) {
   return a;
 }
 
-// 天猫/淘宝详情页通用参数选择器（多套兜底）
-const ATTR_SELS = [
-  ".Ptable .Ptable-item dl",        // 天猫新版参数表
-  "#J_AttrUL li",                   // 天猫/淘宝属性列表
-  ".attributes-list li",            // 淘宝参数列表
-  ".tb-attr li",                    // 旧版
-  "#attributes li",                 // 旧版
-  ".tm-clear .tb-detail-attr li",   // 属性行
-  ".J_AttrMore .tb-attr li",
-];
+// 详情页参数：优先点「参数信息」后抓文本段；兼容老版选择器
+async function fetchDetail(page, url) {
+  await page.goto(url, { timeout: 45000, waitUntil: "domcontentloaded" }).catch(e => {
+    if (!/ERR_ABORTED|Timeout|net::/.test(String(e && e.message || e))) throw e;
+  });
+  await sleep(4000);
+  // 点「参数信息」/「全部参数」（可能有多个，全部点，展开参数表）
+  await page.evaluate(() => {
+    const els = [...document.querySelectorAll("a, span, div, li, button")];
+    els.filter(x => /^参数信息$|^全部参数$/.test((x.innerText||"").trim()) && x.children.length <= 1)
+       .slice(0, 4).forEach(e => { try { e.click(); } catch(err){} });
+  }).catch(()=>{});
+  await sleep(3500);
+  const data = await page.evaluate(() => {
+    const clean = (s) => (s||"").replace(/\s+/g, " ").trim();
+    const t = document.body.innerText.replace(/\s+/g, " ");
+    const title = clean(document.querySelector("h1, .tb-detail-hd h1, .tb-main-title") ? (document.querySelector("h1, .tb-detail-hd h1, .tb-main-title").innerText) : "");
+    // 参数区在「参数信息」最后一次出现之后（前面出现的是 tab 标签）
+    let params = "";
+    const i = t.lastIndexOf("参数信息");
+    if (i >= 0) {
+      let j = t.indexOf("尺码信息", i + 4);
+      if (j < 0) j = t.indexOf("图文详情", i + 4);
+      if (j < 0) j = t.indexOf("用户评价", i + 4);
+      if (j < 0) j = i + 1800;
+      params = clean(t.slice(i + 4, j)).slice(0, 1800);
+    }
+    if (!params) {
+      // 兜底：找参数关键词段
+      const m = t.match(/(材质成分|是否商场同款|适用场景|品牌|货号)[\s\S]{0,600}/);
+      if (m) params = clean(m[0]).slice(0, 1800);
+    }
+    return { title: title.slice(0, 120), params };
+  });
+  return data;
+}
 const TITLE_SELS = ["h1.tb-main-title", ".tb-detail-hd h1", "#J_Title h3", ".tb-main-title"];
 const PRICE_SELS = [".tm-price", ".tb-rmb-num", ".price", "#J_PromoPrice .tm-price", ".tb-detail-price .tm-price"];
 const SHOP_SELS = [".slogo-shopname", ".shop-name a", ".tb-shop-name", ".shop-title a"];
@@ -50,8 +76,9 @@ async function main() {
   const args = parseArgs(process.argv);
   const cdp = args.cdp || "http://127.0.0.1:9222";
   const shop = args.shop || "";
+  const linksArg = (args.links || "").split(",").map(s => s.trim()).filter(Boolean);
   const maxItems = parseInt(args.max || "50", 10);
-  if (!shop) { out({ type: "error", message: "缺少 --shop URL" }); process.exit(1); }
+  if (!shop && linksArg.length === 0) { out({ type: "error", message: "缺少 --shop URL 或 --links 商品链接列表" }); process.exit(1); }
 
   let browser;
   try {
@@ -63,46 +90,51 @@ async function main() {
   const ctx = browser.contexts()[0] || await browser.newContext();
   const page = ctx.pages()[0] || await ctx.newPage();
 
-  out({ type: "meta", stage: "open_shop", shop });
-  try {
-    await page.goto(shop, { timeout: 60000, waitUntil: "domcontentloaded" });
-  } catch (e) {
-    out({ type: "error", message: "打开店铺页失败：" + (e.message||e).slice(0,150) });
-    process.exit(1);
-  }
-  // 等商品出现（滚动几次触发懒加载）
-  await sleep(2500);
-  for (let i = 0; i < 5; i++) {
-    await page.mouse.wheel(0, 1500).catch(()=>{});
-    await sleep(900);
-  }
-  await sleep(1500);
+  let links = linksArg.map(u => ({ url: u.startsWith("//") ? "https:" + u : u, title: "" }));
+  let bodyTxt = "";
+  out({ type: "meta", stage: linksArg.length ? "direct_links" : "open_shop", shop, direct: linksArg.length });
+  if (linksArg.length === 0) {
+    try {
+      await page.goto(shop, { timeout: 60000, waitUntil: "domcontentloaded" });
+    } catch (e) {
+      out({ type: "error", message: "打开店铺页失败：" + (e.message||e).slice(0,150) });
+      process.exit(1);
+    }
+    // 等商品出现（滚动几次触发懒加载）
+    await sleep(2500);
+    for (let i = 0; i < 5; i++) {
+      await page.mouse.wheel(0, 1500).catch(()=>{});
+      await sleep(900);
+    }
+    await sleep(1500);
 
-  const bodyTxt = await page.evaluate(() => document.body ? document.body.innerText.slice(0, 120) : "");
-  if (/拖动|滑块|验证/.test(bodyTxt)) {
-    out({ type: "login", message: "店铺页要求滑块验证——请在 Chrome 里完成滑块（或先登录淘宝）后告诉我，我会继续" });
-    process.exit(0);
-  }
-
-  const links = await page.evaluate(() => {
-    const seen = new Set(); const arr = [];
-    document.querySelectorAll("a[href*='item.htm'], a[href*='/item/']").forEach(a => {
-      let h = a.getAttribute("href") || "";
-      if (h.startsWith("//")) h = "https:" + h;
-      if (!/item\.htm/i.test(h)) return;
-      if (!/^https?:\/\//.test(h)) return;
-      const idm = h.match(/[?&]id=(\d+)/);
-      const key = idm ? idm[1] : h;
-      if (seen.has(key)) return;
-      seen.add(key);
-      const t = clean(a.innerText);
-      if (t) arr.push({ url: h, title: t.slice(0, 80) });
+    bodyTxt = await page.evaluate(() => document.body ? document.body.innerText.slice(0, 120) : "");
+    if (/拖动|滑块|验证/.test(bodyTxt)) {
+      out({ type: "login", message: "店铺页要求滑块验证——请在 Chrome 里完成滑块（或先登录淘宝）后告诉我，我会继续" });
+      process.exit(0);
+    }
+    const collected = await page.evaluate(() => {
+      const clean = (s) => (s || "").replace(/\s+/g, " ").trim();
+      const seen = new Set(); const arr = [];
+      document.querySelectorAll("a[href*='item.htm'], a[href*='/item/']").forEach(a => {
+        let h = a.getAttribute("href") || "";
+        if (h.startsWith("//")) h = "https:" + h;
+        if (!/item\.htm/i.test(h)) return;
+        if (!/^https?:\/\//.test(h)) return;
+        const idm = h.match(/[?&]id=(\d+)/);
+        const key = idm ? idm[1] : h;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const t = clean(a.innerText);
+        if (t) arr.push({ url: h, title: t.slice(0, 80) });
+      });
+      return arr.slice(0, 200);
     });
-    return arr.slice(0, 200);
-  });
+    if (collected.length) links = collected;
+  }
   out({ type: "meta", items_found: links.length, on_page: bodyTxt.slice(0, 60) });
   if (links.length === 0) {
-    out({ type: "error", message: "店铺页未找到商品链接（可能未登录/页面结构特殊/需滑块）。页面：" + bodyTxt.slice(0,80) });
+    out({ type: "error", message: "未拿到商品链接（新版天猫店铺商品卡片无常规链接；请改用 --links 提供商品链接，或用搜索页/详情页）。页面：" + bodyTxt.slice(0,80) });
     process.exit(0);
   }
 
@@ -112,26 +144,10 @@ async function main() {
   for (const t of targets) {
     try {
       const np = await ctx.newPage();
-      await np.goto(t.url, { timeout: 45000, waitUntil: "domcontentloaded" });
-      await sleep(1500);
-      const data = await np.evaluate((ATTR_SELS, TITLE_SELS, PRICE_SELS, SHOP_SELS) => {
-        const q = (sels) => { for (const s of sels) { const e = document.querySelector(s); if (e) return e; } return null; };
-        const title = q(TITLE_SELS) ? q(TITLE_SELS).innerText.trim().replace(/\s+/g," ") : "";
-        const price = q(PRICE_SELS) ? q(PRICE_SELS).innerText.trim() : "";
-        const shop = q(SHOP_SELS) ? q(SHOP_SELS).innerText.trim().replace(/\s+/g," ") : "";
-        // 参数：拼接所有匹配
-        const params = [];
-        const seen = new Set();
-        ATTR_SELS.forEach(s => {
-          document.querySelectorAll(s).forEach(el => {
-            const t = el.innerText.trim().replace(/\s+/g, " ");
-            if (t && t.length < 120 && !seen.has(t)) { seen.add(t); params.push(t); }
-          });
-        });
-        return { title, price, shop, params: params.slice(0, 60) };
-      }, ATTR_SELS, TITLE_SELS, PRICE_SELS, SHOP_SELS);
+      const data = await fetchDetail(np, t.url);
       await np.close().catch(()=>{});
-      out({ type: "item", ...data, url: t.url, list_title: t.title });
+      // 参数保持完整段落（不再按字切碎），Python 侧再整理
+      out({ type: "item", title: data.title, price: "", shop: "", url: t.url, list_title: t.title, params: data.params ? [data.params] : [] });
       done++;
     } catch (e) {
       fail++;
