@@ -1,89 +1,5 @@
 [
  {
-  "id": 56,
-  "ok": true,
-  "total": 1,
-  "fetched": 1,
-  "error": "",
-  "sample_n": 5,
-  "first": {
-   "repo": "AUTOMATIC1111/stable-diffusion-webui",
-   "url": "https://github.com/AUTOMATIC1111/stable-diffusion-webui",
-   "description": "Stable Diffusion web UI",
-   "stars": 164445,
-   "language": "Python",
-   "_site": "github"
-  },
-  "secs": 36.0,
-  "desc": "GitHub搜索“stable diffusion”，按star数降序，抓取前100仓库的名称、简介、Star数、语言、最近更新日期，挖掘新兴项目。"
- },
- {
-  "id": 58,
-  "ok": true,
-  "total": 500,
-  "fetched": 1,
-  "error": "",
-  "sample_n": 5,
-  "first": {
-   "title": "LearningWhentoTrustviaSelectiveContextPreferenceOptimization",
-   "url": "http://arxiv.org/abs/2608.06377v1",
-   "authors": "Xian Sun、Wei Chow、Yingshuo Wang、Junhao Liu、Wei Gao、Qing Wu、Lingdong Kong",
-   "abstract": "Language models increasingly condition their answers on external signals, and a single misleading one can turn a correct answer wrong. The obvious remedy, training models to resist such signals, hides a failure mode: a model that ignores all context looks robust yet is useless when the context is wo",
-   "published": "2026-08-06T17:59:58Z",
-   "_site": "arxiv"
-  },
-  "secs": 68.7,
-  "desc": "arXiv “cs.CL”分类下每日新提交论文，抓取标题、作者列表、摘要，自动推送到NLP学习群。"
- },
- {
-  "id": 61,
-  "ok": true,
-  "total": 7,
-  "fetched": 1,
-  "error": "",
-  "sample_n": 5,
-  "first": {
-   "日期": "8日",
-   "天气现象": "多云",
-   "最高温度": "26℃",
-   "最低温度": null,
-   "风力": "3-4级",
-   "_url": "https://www.weather.com.cn/weather/101200101.shtml",
-   "_parser": "llm_fallback"
-  },
-  "secs": 79.0,
-  "desc": "中国天气网“武汉”历史天气，每日抓取当天实况（最高温、最低温、天气现象、风力），用于训练本地化预测模型。"
- },
- {
-  "id": 66,
-  "ok": true,
-  "total": 10,
-  "fetched": 1,
-  "error": "",
-  "sample_n": 5,
-  "first": {
-   "影片名称": "蜘蛛侠：崭新之日",
-   "综合票房": ".万",
-   "票房占比": "30.5%",
-   "排片场次": "106063",
-   "_url": "https://piaofang.maoyan.com/dashboard",
-   "_parser": "llm_fallback"
-  },
-  "secs": 106.3,
-  "desc": "猫眼专业版“实时票房”，每日20点抓取当天票房前10影片名称、综合票房、排片占比、上座率，做票房速报。"
- },
- {
-  "id": 71,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "first": {},
-  "secs": 158.1,
-  "desc": "竞彩网“竞彩足球”胜平负赔率，抓取当日所有受注赛事的赛事编号、主队、客队、初始赔率、即时赔率，做套利分析。"
- },
- {
   "id": 81,
   "ok": false,
   "total": 0,
@@ -123,28 +39,6 @@
   },
   "secs": 86.3,
   "desc": "豆瓣同城“上海·展览”活动列表，每周抓取活动名称、时间、地点、费用、感兴趣人数，编辑城市周末指南。"
- },
- {
-  "id": 57,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "error": "",
-  "sample_n": 0,
-  "first": {},
-  "secs": 113.2,
-  "desc": "LeetCode中国“剑指Offer”专项练习题目列表，抓取所有题目名称、难度、通过率、标签，提供给备考小组。"
- },
- {
-  "id": 73,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "error": "",
-  "sample_n": 0,
-  "first": {},
-  "secs": 133.6,
-  "desc": "PyPI“trending projects”页面，每周抓取最近一周热门Python包名称、简介、版本号、发布者，发现新工具。"
  },
  {
   "id": 1,
@@ -905,5 +799,410 @@
   },
   "secs": 125.4,
   "desc": "天天基金网“偏股型基金”近六月收益排行，每月初抓取前50名基金代码、名称、基金经理、重仓行业，筛选持续优秀基金。"
+ },
+ {
+  "id": 52,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 155.9,
+  "desc": "高铁管家/12306公开的“北京-上海”所有车次信息，抓取车次、发车时间、历时、商务座/一等座/二等座票价，供比价工具使用。"
+ },
+ {
+  "id": 51,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 174.7,
+  "desc": "马蜂窝“埃及自由行”目的地全部游记，抓取标题、作者、出行天数、人均费用、行程文本，抽取经典路线。"
+ },
+ {
+  "id": 56,
+  "ok": true,
+  "total": 100,
+  "fetched": 1,
+  "kind": "ok",
+  "error": "",
+  "sample_n": 5,
+  "source": "http",
+  "first": {
+   "repo": "AUTOMATIC1111/stable-diffusion-webui",
+   "url": "https://github.com/AUTOMATIC1111/stable-diffusion-webui",
+   "description": "Stable Diffusion web UI",
+   "stars": 164446,
+   "language": "Python",
+   "_site": "github"
+  },
+  "secs": 44.0,
+  "desc": "GitHub搜索“stable diffusion”，按star数降序，抓取前100仓库的名称、简介、Star数、语言、最近更新日期，挖掘新兴项目。"
+ },
+ {
+  "id": 53,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 249.6,
+  "desc": "途家民宿“安吉·云上草原”附近房源，每日抓取可预订房源的每晚价格、宜住人数、评价关键词，分析节假日溢价。"
+ },
+ {
+  "id": 55,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 163.9,
+  "desc": "知网“自然语言处理”主题核心期刊论文，抓取2024-2025年文献的标题、作者、机构、摘要、关键词、被引频次，做文献计量。"
+ },
+ {
+  "id": 54,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 363.1,
+  "desc": "十六番“曼谷”直播帖板块，抓取最新发帖的用户实时定位、花费明细、行程吐槽，挖掘真实避雷信息。 **教育与学术**"
+ },
+ {
+  "id": 57,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 5,
+  "source": "http",
+  "first": {
+   "title": "万灵之树",
+   "frontend_id": "LCP 82",
+   "difficulty": "困难",
+   "acceptance": 15.46,
+   "url": "https://leetcode.cn/problems/cnHoX6/",
+   "status": "",
+   "_site": "leetcode"
+  },
+  "secs": 173.9,
+  "desc": "LeetCode中国“剑指Offer”专项练习题目列表，抓取所有题目名称、难度、通过率、标签，提供给备考小组。"
+ },
+ {
+  "id": 61,
+  "ok": true,
+  "total": 6,
+  "fetched": 1,
+  "kind": "ok",
+  "error": "",
+  "sample_n": 5,
+  "source": "http",
+  "first": {
+   "日期": "9日（明天）",
+   "天气": "多云",
+   "最高温度": "34℃",
+   "最低温度": "25℃",
+   "风力": "3-4级",
+   "_url": "https://www.weather.com.cn/weather/101200101.shtml",
+   "_parser": "llm_fallback"
+  },
+  "secs": 54.3,
+  "desc": "中国天气网“武汉”历史天气，每日抓取当天实况（最高温、最低温、天气现象、风力），用于训练本地化预测模型。"
+ },
+ {
+  "id": 60,
+  "ok": true,
+  "total": 5,
+  "fetched": 6,
+  "kind": "ok",
+  "error": "",
+  "sample_n": 5,
+  "source": "browser",
+  "first": {
+   "title": "2026年6月份70个大中城市商品住宅销售价格变动情况",
+   "link": "./202607/t20260715_1964115.html",
+   "list_date": "",
+   "_url": "https://www.stats.gov.cn/sj/zxfb/index_1.html",
+   "_parser": "list",
+   "detail_status": "ERR:RuntimeError"
+  },
+  "secs": 353.5,
+  "desc": "国家统计局“70个大中城市住宅销售价格指数”每月15日左右发布，自动抓取最新月份数据表，提取环比同比涨跌。"
+ },
+ {
+  "id": 59,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 358.2,
+  "desc": "中国大学MOOC“计算机”类别下全部已结课课程，抓取课程名、学校、授课教师、选课人数、评分，构建在线课程评价库。 **政府与公共数据**"
+ },
+ {
+  "id": 65,
+  "ok": true,
+  "total": 34,
+  "fetched": 1,
+  "kind": "ok",
+  "error": "",
+  "sample_n": 5,
+  "source": "browser",
+  "first": {
+   "类型": "自然人",
+   "姓名/名称": "王巧玲",
+   "证件号码": "4101041980****5523",
+   "_url": "https://zxgk.court.gov.cn/shixin/",
+   "_parser": "llm_fallback"
+  },
+  "secs": 335.4,
+  "desc": "中国执行信息公开网，输入目标企业名单，每月抓取一次失信被执行人信息及履行情况，用于信贷风控初筛。 **娱乐与体育**"
+ },
+ {
+  "id": 64,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 334.6,
+  "desc": "自然资源部“土地市场”成交结果，抓取城市、地块名称、用途、成交价、楼面价、竞得企业，形成城市土地出让热力图。"
+ },
+ {
+  "id": 63,
+  "ok": false,
+  "error": "RuntimeError: LLM 响应超时（>200s），请检查模型接口/网络/Key",
+  "secs": 200.0,
+  "desc": "国家企业信用信息公示系统，批量查询指定100家公司的经营状态、列入异常名录情况，每日定时更新风险名单。",
+  "kind": "exception"
+ },
+ {
+  "id": 69,
+  "ok": true,
+  "total": 20,
+  "fetched": 1,
+  "kind": "ok",
+  "error": "",
+  "sample_n": 5,
+  "source": "browser",
+  "first": {
+   "排名": 1,
+   "歌曲": "游向陆地的鱼",
+   "歌手": [
+    {
+     "名字": "梓渝",
+     "链接": "https://y.qq.com/n/ryqq/singer/002Mp50T4HjMya"
+    }
+   ],
+   "时长": "04:39",
+   "歌曲链接": "https://y.qq.com/n/ryqq/songDetail/0019tNGN1TJbLT",
+   "专辑链接": "https://y.qq.com/n/ryqq/albumDetail/0035Y3b01o1BsG",
+   "MV链接": null,
+   "上周排名": null,
+   "排名变化": null,
+   "_url": "https://y.qq.com/n/ryqq/toplist/5",
+   "_parser": "llm_fallback"
+  },
+  "secs": 170.0,
+  "desc": "QQ音乐“内地榜”每周四更新后抓取前100歌曲名称、歌手、播放指数，与上周对比排名变化。"
+ },
+ {
+  "id": 68,
+  "ok": true,
+  "total": 50,
+  "fetched": 1,
+  "kind": "ok",
+  "error": "",
+  "sample_n": 5,
+  "source": "http",
+  "first": {
+   "标题": "海斗训练赛",
+   "链接": "https://www.huya.com/518518",
+   "主播名": null,
+   "热度": null,
+   "_url": "https://www.huya.com/g/lol",
+   "_parser": "llm_fallback"
+  },
+  "secs": 105.3,
+  "desc": "虎牙直播“英雄联盟”分类下当前开播的直播间，每10分钟抓取人气前50房间的标题、主播名、热度，分析开播趋势。"
+ },
+ {
+  "id": 67,
+  "ok": false,
+  "error": "ConfigError: 配置错误 [pipelines[2].type]: 未知流水线类型 'chart'\n  提示: 可选: add, cast, dedup, dedup_content, default, download, filter, parse_date, rename, split, template, validate",
+  "secs": 165.4,
+  "desc": "懂球帝“英超联赛”积分榜与射手榜，每轮比赛日结束后抓取更新，自动生成前6名球队积分变化图。",
+  "kind": "exception"
+ },
+ {
+  "id": 58,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 705.9,
+  "desc": "arXiv “cs.CL”分类下每日新提交论文，抓取标题、作者列表、摘要，自动推送到NLP学习群。"
+ },
+ {
+  "id": 73,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "blocked_login",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 113.5,
+  "desc": "PyPI“trending projects”页面，每周抓取最近一周热门Python包名称、简介、版本号、发布者，发现新工具。"
+ },
+ {
+  "id": 72,
+  "ok": true,
+  "total": 10,
+  "fetched": 0,
+  "kind": "ok",
+  "error": "运行超时（>90s）",
+  "sample_n": 5,
+  "source": "browser",
+  "first": {
+   "排名": 1,
+   "游戏名称": "心动小镇",
+   "评分": "8.5",
+   "开发商": "",
+   "标签": [
+    "模拟经营",
+    "治愈",
+    "多人联机"
+   ],
+   "安装人数区间": "",
+   "链接": "https://www.taptap.cn/app/45213?os=android",
+   "_url": "https://www.taptap.cn/top/board",
+   "_parser": "llm_fallback"
+  },
+  "secs": 189.2,
+  "desc": "TapTap“Android游戏热玩榜”，每日抓取前50游戏名称、评分、开发商、标签、安装人数区间，研究安卓游戏生态。 **技术开发与数据**"
+ },
+ {
+  "id": 71,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "blocked_login",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 202.1,
+  "desc": "竞彩网“竞彩足球”胜平负赔率，抓取当日所有受注赛事的赛事编号、主队、客队、初始赔率、即时赔率，做套利分析。"
+ },
+ {
+  "id": 62,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 197.0,
+  "desc": "中国裁判文书网“劳动争议”案由，每日抓取新公开判决的案号、审理法院、裁判日期、判决结果梗概，分析企业用工风险。"
+ },
+ {
+  "id": 66,
+  "ok": true,
+  "total": 10,
+  "fetched": 1,
+  "kind": "ok",
+  "error": "",
+  "sample_n": 5,
+  "source": "browser",
+  "first": {
+   "排名": "01",
+   "影片名称": "奥德赛",
+   "综合票房": null,
+   "累计票房": "4274.2万",
+   "票房占比": "24.9%",
+   "排片场次": 2019,
+   "排片占比": null,
+   "上座率": null,
+   "_url": "https://piaofang.maoyan.com/dashboard",
+   "_parser": "llm_fallback"
+  },
+  "secs": 314.9,
+  "desc": "猫眼专业版“实时票房”，每日20点抓取当天票房前10影片名称、综合票房、排片占比、上座率，做票房速报。"
+ },
+ {
+  "id": 75,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 412.3,
+  "desc": "NPM “most depended packages”榜单，每月抓取前100包名、依赖数、版本、说明，分析JavaScript生态基建。"
+ },
+ {
+  "id": 70,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 5,
+  "source": "browser",
+  "first": {
+   "title": "小伙在桥上和女友＂腻歪＂ 二人紧紧抱着晃来晃去",
+   "url": "https://www.163.com/v/video/VV2TMOHPP.html",
+   "digest": "",
+   "_site": "netease"
+  },
+  "secs": 363.6,
+  "desc": "网易云音乐“官方歌单·新歌推荐”，每周抓取新增歌曲名称、歌手、评论数、收藏数，发现潜力新作。"
+ },
+ {
+  "id": 74,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 285.0,
+  "desc": "Stack Overflow“Questions”标签“python”下按votes排序，每日抓取当天新增的高分问题标题、摘要、标签、查看数，做技术问答热点。"
  }
 ]

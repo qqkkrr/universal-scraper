@@ -325,6 +325,17 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             _kept.append(_a)
         cfg.setdefault("source", {})["actions"] = _kept
 
+    # 管道类型校验：AI 可能输出不存在的流水线类型（如 chart/analysis）→ 直接丢弃该步，
+    # 否则 validate_task 会 ConfigError 卡死整单
+    _PIPE_OK = {"filter", "dedup", "dedup_content", "cast", "add", "validate",
+                "rename", "default", "template", "split", "download", "parse_date"}
+    cfg["pipelines"] = [pl for pl in (cfg.get("pipelines") or [])
+                        if isinstance(pl, dict) and pl.get("type") in _PIPE_OK]
+    _det0 = cfg.get("detail") or {}
+    if _det0.get("filters"):
+        _det0["filters"] = [pl for pl in _det0["filters"]
+                            if isinstance(pl, dict) and pl.get("type") in _PIPE_OK]
+
     # 管道过滤字段校验：AI 常把过滤字段写成解析器里不存在的名字（如 published/时间），
     # 不存在的字段过滤会把整单滤成 0 条——直接丢弃这类过滤（ts 是 detail 合并后的日期字段，保留）
     _known = set()
