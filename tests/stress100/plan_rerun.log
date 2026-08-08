@@ -1,1 +1,8 @@
 共 14 个待测（6-95），workers=3
+⛔ # 31 分0  61.0s |  |  | err:UnboundLocalError: cannot access local v
+⛔ # 17 分0  75.3s |  |  | err:UnboundLocalError: cannot access local v
+⛔ #  6 分0 120.3s |  |  | err:UnboundLocalError: cannot access local v
+⛔ # 60 分0  76.4s |  |  | err:UnboundLocalError: cannot access local v
+⛔ # 45 分0  76.8s |  |  | err:UnboundLocalError: cannot access local v
+⛔ # 32 分0  61.0s |  |  | err:UnboundLocalError: cannot access local v
+⛔ # 65 分0  57.8s |  |  | err:UnboundLocalError: cannot access local v

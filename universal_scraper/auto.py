@@ -360,6 +360,7 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             _kept_df.append(_pl)
         _det["filters"] = _kept_df
 
+    _su0 = (cfg.get("start_urls") or [""])[0]
     # 已知「HTML 壳页 → 公开 API」改写：这些页面本体是 JS 壳，静态抓 0 条，
     # 直接换成可直抓的 JSON/JSONP 接口（比让 AI 猜更稳）
     _API_REWRITE = {
@@ -383,7 +384,6 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
                       "wenshu.court.gov.cn", "zxgk.court.gov.cn", "kns.cnki.net", "bilibili.com")
     _src = cfg.get("source") or {}
     _st = (_src.get("type") or "http").lower()
-    _su0 = (cfg.get("start_urls") or [""])[0]
     _host = (_su0.split("//")[-1].split("/")[0] if "//" in _su0 else _su0).lower()
     if _st == "http" and not (_src.get("headers") or {}).get("Cookie") \
             and any(_host.endswith(d) for d in _login_domains):

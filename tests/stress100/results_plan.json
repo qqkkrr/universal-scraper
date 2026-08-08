@@ -1895,34 +1895,6 @@
   "secs": 108.0
  },
  {
-  "id": 71,
-  "ok": true,
-  "error": "",
-  "start_url": "https://www.sporttery.cn/jc/jczq/spf/",
-  "source": "browser",
-  "route": "🎯 AI 理解的实体类型：竞彩足球胜平负赔率数据；📌 入口依据：sporttery.cn 是中国竞彩网官方域名，/jc/jczq/spf/ 是竞彩足球胜平负赔率专页，展示当日全部受注赛事的赛事编号、主客队以及初赔/即时赔率；页面由 JS 动态加载，内部调用 JSON 赔率接口，因此使用浏览器渲染并捕获全部 XHR/JSON 响应。；🖥️ 浏览器渲染（JS 页面，无人工步骤）",
-  "summary": "入口: https://www.sporttery.cn/jc/jczq/spf/；字段: match_no、home_team、away_team、match_date、match_time、initial_odds、live_odds；上限: 30 请求 / 深度 1",
-  "intent_target": "竞彩足球胜平负赔率数据",
-  "entry_unknown": false,
-  "fields": [
-   "match_no",
-   "home_team",
-   "away_team",
-   "match_date",
-   "match_time",
-   "initial_odds",
-   "live_odds",
-   "match_no",
-   "home_team",
-   "away_team"
-  ],
-  "has_verify": false,
-  "has_login": false,
-  "has_date_filter": false,
-  "detail_enabled": false,
-  "secs": 96.3
- },
- {
   "id": 72,
   "ok": true,
   "error": "",
@@ -1975,28 +1947,6 @@
   "has_date_filter": false,
   "detail_enabled": false,
   "secs": 89.9
- },
- {
-  "id": 77,
-  "ok": true,
-  "error": "",
-  "start_url": "https://top.chinaz.com/",
-  "source": "http",
-  "route": "🎯 AI 理解的实体类型：行业Top500网站建站技术栈（Wappalyzer风格指纹识别）；📌 入口依据：任务需要先收集「汽车与出行」行业约500个网站清单，再逐站做技术栈探测（CMS/分析工具/CDN/语言/服务器等）。入口使用真实存在的行业网站排行站 top.chinaz.com，引擎先抓取行业分类列表页生成站点清单，再对每个站点首页做 Wappalyzer 指纹识别并汇总市场占有率。用户未提供具体排名页URL，入口可能需自动搜索/替换，因此标记 entry_unknown=true。；⚠️ AI 不确定入口，请人工确认/提供正确入口 URL；🌐 HTTP 直连（公开页面）",
-  "summary": "入口: https://top.chinaz.com/；字段: site_name、link；上限: 800 请求 / 深度 3",
-  "intent_target": "行业Top500网站建站技术栈（Wappalyzer风格指纹识别）",
-  "entry_unknown": true,
-  "fields": [
-   "site_name",
-   "link",
-   "site_name",
-   "link"
-  ],
-  "has_verify": false,
-  "has_login": false,
-  "has_date_filter": false,
-  "detail_enabled": true,
-  "secs": 51.6
  },
  {
   "id": 85,
