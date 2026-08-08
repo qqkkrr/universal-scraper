@@ -179,6 +179,46 @@ async function main() {
   const cdpUrl = arg("cdp", null);
   const stopFile = arg("stopFile", null);
   const stopRequested = () => stopFile && fs.existsSync(stopFile);
+
+// mac 有头窗口：居中 + 放大到接近全屏（System Events 需辅助功能权限，失败静默）
+// 解决"弹出的 Chrome 窗口在屏幕角落/太小，验证滑块锁在右下角点不到"
+function focusWindowMac() {
+  if (process.platform !== "darwin") return;
+  try {
+    const { execSync } = require("node:child_process");
+    execSync(
+      `osascript -e 'tell application "System Events" to tell (first process whose name contains "chrome") to set position of front window to {120, 60}' ` +
+      `-e 'tell application "System Events" to tell (first process whose name contains "chrome") to set size of front window to {1680, 1050}' ` +
+      `-e 'tell application "System Events" to tell (first process whose name contains "chrome") to set frontmost to true'`,
+      { timeout: 4000 }
+    );
+  } catch (e) { /* 无辅助功能权限或非 mac：忽略 */ }
+}
+
+// 把 fixed/absolute 的验证码弹窗强制改到屏幕正中央（Boss直聘易盾锁右下角的修复）
+function centerCaptcha(page) {
+  return page.evaluate(() => {
+    const sels = [".yidun_panel", ".yidun--light", ".yidun", ".nc-container", ".nc_wrapper",
+                  ".nc_scale", "[class*='yidun']", "[class*='nc_']", "[class*='verify']",
+                  "[class*='captcha']", "[class*='slider']"];
+    let moved = 0;
+    for (const sel of sels) {
+      document.querySelectorAll(sel).forEach((el) => {
+        const cs = getComputedStyle(el);
+        if (cs.position === "fixed" || cs.position === "absolute") {
+          el.style.position = "fixed";
+          el.style.left = "50%";
+          el.style.top = "50%";
+          el.style.transform = "translate(-50%, -50%)";
+          el.style.margin = "0";
+          el.style.zIndex = "999999";
+          moved++;
+        }
+      });
+    }
+    return moved;
+  }).catch(() => 0);
+}
   // 安全正则：非法 pattern 不抛异常（配置可能来自 LLM），返回 null 表示"永不匹配"
   function safeRe(pattern) {
     try { return new RegExp(pattern); } catch (e) { return null; }
@@ -236,6 +276,7 @@ async function main() {
         args: ["--no-sandbox", "--disable-blink-features=AutomationControlled", "--lang=zh-CN"],
       });
       page = context.pages()[0] || await context.newPage();
+      if (arg("headless", "0") === "0") focusWindowMac();  // 有头：窗口居中放大
     } else {
       browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox"] });
       context = await browser.newContext(ctxOpts);
@@ -411,8 +452,10 @@ async function main() {
         // 取前 5000 字符（原 500 会让 txtLen>2000 的"长页面=登录成功"兜底永远不成立）
         try { txt = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 5000) : "")); } catch (e) {}
         const hitMarker = gateMarkers.some(m => u.includes(m) || txt.includes(String(m).toLowerCase()));
-        // 验证码元素常被顶出视口（用户点不到按钮）：自动滚到屏幕中央
+        // 验证码元素锁在右下角/视口外（用户点不到按钮）：
+        // ① fixed 弹窗强制居中 ② 普通元素滚进视口中央
         try {
+          await centerCaptcha(page);
           await page.evaluate(() => {
             const sel = ".yidun_slider,.nc_scale,.nc_wrapper,.nc_iconfont,.btn_ok,[class*='yidun'],[class*='nc_'],[class*='verify'],[class*='captcha'],[class*='slider']";
             const el = document.querySelector(sel);
