@@ -136,15 +136,25 @@ function isRateLimited(j) {
   return j && (j.code === 800 || j.code === 801 || j.code === 804);
 }
 
-async function getListWithRetry(page, wantPage, getLastApi, maxRetries = 4) {
+async function getListWithRetry(page, wantPage, getLastApi, maxRetries = 6, deadline = 0) {
   for (let a = 1; a <= maxRetries; a++) {
+    if (deadline > 0 && Date.now() > deadline) {
+      out({ type: "deadline", page: wantPage, attempt: a });
+      return { ok: false, captcha: false, deadline: true };
+    }
     await page.evaluate((pn) => { document.querySelector("#app").__vue__.getList(pn); }, wantPage);
     const st = await waitListReady(page, wantPage);
     if (st.captcha) return { ok: false, captcha: true };
     const api = getLastApi();
     if (st.ok && isRateLimited(api)) {
-      out({ type: "ratelimited", attempt: a, code: api.code, waitSec: 30 });
-      await sleep(30000);
+      out({ type: "ratelimited", attempt: a, code: api.code, waitSec: 45 });
+      await sleep(45000);
+      continue;
+    }
+    if (!st.ok) {
+      // 页面等待超时（WAF 限流/接口慢）：先退避再重试，避免高频硬刚
+      out({ type: "retry_wait", attempt: a, waitSec: 8 });
+      await sleep(8000);
       continue;
     }
     return st;
@@ -152,7 +162,7 @@ async function getListWithRetry(page, wantPage, getLastApi, maxRetries = 4) {
   return { ok: false, captcha: false, ratelimited: true };
 }
 
-async function waitListReady(page, wantPage, timeoutMs = 25000) {
+async function waitListReady(page, wantPage, timeoutMs = 40000) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     const st = await page.evaluate((want) => {
@@ -174,6 +184,8 @@ async function main() {
   const stage = args.stage || "0001";
   const maxPages = parseInt(args.maxpages || "200", 10);
   const settleMs = parseInt(args.settle || "1200", 10);
+  const deadlineMs = parseInt(args.deadlineMs || "360000", 10);
+  const deadline = Date.now() + deadlineMs;
   const captchaOut = args.captchaOut || null;
   const captchaDir = args.captchaDir || null;
   const captchaTimeout = parseInt(args.captchaTimeout || "300000", 10);
@@ -219,12 +231,12 @@ async function main() {
     }, { keyword, begin, end, stage });
 
     // 请求第 1 页，拿到总数/总页数
-    let first = await getListWithRetry(page, 1, () => lastApi);
+    let first = await getListWithRetry(page, 1, () => lastApi, 6, deadline);
     if (first.captcha) {
       if (!captchaDir) { out({ type: "captcha", message: "第 1 页触发验证码（未配置 captchaDir，无法自动解）" }); process.exit(0); }
       const solved = await solveCaptchaAndRetry(page, 1, captchaDir, captchaTimeout);
       if (!solved) { out({ type: "error", message: "验证码未能解出，已放弃" }); process.exit(1); }
-      first = await getListWithRetry(page, 1, () => lastApi);
+      first = await getListWithRetry(page, 1, () => lastApi, 6, deadline);
       if (first.captcha) { out({ type: "captcha", message: "第 1 页仍触发验证码" }); process.exit(0); }
     }
     if (!first.ok) { out({ type: "error", message: "第 1 页等待超时" }); process.exit(1); }
@@ -234,14 +246,18 @@ async function main() {
     const pages = Math.min(meta.pages || 1, maxPages);
 
     for (let p = 1; p <= pages; p++) {
+      if (deadline > 0 && Date.now() > deadline) {
+        out({ type: "error", message: `整体时限到期（${deadlineMs / 1000}s），已抓 ${p - 1} 页` });
+        process.exit(0);
+      }
       if (p > 1) {
         await sleep(settleMs);
-        let st = await getListWithRetry(page, p, () => lastApi);
+        let st = await getListWithRetry(page, p, () => lastApi, 6, deadline);
         if (st.captcha) {
           if (!captchaDir) { out({ type: "captcha", message: `第 ${p} 页触发验证码` }); process.exit(0); }
           const solved = await solveCaptchaAndRetry(page, p, captchaDir, captchaTimeout);
           if (!solved) { out({ type: "error", message: `第 ${p} 页验证码未解出` }); process.exit(1); }
-          st = await getListWithRetry(page, p, () => lastApi);
+          st = await getListWithRetry(page, p, () => lastApi, 6, deadline);
         }
         if (!st.ok) { out({ type: "error", message: `第 ${p} 页等待超时` }); process.exit(1); }
       }

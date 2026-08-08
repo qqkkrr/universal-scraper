@@ -105,24 +105,33 @@ def _extract_json(raw: str) -> dict:
 
 
 def _llm_chat(messages: List[Dict[str, str]], timeout: int = 200) -> str:
-    """LLM 调用带硬超时：模型一慢/一挂不能让任务无限卡死（最多等 timeout 秒）。"""
+    """LLM 调用带硬超时 + 空响应重试（模型偶尔返回空/纯空白，提高温度再补一次）。"""
     from .llm import LLMClient
-    box: Dict[str, Any] = {}
+    import time as _t
 
-    def _t():
-        try:
-            box["r"] = LLMClient().chat(messages, temperature=0.2)
-        except Exception as e:
-            box["e"] = e
+    def _call(temp: float) -> str:
+        box: Dict[str, Any] = {}
 
-    th = threading.Thread(target=_t, daemon=True)
-    th.start()
-    th.join(timeout)
-    if th.is_alive():
-        raise RuntimeError(f"LLM 响应超时（>{timeout}s），请检查模型接口/网络/Key")
-    if "e" in box:
-        raise box["e"]
-    return box["r"]
+        def _t0():
+            try:
+                box["r"] = LLMClient().chat(messages, temperature=temp)
+            except Exception as e:
+                box["e"] = e
+
+        th = threading.Thread(target=_t0, daemon=True)
+        th.start()
+        th.join(timeout)
+        if th.is_alive():
+            raise RuntimeError(f"LLM 响应超时（>{timeout}s），请检查模型接口/网络/Key")
+        if "e" in box:
+            raise box["e"]
+        return box["r"]
+
+    out = _call(0.2)
+    if out is None or not str(out).strip():
+        _t.sleep(2)
+        out = _call(0.7)   # 空响应：提高温度重试一次
+    return str(out or "")
 
 
 def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
@@ -363,6 +372,162 @@ def _rendered_class_hint(task_dir) -> str:
     except Exception:
         pass
     return ""
+
+
+def _annotated_dom_hint(task_dir, url: str = "") -> str:
+    """自修复时把引擎保存的渲染页转成「带 CSS 选择器标注」的 DOM 摘要（scrapedown 思路）。
+    比裸 class 统计强：每行给出完整 CSS 路径 + 字段相对选择器 + 真实内容，LLM 一次修对。"""
+    try:
+        lp = Path(task_dir) / "last_page.html"
+        if lp.exists() and lp.stat().st_size > 300:
+            from .structure import annotate_dom
+            return annotate_dom(lp.read_text(encoding="utf-8", errors="replace"), url or "")
+    except Exception:
+        pass
+    return ""
+
+
+def _task_evidence_summary(task_dir, log=None) -> Dict[str, Any]:
+    """收集任务目录里已有的「真实证据」：渲染页 / 捕获接口 / 页面文件，供 LLM 抽取用。"""
+    ev: Dict[str, Any] = {"html": "", "capture": [], "url": ""}
+    try:
+        lp = Path(task_dir) / "last_page.html"
+        if lp.exists() and lp.stat().st_size > 300:
+            ev["html"] = lp.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    try:
+        cap = Path(task_dir) / "capture_all.json"
+        if cap.exists() and cap.stat().st_size > 100:
+            data = json.loads(cap.read_text(encoding="utf-8", errors="replace"))
+            if isinstance(data, list):
+                ev["capture"] = [it for it in data if isinstance(it, dict)][:30]
+    except Exception:
+        pass
+    return ev
+
+
+def _llm_extract_from_evidence(description: str, cfg: dict, task_dir, log,
+                               ev: Optional[Dict[str, Any]] = None) -> dict:
+    """改造3：失败轮内先用「真实页面证据」做 LLM 结构化抽取（crawl4ai LLMExtractionStrategy 路线）。
+
+    优先级：capture_all.json（SPA 加密接口）> last_page.html（渲染页）。
+    成功即返回条目，避免空转引擎重跑。
+    """
+    ev = ev if ev is not None else _task_evidence_summary(task_dir, log)
+    url = (cfg.get("start_urls") or [""])[0]
+
+    # 1) 捕获接口 JSON：SPA 站的数据全在接口里，让 LLM 从 JSON 挑字段
+    if ev.get("capture"):
+        from .structure import summarize_json
+        chunks = []
+        total_chars = 0
+        for it in ev["capture"]:
+            api = it.get("url", "")
+            data = it.get("json", it.get("data"))
+            s = f"接口: {api}\n" + summarize_json(data)
+            chunks.append(s)
+            total_chars += len(s)
+            if total_chars > 6000:
+                break
+        log(f"📡 捕获到 {len(ev['capture'])} 个接口响应，让 LLM 从 JSON 中抽取...")
+        prompt = (
+            f"任务：{description}\n"
+            f"以下是浏览器捕获的接口 JSON 结构（含真实样例值）。请从中提取与任务相关的所有条目，"
+            f"输出 JSON 数组，每个对象用贴合任务的中文字段名，链接保持原始 URL。"
+            f"接口里没有相关数据就输出 []。只输出 JSON 数组。\n\n"
+            + "\n\n".join(chunks)
+        )
+        try:
+            raw_out = _llm_chat([
+                {"role": "system", "content": "你是数据抽取引擎，只输出合法 JSON 数组。"},
+                {"role": "user", "content": prompt},
+            ])
+            raw_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_out.strip())
+            try:
+                arr = json.loads(raw_out)
+            except json.JSONDecodeError:
+                m = re.search(r"\[.*\]", raw_out, re.S)
+                arr = json.loads(m.group(0)) if m else []
+            if isinstance(arr, list) and arr:
+                items = [it for it in arr if isinstance(it, dict)
+                         and any(str(v or "").strip() for v in it.values())]
+                if items:
+                    for it in items:
+                        it.setdefault("_url", url)
+                        it.setdefault("_parser", "llm_capture")
+                    return _save_llm_items(description, items, log)
+        except Exception as e:
+            log(f"⚠️ 接口 JSON 抽取失败: {e}")
+
+    # 2) 渲染页 HTML：常规 CSS 没抓到时，LLM 直接看 Markdown 挑条目
+    if ev.get("html"):
+        fb = _llm_fallback_extract(description, cfg, log,
+                                   rendered_html=ev["html"], rendered_url=url)
+        if fb.get("items"):
+            return fb
+    return {"items": [], "total": 0, "files": {}}
+
+
+def _save_llm_items(description: str, items: list, log) -> dict:
+    """把 LLM 抽出的条目落盘 outputs/（与 auto 任务同名）。"""
+    import hashlib
+    name = f"auto_{hashlib.md5(description.encode()).hexdigest()[:10]}"
+    items_dir = ROOT / "outputs" / "items"
+    items_dir.mkdir(parents=True, exist_ok=True)
+    (items_dir / f"{name}.jsonl").write_text(
+        "".join(json.dumps(it, ensure_ascii=False) + "\n" for it in items), encoding="utf-8")
+    fp = ROOT / "outputs" / f"{name}.json"
+    fp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    log(f"✅ LLM 直接抽取成功：{len(items)} 条")
+    return {"items": items, "total": len(items), "files": {"json": f"outputs/{name}.json"}}
+
+
+def _try_precise_first(description: str, cfg: dict, limit, log, out_name: str = "",
+                       timeout: Optional[int] = None) -> Optional[dict]:
+    """改造2：命中「直达型精配」（run 型，如 ggzy）时，首轮前先跑精配，成功直接返回。
+    避免空转 N 轮通用引擎。带超时保护（WAF 卡住时不阻塞整个任务）。返回 run_site 结果；未命中返回 None。"""
+    su = (cfg.get("start_urls") or [""])[0]
+    if not su:
+        return None
+    try:
+        from .sites import match_site, run_site, SITES
+        site = match_site(su)
+        if not site or not (SITES.get(site) or {}).get("run"):
+            return None
+        _ch = ((cfg.get("source") or {}).get("headers") or {}).get("Cookie") or ""
+        _px = (cfg.get("anti_bot") or {}).get("proxy") or ""
+        log(f"🏆 命中直达精配[{site}]：优先用精配（不空转通用引擎）...")
+        if timeout is None:
+            import os as _os
+            timeout = int(_os.environ.get("US_PRECISE_TIMEOUT", "300"))
+        box: Dict[str, Any] = {}
+
+        def _run():
+            try:
+                box["r"] = run_site(su, cookie=_ch, proxy=_px or None,
+                                    limit=int(limit or 20), out_name=out_name or None)
+            except Exception as e:
+                box["e"] = e
+
+        th = threading.Thread(target=_run, daemon=True)
+        th.start()
+        th.join(timeout)
+        if th.is_alive():
+            log(f"⏱️ 直达精配[{site}]超过 {timeout}s 未完成（WAF 限流/卡住），放弃精配改用通用引擎")
+            return {"total": 0, "rows": [], "files": {},
+                    "error": f"直达精配超时（>{timeout}s）", "site": site}
+        if "e" in box:
+            raise box["e"]
+        dr = box.get("r") or {}
+        if dr.get("rows"):
+            log(f"🏆 直达精配[{site}]成功：{dr['total']} 条")
+        elif dr.get("error"):
+            log(f"⚠️ 直达精配[{site}]失败：{dr['error']}（改用通用引擎兜底）")
+        return dr
+    except Exception as e:
+        log(f"⚠️ 直达精配未启用：{e}")
+        return None
 
 
 _KEY_DATE_WORDS = ("日期", "时间", "发布", "更新", "date", "time", "publish", "上线", "创建")
@@ -964,7 +1129,18 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     last_result = {}
     last_log = ""
     sample: List[Dict[str, Any]] = []
-    for round_i in range(1, rounds + 1):
+    # 🏆 改造2：命中「直达型精配」（run 型，如 ggzy）时，首轮前先跑精配，成功直接返回
+    _precise = _try_precise_first(description, cfg, limit, log, out_name=name)
+    _precise_done = bool(_precise and _precise.get("rows"))
+    _precise_attempted = _precise is not None   # run 型已试过：末尾不再重复打站
+    if _precise_done:
+        sample = _precise["rows"][:5]
+        files = _precise["files"]
+        last_result = {"total": _precise["total"], "fetched": _precise["total"], "errors": 0,
+                       "precise": _precise.get("site")}
+    _loop_rounds = 0 if _precise_done else rounds
+    _llm_ev_tried = False
+    for round_i in range(1, _loop_rounds + 1):
         # 写任务包
         (task_dir / "modules").mkdir(parents=True, exist_ok=True)
         (task_dir / "config.json").write_text(
@@ -1056,6 +1232,23 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             cfg = _force_browser_waf(cfg)
             continue
 
+        # 🧠 改造3：失败轮内先对真实页面证据（渲染页/捕获接口）做 LLM 结构化抽取，
+        # 成功即收——避免「空转重跑 → 再失败 → 再自修复」的漫长循环（crawl4ai 路线）
+        if not _llm_ev_tried:
+            _llm_ev_tried = True
+            _ev = _task_evidence_summary(task_dir)
+            if _ev.get("html") or _ev.get("capture"):
+                log("🧠 常规解析未命中，先对真实页面做 LLM 直接抽取（成功即收，不空转重跑）...")
+                fb = _llm_extract_from_evidence(description, cfg, task_dir, log, ev=_ev)
+                if fb.get("items"):
+                    sample = fb["items"][:5]
+                    files = fb["files"]
+                    last_result = dict(last_result or {})
+                    last_result["total"] = fb["total"]
+                    last_result["llm_extract"] = True
+                    log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
+                    break
+
         if round_i < rounds:
             log(f"⚠️ 第 {round_i} 轮 0 条/报错，AI 正在自修复...")
             _blocks = (result or {}).get("block_stats") or {}
@@ -1075,9 +1268,13 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     f"运行结果：{json.dumps(result, ensure_ascii=False)}\n"
                     f"{_bhint}\n"
                     f"{_page_context(cfg.get('start_urls', [''])[0]) if cfg.get('start_urls') else ''}\n"
+                    f"{_annotated_dom_hint(task_dir, (cfg.get('start_urls') or [''])[0])}\n"
                     f"{_rendered_class_hint(task_dir)}\n"
                     f"运行日志（末尾）：\n{last_log[-2000:]}\n\n"
-                    f"注意：若日志提示【用户关键字段缺失】，说明列表页没有该字段，"
+                    f"【选择器修正要点】上面【重复块候选】是真实渲染页里带 CSS 选择器标注的 DOM："
+                    f"完整CSS 就是 row_css，实例里的相对选择器就是 fields 的 css。"
+                    f"请严格按它修正 row_css 和 fields，不要凭空猜选择器。"
+                    f"若日志提示【用户关键字段缺失】，说明列表页没有该字段，"
                     f"必须在 config 里加 detail 配置（url_field 指向列表记录中的详情 URL 字段，"
                     f"url_transform.prefix 补全域名，extract 抓详情页字段，filters 做日期过滤）。\n"
                     f"请修正配置（选择器/网址/解析方式/是否升级浏览器/加 detail 等），只输出修正后的完整 config.json。"
@@ -1129,24 +1326,27 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             log("✅ LLM 兜底成功，任务视为完成")
 
     # 🏆 精配解析器覆盖（高频网站注册表）：检测到命中即用精配解析器，字段干净
-    try:
-        su = (cfg.get("start_urls") or [""])[0]
-        from .sites import match_site, run_site
-        _site = match_site(su)
-        if _site:
-            _ch = ((cfg.get("source") or {}).get("headers") or {}).get("Cookie") or ""
-            _px = (cfg.get("anti_bot") or {}).get("proxy") or ""
-            _dr = run_site(su, cookie=_ch, proxy=_px or None, limit=int(limit or 20))
-            if _dr.get("rows"):
-                sample = _dr["rows"][:5]
-                files = _dr["files"]
-                total = _dr["total"]
-                real = sample
-                log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
-            elif _dr.get("error"):
-                log(f"⚠️ 精配解析[{_site}]失败：{_dr['error']}")
-    except Exception as _e:
-        log(f"⚠️ 精配解析未启用：{_e}")
+    # run 型直达精配已在首轮前跑过（_precise_attempted），末尾只兜底 fetch+parse 型精配
+    if not _precise_done and not _precise_attempted:
+        try:
+            su = (cfg.get("start_urls") or [""])[0]
+            from .sites import match_site, run_site
+            _site = match_site(su)
+            if _site:
+                _ch = ((cfg.get("source") or {}).get("headers") or {}).get("Cookie") or ""
+                _px = (cfg.get("anti_bot") or {}).get("proxy") or ""
+                _dr = run_site(su, cookie=_ch, proxy=_px or None, limit=int(limit or 20),
+                               out_name=name)
+                if _dr.get("rows"):
+                    sample = _dr["rows"][:5]
+                    files = _dr["files"]
+                    total = _dr["total"]
+                    real = sample
+                    log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
+                elif _dr.get("error"):
+                    log(f"⚠️ 精配解析[{_site}]失败：{_dr['error']}")
+        except Exception as _e:
+            log(f"⚠️ 精配解析未启用：{_e}")
 
     # 自动复核（字段完整率/去重/数量，不联网，秒级完成）
     verify = None
@@ -1211,6 +1411,17 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     last_result = {}
     last_log = ""
     sample: List[Dict[str, Any]] = []
+    # 🏆 改造2：命中「直达型精配」（run 型，如 ggzy）时，首轮前先跑精配，成功直接返回
+    _precise = _try_precise_first(description or "", config, limit, log, out_name=name)
+    _precise_done = bool(_precise and _precise.get("rows"))
+    _precise_attempted = _precise is not None   # run 型已试过：末尾不再重复打站
+    if _precise_done:
+        sample = _precise["rows"][:5]
+        files = _precise["files"]
+        last_result = {"total": _precise["total"], "fetched": _precise["total"], "errors": 0,
+                       "precise": _precise.get("site")}
+    _loop_rounds = 0 if _precise_done else rounds
+    _llm_ev_tried = False
     import os as _os
     import threading as _th
     if round_timeout is None:
@@ -1218,7 +1429,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     _src0 = config.get("source", {}) or {}
     if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
         round_timeout = max(round_timeout, 600)
-    for round_i in range(1, rounds + 1):
+    for round_i in range(1, _loop_rounds + 1):
         # 每轮按当前配置重算超时（WAF 自动升级浏览器后要等人工滑块，需放宽到 10 分钟）
         _src0 = config.get("source", {}) or {}
         if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
@@ -1288,6 +1499,22 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             config = _force_browser_waf(config)
             continue
 
+        # 🧠 改造3：失败轮内先对真实页面证据（渲染页/捕获接口）做 LLM 结构化抽取，成功即收
+        if not _llm_ev_tried:
+            _llm_ev_tried = True
+            _ev = _task_evidence_summary(td)
+            if _ev.get("html") or _ev.get("capture"):
+                log("🧠 常规解析未命中，先对真实页面做 LLM 直接抽取（成功即收，不空转重跑）...")
+                fb = _llm_extract_from_evidence(description or "", config, td, log, ev=_ev)
+                if fb.get("items"):
+                    sample = fb["items"][:5]
+                    files = fb["files"]
+                    last_result = dict(last_result or {})
+                    last_result["total"] = fb["total"]
+                    last_result["llm_extract"] = True
+                    log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
+                    break
+
         if round_i < rounds:
             log(f"⚠️ 第 {round_i} 轮 0 条/报错，AI 正在自修复...")
             fix_messages = [
@@ -1297,8 +1524,12 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                     f"上次配置：{_json.dumps(config, ensure_ascii=False)}\n"
                     f"运行结果：{_json.dumps(result, ensure_ascii=False)}\n"
                     f"{_page_context((config.get('start_urls') or [''])[0]) if config.get('start_urls') else ''}\n"
+                    f"{_annotated_dom_hint(task_dir, (config.get('start_urls') or [''])[0])}\n"
                     f"运行日志（末尾）：\n{last_log[-2000:]}\n\n"
                     f"{_rendered_class_hint(task_dir)}\n"
+                    f"【选择器修正要点】上面【重复块候选】是真实渲染页里带 CSS 选择器标注的 DOM："
+                    f"完整CSS 就是 row_css，实例里的相对选择器就是 fields 的 css。"
+                    f"请严格按它修正 row_css 和 fields，不要凭空猜选择器。"
                     f"注意：若日志提示【用户关键字段缺失】，说明列表页没有该字段，"
                     f"必须在 config 里加 detail 配置（url_field 指向列表记录中的详情 URL 字段，"
                     f"url_transform.prefix 补全域名，extract 抓详情页字段，filters 做日期过滤）。\n"
@@ -1325,24 +1556,26 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     total = (last_result or {}).get("total", 0)
     real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
 
-    try:
-        su = (config.get("start_urls") or [""])[0]
-        from .sites import match_site, run_site
-        _site = match_site(su)
-        if _site:
-            _ch = ((config.get("source") or {}).get("headers") or {}).get("Cookie") or ""
-            _px = (config.get("anti_bot") or {}).get("proxy") or ""
-            _dr = run_site(su, cookie=_ch, proxy=_px or None, limit=int(limit or 20))
-            if _dr.get("rows"):
-                sample = _dr["rows"][:5]
-                files = _dr["files"]
-                total = _dr["total"]
-                real = sample
-                log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
-            elif _dr.get("error"):
-                log(f"⚠️ 精配解析[{_site}]失败：{_dr['error']}")
-    except Exception as _e:
-        log(f"⚠️ 精配解析未启用：{_e}")
+    if not _precise_done and not _precise_attempted:
+        try:
+            su = (config.get("start_urls") or [""])[0]
+            from .sites import match_site, run_site
+            _site = match_site(su)
+            if _site:
+                _ch = ((config.get("source") or {}).get("headers") or {}).get("Cookie") or ""
+                _px = (config.get("anti_bot") or {}).get("proxy") or ""
+                _dr = run_site(su, cookie=_ch, proxy=_px or None, limit=int(limit or 20),
+                               out_name=name)
+                if _dr.get("rows"):
+                    sample = _dr["rows"][:5]
+                    files = _dr["files"]
+                    total = _dr["total"]
+                    real = sample
+                    log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
+                elif _dr.get("error"):
+                    log(f"⚠️ 精配解析[{_site}]失败：{_dr['error']}")
+        except Exception as _e:
+            log(f"⚠️ 精配解析未启用：{_e}")
 
     if not (total > 0 and real):
         log("🧠 常规解析未命中，尝试 LLM 直接抽取（兜底）...")

@@ -447,8 +447,25 @@ class BrowserFetcher(BaseFetcher):
                     rows = self._extract(html)
                     records.extend(rows)
                     log(f"  page {obj.get('page')}: +{len(rows)}（累计 {len(records)}）")
+                    # 渲染页落盘到任务目录：供失败轮内 LLM 直接抽取/选择器精修用
+                    try:
+                        if _td:
+                            _lp = Path(_td) / "last_page.html"
+                            if not _lp.exists() or len(html) > _lp.stat().st_size:
+                                _lp.write_text(html, encoding="utf-8")
+                    except Exception:
+                        pass
                 elif t == "capture_file":
                     log(f"  捕获接口 {obj.get('name')}: {obj.get('count')} 个响应 -> {obj.get('file')}")
+                    # 接口 JSON 落盘到任务目录：SPA 加密接口的数据喂 LLM 结构化抽取
+                    try:
+                        if _td and obj.get("file"):
+                            _cf = Path(obj["file"])
+                            if _cf.exists():
+                                (Path(_td) / "capture_all.json").write_text(
+                                    _cf.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+                    except Exception:
+                        pass
                 elif t == "login":
                     log(f"[登录] {obj.get('message')}（请在浏览器窗口完成登录，最多等 {self.source.get('login_timeout_ms',600000)//1000}s）", "WARN")
                 elif t == "login_ok":

@@ -29,11 +29,14 @@ def run_bridge(bridge_script: Path, args: Dict[str, str], timeout: int = 900) ->
 
 
 def crawl_ggzy_list(bridge_script: Path, keyword: str, begin: str, end: str, stage: str,
-                    max_pages: int = 200, settle: int = 1200) -> List[Dict[str, Any]]:
-    """兼容旧接口：返回全部记录（不自动解验证码，触发则抛 CaptchaError）。"""
+                    max_pages: int = 200, settle: int = 1200,
+                    deadline_ms: int = 360000) -> List[Dict[str, Any]]:
+    """兼容旧接口：返回全部记录（不自动解验证码，触发则抛 CaptchaError）。
+    deadline_ms：桥侧整体时限（耐心重试但绝不无限拖，默认 8 分钟/阶段）。"""
     records: List[Dict[str, Any]] = []
     for obj in run_bridge(bridge_script, {"keyword": keyword, "begin": begin, "end": end,
-                                          "stage": stage, "maxpages": str(max_pages), "settle": str(settle)}):
+                                          "stage": stage, "maxpages": str(max_pages),
+                                          "settle": str(settle), "deadlineMs": str(deadline_ms)}):
         if obj.get("type") == "page":
             records.extend(obj.get("records") or [])
     return records

@@ -671,6 +671,7 @@ class EngineV3:
         except Exception as e:
             self.logger.warn(f"详情：浏览器池初始化失败（{e}），退回原取数器")
         todo, seen = [], set()
+        _base = (rows[0].get("_url") or (self.config.get("start_urls") or [""])[0] or "") if rows else ""
         for r in rows:
             u = str(r.get(url_field) or "").strip()
             if not u:
@@ -682,7 +683,18 @@ class EngineV3:
                     u = tr["prefix"] + u
                 elif "suffix" in tr:
                     u = u + tr["suffix"]
-            if not u or u in seen:
+            # 🛡️ 无效/伪链接防线：javascript:; / # / mailto 等必须跳过，
+            # 相对路径按列表页 URL 补全——否则详情全抓 "https://hostjavascript:;" 报错
+            u = (u or "").strip()
+            if not u or u.startswith(("javascript:", "mailto:", "tel:", "data:", "#", "about:")):
+                continue
+            if not u.startswith(("http://", "https://")):
+                if u.startswith("/") and _base.startswith(("http://", "https://")):
+                    from urllib.parse import urljoin
+                    u = urljoin(_base, u)
+                else:
+                    continue
+            if u in seen:
                 continue
             seen.add(u)
             todo.append((u, r))

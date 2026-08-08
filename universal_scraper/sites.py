@@ -745,17 +745,18 @@ def _ggzy_run(url: str, cookie: str = "", proxy: Optional[str] = None,
         st = st.strip()
         recs = None
         last_err = ""
-        # WAF/限流可能是瞬时的：最多重试 3 次
+        # WAF/限流可能是瞬时的：最多重试 3 次，退避逐步拉长（15/30/60s），不硬刚；
+        # 桥内部还有 6 次页级重试 + 6 分钟整体时限，绝不无限拖
         for _attempt in range(1, 4):
             try:
                 recs = crawl_ggzy_list(bridge, keyword, begin, end, st,
-                                       max_pages=max_pages, settle=1500)
+                                       max_pages=max_pages, settle=2500, deadline_ms=360000)
                 break
             except CaptchaError as e:
                 raise RuntimeError(f"ggzy 触发验证码：{e}（可稍后重试/换网络，或人工打开网页过验证）")
             except BrowserBridgeError as e:
                 last_err = str(e)
-                _time.sleep(4 * _attempt)
+                _time.sleep(15 * _attempt)
         if recs is None:
             raise RuntimeError(f"ggzy 桥错误（重试3次后）：{last_err}")
         for r in recs or []:
