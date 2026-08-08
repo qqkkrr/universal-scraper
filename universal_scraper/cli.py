@@ -394,7 +394,7 @@ def main() -> int:
             print(f"  {k}: {v}")
         print("\n切换示例：")
         print("  us llm --model qwen-max            # 千问最强")
-        print("  us llm --model deepseek-chat --base https://api.deepseek.com/v1 --key sk-xxx   # DeepSeek")
+        print("  us llm --model deepseek-v4-flash --base https://api.deepseek.com/v1 --key sk-xxx   # DeepSeek")
         print("  us llm --vision qwen-vl-max        # 视觉模型（看截图/验证码）")
         return 0
 

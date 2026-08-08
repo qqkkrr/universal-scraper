@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Optional
 
 
 def _get_key() -> str:
-    key = os.environ.get("QWEN_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+    # 主模型 key：OPENAI_API_KEY 优先（切 DeepSeek/GPT 等时用），千问 QWEN_API_KEY 兜底
+    key = os.environ.get("OPENAI_API_KEY") or os.environ.get("QWEN_API_KEY") or ""
     if key:
         return key
     from pathlib import Path

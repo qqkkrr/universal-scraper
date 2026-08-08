@@ -176,13 +176,33 @@ class ConfigParser(BaseParser):
         "url": ["job-name", "title", "name", "detail"],
     }
 
-    def _guess_field(self, el, name: str) -> str:
-        """字段名驱动的选择器猜测：在自愈行元素里按常见 class 关键词找字段值。"""
+    @staticmethod
+    def _guess_field(el, name: str) -> str:
+        """字段名驱动的选择器猜测：在元素(行/整页)里按常见 class 关键词找字段值。
+        供自愈行和 detail 详情提取共用（AI 选择器漏了也能兜底）。"""
         key = re.sub(r"[^a-z]", "", (name or "").lower())
         if key in ("link", "url", "href"):
             a = el.cssselect("a[href]")
             return a[0].get("href", "").strip() if a else ""
-        hints = self._FIELD_HINTS.get(key) or []
+        # 字段名模糊归并：publish_time/publishtime/updated_at → date 类
+        if key not in ConfigParser._FIELD_HINTS:
+            if any(w in key for w in ("time", "date", "publish", "pub", "update", "release", "created")):
+                key = "date"
+            elif any(w in key for w in ("price", "salary", "pay", "wage", "money")):
+                key = "salary"
+            elif any(w in key for w in ("company", "corp", "boss", "shop", "brand")):
+                key = "company"
+            elif any(w in key for w in ("location", "area", "addr", "city", "region")):
+                key = "location"
+            elif any(w in key for w in ("title", "name", "job", "position")):
+                key = "title"
+            elif any(w in key for w in ("desc", "content", "detail", "text", "intro")):
+                key = "desc"
+            elif any(w in key for w in ("tag", "label", "skill")):
+                key = "tags"
+            elif any(w in key for w in ("author", "user", "people")):
+                key = "author"
+        hints = ConfigParser._FIELD_HINTS.get(key) or []
         # 精确类名（带连字符的完整类名）优先，泛词（company/tag 等）最后，避免 company 误命中 company-location
         precise = [h for h in hints if "-" in h]
         generic = [h for h in hints if "-" not in h]

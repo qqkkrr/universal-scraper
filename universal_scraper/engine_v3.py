@@ -667,10 +667,22 @@ class EngineV3:
                 resp = self.fetcher.fetch(Request(url=u))
                 html = resp.text or ""
                 for spec in extract:
+                    _n = spec.get("name", "detail")
+                    _v = ""
                     try:
-                        r[spec.get("name", "detail")] = apply_extractor(spec, html, html, None)
+                        _v = apply_extractor(spec, html, html, None)
                     except Exception:
-                        r[spec.get("name", "detail")] = ""
+                        _v = ""
+                    # 兜底：AI 选择器漏了也能按字段名猜（publish_time→.time/.date 等）
+                    if not str(_v or "").strip():
+                        try:
+                            from lxml import html as _lh
+                            _doc = _lh.fromstring(html)
+                            from .modules.parsers import ConfigParser
+                            _v = ConfigParser._guess_field(_doc, _n)
+                        except Exception:
+                            _v = ""
+                    r[_n] = _v
                 r["detail_status"] = str(resp.status)
                 return True
             except Exception as e:
