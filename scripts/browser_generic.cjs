@@ -387,16 +387,16 @@ function centerCaptcha(page) {
       }
       if (needLogin) {
         out({ type: "login", message: `请在弹出的浏览器中登录: ${spec.login.url || spec.url}` });
-        await page.goto(spec.login.url || spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
+        await page.goto(spec.login.url || spec.url, { timeout: 90000, waitUntil: "domcontentloaded" });
         if (spec.login.auto_js) {
           await page.evaluate(spec.login.auto_js);
-          await page.goto(spec.login.url || spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
+          await page.goto(spec.login.url || spec.url, { timeout: 90000, waitUntil: "domcontentloaded" });
         }
       } else {
-        await page.goto(spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
+        await page.goto(spec.url, { timeout: 90000, waitUntil: "domcontentloaded" });
       }
     } else {
-      await page.goto(spec.url, { timeout: 60000, waitUntil: "domcontentloaded" });
+      await page.goto(spec.url, { timeout: 90000, waitUntil: "domcontentloaded" });
     }
 
     // 2) 人工等待循环：验证码页 / 登录页 → 直到目标页出现
@@ -563,7 +563,7 @@ function centerCaptcha(page) {
           || (cur.includes("/search/") && target.includes("/search/"));
         if (!sameHost) {
           out({ type: "redirect", message: "登录后跳转到 " + cur + "，正在回到目标页 " + target });
-          await page.goto(target, { timeout: 60000, waitUntil: "domcontentloaded" });
+          await page.goto(target, { timeout: 90000, waitUntil: "domcontentloaded" });
           await sleep(2500);
           if (gateSuccessSel) {
             try { await page.waitForSelector(gateSuccessSel, { timeout: 5000 }); } catch (e) {}

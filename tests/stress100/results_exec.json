@@ -160,28 +160,6 @@
   "desc": "豆瓣同城“上海·展览”活动列表，每周抓取活动名称、时间、地点、费用、感兴趣人数，编辑城市周末指南。"
  },
  {
-  "id": 41,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "error": "",
-  "sample_n": 0,
-  "first": {},
-  "secs": 133.6,
-  "desc": "天天基金网“偏股型基金”近六月收益排行，每月初抓取前50名基金代码、名称、基金经理、重仓行业，筛选持续优秀基金。"
- },
- {
-  "id": 73,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "error": "",
-  "sample_n": 0,
-  "first": {},
-  "secs": 107.4,
-  "desc": "PyPI“trending projects”页面，每周抓取最近一周热门Python包名称、简介、版本号、发布者，发现新工具。"
- },
- {
   "id": 57,
   "ok": false,
   "total": 0,
@@ -189,7 +167,29 @@
   "error": "",
   "sample_n": 0,
   "first": {},
-  "secs": 175.4,
+  "secs": 113.2,
   "desc": "LeetCode中国“剑指Offer”专项练习题目列表，抓取所有题目名称、难度、通过率、标签，提供给备考小组。"
+ },
+ {
+  "id": 41,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "error": "",
+  "sample_n": 0,
+  "first": {},
+  "secs": 122.5,
+  "desc": "天天基金网“偏股型基金”近六月收益排行，每月初抓取前50名基金代码、名称、基金经理、重仓行业，筛选持续优秀基金。"
+ },
+ {
+  "id": 73,
+  "ok": false,
+  "total": 0,
+  "fetched": 3,
+  "error": "",
+  "sample_n": 0,
+  "first": {},
+  "secs": 133.6,
+  "desc": "PyPI“trending projects”页面，每周抓取最近一周热门Python包名称、简介、版本号、发布者，发现新工具。"
  }
 ]

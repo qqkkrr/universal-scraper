@@ -53,9 +53,9 @@ from .config import ConfigError
 
 
 def resolve_tpl(value: Any, vars: Dict[str, str]) -> Any:
-    """把配置里的 {{var}} 模板替换成任务变量（与 v2 _resolve_template 对齐）。"""
+    """把配置里的 {{var}} 与 {var} 模板替换成任务变量（AI 常写单花括号）。"""
     if isinstance(value, str):
-        return re.sub(r"\{\{(\w+)\}\}", lambda m: str(vars.get(m.group(1), m.group(0))), value)
+        return re.sub(r"\{\{?(\w+)\}?\}", lambda m: str(vars.get(m.group(1), m.group(0))), value)
     if isinstance(value, dict):
         return {k: resolve_tpl(v, vars) for k, v in value.items()}
     if isinstance(value, list):

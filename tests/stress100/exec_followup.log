@@ -1,0 +1,19 @@
+执行测试 3 个任务（limit=6, timeout=90s, workers=2）
+[22:48:47] [INFO] 任务启动: auto_dd5ad672fe | 队列 1 | 规则 1
+[22:48:47] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ # 57 total=0 113.2s | LeetCode中国“剑指Offer”专项练习题目列表，抓取所有题目名称、难度、通过率、标签，提供给 | err:
+[22:48:50] [INFO] 任务启动: auto_ec8723c4c4 | 队列 1 | 规则 2
+[22:48:52] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ # 41 total=0 122.5s | 天天基金网“偏股型基金”近六月收益排行，每月初抓取前50名基金代码、名称、基金经理、重仓行业，筛选持 | err:
+[22:50:43] [INFO] 任务启动: auto_abf5c4a52a | 队列 1 | 规则 1
+[22:50:44] [INFO] 延迟重试 1/2: https://pypistats.org/top（2s 后）
+[22:50:44] [WARN] 请求失败 https://pypistats.org/top: RateLimitedError: 限流 200: https://pypistats.org/top (retry_after=0.0s) | 反爬拦截[cloudflare] tps://cdnjs.cloudflare.com/ajax/li
+[22:50:48] [INFO] 延迟重试 2/2: https://pypistats.org/top（4s 后）
+[22:50:48] [WARN] 请求失败 https://pypistats.org/top: RateLimitedError: 限流 200: https://pypistats.org/top (retry_after=0.0s) | 反爬拦截[cloudflare] tps://cdnjs.cloudflare.com/ajax/li
+[22:50:54] [WARN] 放弃重试 https://pypistats.org/top（已达 2 次）
+[22:50:54] [WARN] 请求失败 https://pypistats.org/top: RateLimitedError: 限流 200: https://pypistats.org/top (retry_after=0.0s) | 反爬拦截[cloudflare] tps://cdnjs.cloudflare.com/ajax/li
+[22:50:54] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[22:50:54] [INFO] 反爬拦截统计: cloudflare×3
+❌ # 73 total=0 133.6s | PyPI“trending projects”页面，每周抓取最近一周热门Python包名称、简介、版 | err:
+
+完成 3 个：成功 0

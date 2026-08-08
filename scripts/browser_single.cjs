@@ -34,7 +34,7 @@ async function main() {
     const context = await browser.newContext(ctxOpts);
     if (stealth) await applyStealth(context);
     const page = await context.newPage();
-    await page.goto(url, { timeout: 60000, waitUntil: "domcontentloaded" });
+    await page.goto(url, { timeout: 90000, waitUntil: "domcontentloaded" });
     if (jsPre) await page.evaluate(jsPre);
     if (removeOverlays) await dismissOverlays(page);
     if (actionsJson) await runActions(page, JSON.parse(actionsJson));

@@ -360,6 +360,20 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             _kept_df.append(_pl)
         _det["filters"] = _kept_df
 
+    # 变量缺失检测：AI 常留 {company_name} 等占位符却没给 vars 值。
+    # 收集所有未赋值变量 → cfg["_needs_input"]，plan 时给用户醒目提示，避免空转
+    _need = []
+    _vars = cfg.get("vars") or {}
+    _scan_txt = " ".join(str(x) for x in (cfg.get("start_urls") or [])) + " " + json.dumps((cfg.get("source") or {}).get("query") or {}, ensure_ascii=False)
+    for _m in re.finditer(r"\{\{?(\w+)\}?\}", _scan_txt):
+        _name = _m.group(1)
+        if _name and _name not in _vars and _name not in _need:
+            _need.append(_name)
+    if _need:
+        cfg["_needs_input"] = _need
+        _int = cfg.setdefault("intent", {})
+        _int["entry_unknown"] = True
+
     _su0 = (cfg.get("start_urls") or [""])[0]
     # 已知「HTML 壳页 → 公开 API」改写：这些页面本体是 JS 壳，静态抓 0 条，
     # 直接换成可直抓的 JSON/JSONP 接口（比让 AI 猜更稳）
@@ -1350,6 +1364,9 @@ def describe_route(cfg: dict, description: str = "") -> Dict[str, str]:
                 pass
     # 配置风险提示：帮用户在确认前一眼发现 AI 配置问题
     warnings = []
+    for _vn in (cfg.get("_needs_input") or []):
+        warnings.append(f"⛔ 任务缺少变量【{_vn}】（如企业名称/关键词/城市），请在上方配置 vars 里填写具体值，否则会空抓")
+
     _login_need = ("xiaohongshu.com", "zhihu.com", "weibo.com", "douyin.com", "kuaishou.com",
                    "taobao.com", "tmall.com", "jd.com", "yangkeduo.com", "pinduoduo.com",
                    "dianping.com", "meituan.com", "goofish.com", "dewu.com", "zhipin.com",
@@ -1391,6 +1408,7 @@ def plan_task(description: str, limit: Optional[int] = None, proxy: Optional[str
         return {"ok": True, "name": name, "task_dir": str(task_dir),
                 "config": cfg, "route": plan["route"], "summary": plan["summary"],
                 "warnings": plan.get("warnings") or [],
+                "needs_input": cfg.get("_needs_input") or [],
                 "messages": lines, "description": description}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "messages": lines}
