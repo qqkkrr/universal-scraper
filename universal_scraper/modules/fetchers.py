@@ -3,14 +3,47 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+import threading
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from ..protocols import BaseFetcher, Request, Response
 from ..session import SessionPool
 from ..antibot import detect_block
 from ..core import update_cookie_jar, jar_cookie_header, log
+
+
+def _spawn_bridge(cmd: List[str], env: Dict[str, str]):
+    """启动浏览器桥 + 后台排空 stderr（防管道写满死锁）。"""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", env=env)
+    errbuf: List[str] = []
+    if proc.stderr:
+        def _drain():
+            try:
+                for ln in proc.stderr:
+                    errbuf.append(ln)
+            except Exception:
+                pass
+        threading.Thread(target=_drain, daemon=True).start()
+    return proc, errbuf
+
+
+def _wait_bridge(proc, errbuf, timeout: int = 1800):
+    try:
+        rc = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        try:
+            rc = proc.wait(timeout=10)
+        except Exception:
+            rc = -9
+    return rc, "".join(errbuf)
 
 
 class HttpFetcher(BaseFetcher):
@@ -236,9 +269,7 @@ class BridgeFetcher(BaseFetcher):
         for k, v in params.items():
             if v is not None:
                 cmd += [f"--{k}", str(v)]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, encoding="utf-8",
-                                env={**os.environ, "NODE_PATH": _NODE_PATH})
+        proc, errbuf = _spawn_bridge(cmd, {**os.environ, "NODE_PATH": _NODE_PATH})
         records = []
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -259,9 +290,8 @@ class BridgeFetcher(BaseFetcher):
             elif t == "error":
                 proc.terminate()
                 raise RuntimeError(obj.get("message"))
-        rc = proc.wait(timeout=1800)
+        rc, err = _wait_bridge(proc, errbuf)
         if rc != 0:
-            err = proc.stderr.read() if proc.stderr else ""
             raise RuntimeError(f"桥退出码 {rc}: {err[-300:]}")
         return records
 
@@ -433,8 +463,7 @@ class BrowserFetcher(BaseFetcher):
             if self._task_dir:
                 cmd += ["--stopFile", str(self._task_dir / ".stop")]
             env = {**os.environ, "NODE_PATH": _NODE_PATH}
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, encoding="utf-8", env=env)
+            proc, errbuf = _spawn_bridge(cmd, env)
             html = ""
             final_url = req.url
             finished = False
@@ -473,7 +502,13 @@ class BrowserFetcher(BaseFetcher):
                 elif t == "error":
                     proc.terminate()
                     raise RuntimeError(msg or "浏览器交互桥错误")
-            proc.wait(timeout=30 if finished else 600)
+            try:
+                proc.wait(timeout=30 if finished else 600)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
             try:
                 if not html:
                     files = sorted(out_dir.glob("*.html"))
