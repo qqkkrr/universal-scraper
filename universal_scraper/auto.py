@@ -11,6 +11,7 @@
   API:  POST /api/auto  {"description": "..."}
 """
 from __future__ import annotations
+import os
 
 import hashlib
 import json
@@ -1406,6 +1407,14 @@ def plan_task(description: str, limit: Optional[int] = None, proxy: Optional[str
             log_cb(msg)
     try:
         cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
+        # 持久化配置：确认后执行可复用；排查/批量测试也读同一份，避免每次重新生成
+        try:
+            from pathlib import Path as _PP
+            (task_dir / "config.json").write_text(
+                json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+            (task_dir / "description.txt").write_text(description, encoding="utf-8")
+        except Exception:
+            pass
         plan = describe_route(cfg, description)
         return {"ok": True, "name": name, "task_dir": str(task_dir),
                 "config": cfg, "route": plan["route"], "summary": plan["summary"],
@@ -1431,7 +1440,39 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         if log_cb:
             log_cb(msg)
 
-    cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
+    # 批量回归模式：US_REUSE_CONFIG=1 且任务已有落盘配置 → 直接复用（省 LLM、可反复修引擎）
+    _h = hashlib.md5(description.encode()).hexdigest()[:10]
+    _task_dir0 = ROOT / "tasks" / f"auto_{_h}"
+    _reused_cfg = None
+    if os.environ.get("US_REUSE_CONFIG") == "1":
+        _cfg_p = _task_dir0 / "config.json"
+        if _cfg_p.exists():
+            try:
+                _saved = json.loads(_cfg_p.read_text(encoding="utf-8"))
+                if _saved.get("start_urls"):
+                    _reused_cfg = _saved
+            except Exception:
+                pass
+    if _reused_cfg is not None:
+        cfg = _reused_cfg
+        name = f"auto_{_h}"
+        task_dir = _task_dir0
+        log("♻️ 复用已落盘配置（US_REUSE_CONFIG=1）")
+        (task_dir / "modules").mkdir(parents=True, exist_ok=True)
+    else:
+        cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
+        try:
+            (task_dir / "config.json").write_text(
+                json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+            (task_dir / "description.txt").write_text(description, encoding="utf-8")
+        except Exception:
+            pass
+    # 缺变量（如 {company_name}）→ 直接拒绝执行，给出明确提示，避免空转/卡死
+    _need = cfg.get("_needs_input") or []
+    if _need:
+        raise RuntimeError(
+            "任务缺少变量【" + "、".join(_need) + "】（如企业名称/关键词/城市）。"
+            "请在「生成执行计划」后的配置里 vars 填写具体值，或把具体值直接写进任务描述再试。")
     # 统一命名：storage/output 一律用 auto 任务名（否则引擎写 items/xxx.jsonl 与
     # auto 读 sample 的 items/auto_xxx.jsonl 不一致，复核/抽样会被旧数据污染）
     cfg["name"] = name
@@ -1471,10 +1512,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         if round_timeout is None:
             round_timeout = int(_os.environ.get("US_AUTO_ROUND_TIMEOUT", "240"))
         _src0 = cfg.get("source", {}) or {}
-        if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
-            round_timeout = max(round_timeout, 600)  # 人工验证要等人，放宽到 10 分钟
-        if (cfg.get("detail") or {}).get("enabled"):
-            round_timeout = max(round_timeout, 1200)  # 详情补抓(几十页)要时间，放宽到 20 分钟
+        if os.environ.get("US_BATCH") != "1":
+            if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
+                round_timeout = max(round_timeout, 600)  # 人工验证要等人，放宽到 10 分钟
+            if (cfg.get("detail") or {}).get("enabled"):
+                round_timeout = max(round_timeout, 1200)  # 详情补抓(几十页)要时间，放宽到 20 分钟
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
         from .engine_v3 import run_task
         from .log import Logger
@@ -1783,15 +1825,17 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     if round_timeout is None:
         round_timeout = int(_os.environ.get("US_AUTO_ROUND_TIMEOUT", "240"))
     _src0 = config.get("source", {}) or {}
-    if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
-        round_timeout = max(round_timeout, 600)
+    if os.environ.get("US_BATCH") != "1":
+        if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
+            round_timeout = max(round_timeout, 600)
     for round_i in range(1, _loop_rounds + 1):
         # 每轮按当前配置重算超时（WAF 自动升级浏览器后要等人工滑块，需放宽到 10 分钟）
         _src0 = config.get("source", {}) or {}
-        if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
-            round_timeout = max(round_timeout, 600)
-        if (config.get("detail") or {}).get("enabled"):
-            round_timeout = max(round_timeout, 1200)
+        if os.environ.get("US_BATCH") != "1":
+            if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
+                round_timeout = max(round_timeout, 600)
+            if (config.get("detail") or {}).get("enabled"):
+                round_timeout = max(round_timeout, 1200)
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
         from .engine_v3 import run_task
         log_file = ROOT / "outputs" / f".run_{name}.log"

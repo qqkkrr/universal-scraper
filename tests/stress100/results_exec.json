@@ -191,5 +191,205 @@
   "first": {},
   "secs": 133.6,
   "desc": "PyPI“trending projects”页面，每周抓取最近一周热门Python包名称、简介、版本号、发布者，发现新工具。"
+ },
+ {
+  "id": 1,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "从淘宝搜索“露营帐篷”按销量排序，每日凌晨3点抓取前50个商品的标题、价格、月销量、店铺名称，分析季节性爆款趋势。",
+  "kind": "exception"
+ },
+ {
+  "id": 2,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "京东自营“婴儿奶粉”类目全部在售商品，每周一抓取品牌、规格、价格、好评率、评价总数，监控价格波动与断货情况。",
+  "kind": "exception"
+ },
+ {
+  "id": 3,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "拼多多“百亿补贴”频道每天10点、18点抓取所有数码类商品名称、补贴价、原价、已拼件数，推送到优惠通知群。",
+  "kind": "exception"
+ },
+ {
+  "id": 4,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "1688搜索“定制帆布袋”按成交额排名，采集前80个供应商的公司名称、经营模式、单价、起订量，为文创品牌寻找代工。",
+  "kind": "exception"
+ },
+ {
+  "id": 5,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "闲鱼监测关键词“富士XT-5 套机”，每15分钟抓取最新发布的30条闲置信息，包含价格、快门数、成色描述、卖家芝麻信用，辅助二手入手决策。",
+  "kind": "exception"
+ },
+ {
+  "id": 8,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "什么值得买“好价”频道实时流，抓取所有带有“绝对值”标签的爆料商品名称、价格、商城、值率、评论数，过滤后自动转发。",
+  "kind": "exception"
+ },
+ {
+  "id": 7,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "网易考拉“日本面膜”分类热销榜，每日抓取前20名商品名称、售价、税费、用户评分，与日本亚马逊同款对比差价。",
+  "kind": "exception"
+ },
+ {
+  "id": 6,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "得物App（Web端）指定鞋款“Air Jordan 1 High OG 芝加哥”，每小时抓取各尺码的当前售价、销量、求购数，绘制价格K线。",
+  "kind": "exception"
+ },
+ {
+  "id": 12,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "贝壳找房“深圳·南山区”整租房源，每周四抓取租金在3000-6000元的所有房源信息，包含小区、面积、地铁距离、配套设施，供毕业生租房群使用。",
+  "kind": "exception"
+ },
+ {
+  "id": 9,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "有赞微商城“故宫淘宝”店铺全部商品列表页，每日抓取商品名称、价格、销量、库存状态，监控文创产品上新。",
+  "kind": "exception"
+ },
+ {
+  "id": 11,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "链家上海二手房“浦东新区”房源，每日抓取所有新上架房源的挂牌价、面积、户型、楼层、是否学区，生成当日上新日报。",
+  "kind": "exception"
+ },
+ {
+  "id": 15,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "58同城“杭州·个人急售”二手房板块，每两小时抓取最新发布的20条信息，提取标题、总价、小区、电话标记（仅展示公开信息），识别真实低价房源。",
+  "kind": "exception"
+ },
+ {
+  "id": 10,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "亚马逊美国站“best seller in electric toothbrush”榜单，抓取前20产品名称、售价、星级、评价数量、BSR排名变化，用于跨境选品",
+  "kind": "exception"
+ },
+ {
+  "id": 16,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "我爱我家“南京”站，爬取所有可交易小区详情页，抓取建筑年代、绿化率、物业费、停车位数量，构建小区基础数据库。",
+  "kind": "exception"
+ },
+ {
+  "id": 19,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "BOSS直聘“全国·算法工程师”搜索结果，每周一抓取前200条职位，包含公司名称、融资阶段、薪资范围、经验要求、职位描述高频词，分析技能需求演进。",
+  "kind": "exception"
+ },
+ {
+  "id": 13,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "安居客“成都·天府新区”新楼盘列表，每周抓取楼盘名称、均价、主力户型、交房时间、剩余套数，绘制新盘地图。",
+  "kind": "exception"
+ },
+ {
+  "id": 23,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "应届生求职网BBS“华为2025校招”版块，抓取所有面经帖子的标题、内容摘要、回复数，汇集成面试题库。",
+  "kind": "exception"
+ },
+ {
+  "id": 14,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "自如北京“整租·一居室”房源，每日抓取房间面积、价格、楼层、距离最近地铁站步行分钟数，分析性价比区间。",
+  "kind": "exception"
+ },
+ {
+  "id": 18,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "杭州市住房保障和房产管理局官网“商品房预售证公示”，每日抓取新发预售证的项目名称、开发商、楼栋号、发证日期，用于购房情报。 **招聘与职场**",
+  "kind": "exception"
+ },
+ {
+  "id": 20,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "拉勾网“广州·产品经理”职位列表，每日抓取前100条，记录公司规模、行业、岗位职责前三条、要求掌握的软件，绘制人才画像。",
+  "kind": "exception"
+ },
+ {
+  "id": 17,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "贝壳“必看好房”标签房源，抓取北京所有带该标签的房源信息、好房上榜理由，分析好房共性特征。",
+  "kind": "exception"
+ },
+ {
+  "id": 22,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "智联招聘“校园招聘”频道，每年9月10日抓取所有宣讲会安排，包括公司、学校、时间、场地，整理成日历表格。",
+  "kind": "exception"
+ },
+ {
+  "id": 24,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "看准网“腾讯”公司主页，抓取员工匿名评分、好评标签、差评标签、典型评价文本，做雇主品牌情感分析。 **社交媒体与内容**",
+  "kind": "exception"
+ },
+ {
+  "id": 21,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "猎聘网“年薪50万以上·市场总监”职位，每三天抓取一次，提取公司名称、行业、职责中的管理幅度描述，为猎头提供线索。",
+  "kind": "exception"
+ },
+ {
+  "id": 25,
+  "ok": false,
+  "error": "NameError: name 'os' is not defined",
+  "secs": 0.0,
+  "desc": "微博热搜榜，每5分钟抓取一次前50条热搜词、热度值、话题主持人，用于突发新闻监控。",
+  "kind": "exception"
  }
 ]
