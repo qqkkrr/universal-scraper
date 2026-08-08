@@ -19,7 +19,9 @@ try {
 const fs = require("node:fs");
 // (fs unused)
 
-const EXE = "/Users/kairanqin/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell";
+const os = require("node:os");
+const HOME = process.env.HOME || os.homedir() || "/tmp";
+const EXE = process.env.PW_EXECUTABLE || `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 const HISTORY_URL = "https://www.ggzy.gov.cn/history/dealList.html";
 const API_PATH = "/his/information/pubTradingInfo/getTradList";
 

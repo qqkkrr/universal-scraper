@@ -651,8 +651,7 @@ import os as _os_environ  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 import os as _os_mod  # noqa: E402
-_NODE_BIN = _os_mod.environ.get("UNIVERSAL_SCRAPER_NODE",
-                                "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
-_NODE_PATH = _os_mod.environ.get("UNIVERSAL_SCRAPER_NODE_PATH",
-                                 "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules")
+from ..runtime import resolve_node, resolve_node_path as _resolve_node_path
+_NODE_BIN = _os_mod.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
+_NODE_PATH = _os_mod.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", _resolve_node_path())
 
