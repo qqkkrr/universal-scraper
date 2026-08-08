@@ -321,9 +321,22 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "请先描述任务"})
                     return
                 config = body.get("config")
-                name = body.get("name", "")
-                task_dir = body.get("task_dir", "")
+                name = str(body.get("name", "") or "").strip()
+                task_dir = str(body.get("task_dir", "") or "").strip()
                 if config and name and task_dir:
+                    # 安全：task_dir 只允许 tasks/ 下（防路径穿越写任意文件，分享模式=远程RCE风险）
+                    import re as _re
+                    if not _re.fullmatch(r"[A-Za-z0-9_\-]+", name):
+                        self._json({"error": "非法任务名（仅允许字母数字_-）"})
+                        return
+                    _td = Path(task_dir)
+                    if not _td.is_absolute():
+                        _td = ROOT / _td
+                    try:
+                        _td.resolve().relative_to((ROOT / "tasks").resolve())
+                    except Exception:
+                        self._json({"error": "非法任务目录（仅允许 tasks/ 内）"})
+                        return
                     desc = body.get("description", "") or desc
                 job = _new_job("auto", desc[:60], description=desc)
                 limit = body.get("limit") or None

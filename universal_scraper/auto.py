@@ -549,8 +549,12 @@ def _dns_cache_load() -> Dict[str, List[str]]:
 
 
 def _dns_cache_save() -> None:
+    global _DNS_FIX_CACHE
     try:
         _DNS_FIX_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # 上限 500 条，防止长期使用缓存无限膨胀
+        if len(_DNS_FIX_CACHE) > 500:
+            _DNS_FIX_CACHE = dict(list(_DNS_FIX_CACHE.items())[-500:])
         _DNS_FIX_CACHE_FILE.write_text(json.dumps(_DNS_FIX_CACHE, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass
