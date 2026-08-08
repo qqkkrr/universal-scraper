@@ -15,14 +15,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
-NODE = os.environ.get(
-    "UNIVERSAL_SCRAPER_NODE",
-    "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
-)
-NODE_PATH = os.environ.get(
-    "UNIVERSAL_SCRAPER_NODE_PATH",
-    "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules",
-)
+from .runtime import resolve_node, resolve_node_path
+NODE = os.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
+NODE_PATH = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", resolve_node_path())
 BRIDGE = ROOT / "scripts" / "browser_agent.cjs"
 
 

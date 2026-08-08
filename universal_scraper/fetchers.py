@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -19,14 +20,42 @@ from .antibot import solve_captcha_file, detect_block
 from .session import SessionPool
 from .selectors import jpath, css_text, xpath_text
 
-NODE = os.environ.get(
-    "UNIVERSAL_SCRAPER_NODE",
-    "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
-)
-NODE_PATH = os.environ.get(
-    "UNIVERSAL_SCRAPER_NODE_PATH",
-    "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules",
-)
+from .runtime import resolve_node, resolve_node_path
+NODE = os.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
+NODE_PATH = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", resolve_node_path())
+
+
+def _spawn_bridge(cmd: List[str], env: Optional[Dict[str, str]] = None):
+    """启动浏览器桥子进程 + 后台排空 stderr（防止管道写满死锁）。"""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8",
+                            env=env if env is not None else dict(os.environ))
+    errbuf: List[str] = []
+    if proc.stderr:
+        def _drain():
+            try:
+                for ln in proc.stderr:
+                    errbuf.append(ln)
+            except Exception:
+                pass
+        threading.Thread(target=_drain, daemon=True).start()
+    return proc, errbuf
+
+
+def _wait_bridge(proc: subprocess.Popen, errbuf: List[str], timeout: int = 1800):
+    """等待桥退出；超时强杀（防僵尸）。返回 (rc, stderr_text)。"""
+    try:
+        rc = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        try:
+            rc = proc.wait(timeout=10)
+        except Exception:
+            rc = -9
+    return rc, "".join(errbuf)
 
 
 def _resolve_template(value: Any, vars: Dict[str, str]) -> Any:
@@ -310,8 +339,7 @@ class BrowserScriptFetcher(BaseFetcher):
                 cmd += [f"--{k}", str(v)]
         env = dict(os.environ)
         env["NODE_PATH"] = NODE_PATH
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, encoding="utf-8", env=env)
+        proc, errbuf = _spawn_bridge(cmd, env)
         assert proc.stdout is not None
         for line in proc.stdout:
             line = line.strip()
@@ -332,8 +360,7 @@ class BrowserScriptFetcher(BaseFetcher):
                 if res.get("error"):
                     log(f"  验证码求解失败({res.get('strategy')}): {res.get('error')}", "WARN")
             yield obj
-        rc = proc.wait(timeout=1800)
-        err = proc.stderr.read() if proc.stderr else ""
+        rc, err = _wait_bridge(proc, errbuf)
         if rc != 0 and not err:
             die(f"浏览器桥退出码 {rc}")
 
@@ -399,8 +426,7 @@ class BrowserFetcher(BaseFetcher):
                 cmd += ["--proxy", pp.next() or ""]
             elif self.anti.get("proxy"):
                 cmd += ["--proxy", self.anti["proxy"]]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, encoding="utf-8", env=env)
+            proc, errbuf = _spawn_bridge(cmd, env)
             assert proc.stdout is not None
             records: List[Dict[str, Any]] = []
             for line in proc.stdout:
@@ -429,8 +455,7 @@ class BrowserFetcher(BaseFetcher):
                     log(f"[登录成功] 会话已保存: {obj.get('storageState')}", "WARN")
                 elif t == "error":
                     proc.terminate(); die(f"浏览器错误: {obj.get('message')}")
-            rc = proc.wait(timeout=1800)
-            err = proc.stderr.read() if proc.stderr else ""
+            rc, err = _wait_bridge(proc, errbuf)
             if rc != 0:
                 die(f"浏览器桥退出码 {rc}: {err[-400:]}")
             # 记录来源 = 网络捕获（SPA 签名接口，如小红书评论）

@@ -482,7 +482,11 @@ def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
         print(f"❌ 启动失败: {e}", flush=True)
         print("   可能端口被占用。换端口：python3 -m universal_scraper.cli webui --port 8643", flush=True)
         return 1
-    url = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
+    if host == "0.0.0.0":
+        _lan = _lan_urls(port)
+        url = _lan[0] if _lan else f"http://127.0.0.1:{port}"
+    else:
+        url = f"http://{host}:{port}"
     print(f"✅ 服务已启动: {url}", flush=True)
     print("   按 Ctrl+C 停止", flush=True)
     if auto_open and host == "127.0.0.1":

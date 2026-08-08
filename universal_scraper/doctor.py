@@ -12,10 +12,9 @@ from pathlib import Path
 from typing import Dict, List
 
 ROOT = Path(__file__).resolve().parent.parent
-NODE = os.environ.get("UNIVERSAL_SCRAPER_NODE",
-                      "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
-NODE_PATH = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH",
-                           "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules")
+from .runtime import resolve_node, resolve_node_path
+NODE = os.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
+NODE_PATH = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", resolve_node_path())
 
 REQUIRED_PY = ["lxml", "curl_cffi", "charset_normalizer", "openpyxl"]
 OPTIONAL_PY = ["pandas", "requests", "ddddocr", "cv2"]

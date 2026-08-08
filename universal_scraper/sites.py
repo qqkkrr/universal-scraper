@@ -629,7 +629,9 @@ def parse_ajcass(html: str, url: str = "") -> List[Dict[str, Any]]:
         for m in re.finditer(r"<div[^>]*neirong[^>]*>(.*?)</div>", html, re.S | re.I):
             blocks.append(m.group(1))
     for b in blocks:
-        b_html = b if isinstance(b, str) else (_lh.tostring(b, encoding="unicode") if _lh else str(b))
+        if not isinstance(b, str) and _lh is None:
+            continue  # 无 lxml 时只处理字符串块
+        b_html = b if isinstance(b, str) else _lh.tostring(b, encoding="unicode")
         title = _ajcass_block(b_html, "title")
         link = _ajcass_block(b_html, "link")
         if not title and not link:
@@ -675,10 +677,9 @@ def browser_fetch(url, cookie="", proxy=None):
     import subprocess, tempfile, os
     from pathlib import Path as _P
     root = _P(__file__).resolve().parent.parent
-    node = os.environ.get("UNIVERSAL_SCRAPER_NODE",
-                          "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
-    npath = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH",
-                           "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules")
+    from .runtime import resolve_node, resolve_node_path
+    node = os.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
+    npath = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", resolve_node_path())
     spec = {"url": url, "wait": {"selector": "body", "timeout": 12000},
             "scrollCount": 1, "scrollWait": 1000}
     with tempfile.TemporaryDirectory() as tmp:

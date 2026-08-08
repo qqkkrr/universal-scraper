@@ -393,14 +393,14 @@ class HttpClient:
 
         result: Optional[Dict[str, Any]] = None
         last_err = ""
-        _old_dt = socket.getdefaulttimeout()
-        socket.setdefaulttimeout(self.timeout)  # 兜底：TLS 握手也受超时约束
+        # 注意：不要用 socket.setdefaulttimeout 改进程级全局超时——多线程 worker
+        # 会互相覆盖（竞态）。urllib opener.open(timeout=...) 已覆盖连接/TLS/读取。
         try:
             result = self._request_once(url, body_bytes, method, headers, use_cache,
                                         allow_html_404=allow_html_404, proxy=proxy,
                                         max_size=max_size)
         finally:
-            socket.setdefaulttimeout(_old_dt)
+            pass
         return result
 
     def _request_once(self, url, body_bytes, method, headers, use_cache,
