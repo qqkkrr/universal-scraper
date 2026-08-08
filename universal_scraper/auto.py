@@ -1143,6 +1143,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                 total = _dr["total"]
                 real = sample
                 log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
+            elif _dr.get("error"):
+                log(f"⚠️ 精配解析[{_site}]失败：{_dr['error']}")
     except Exception as _e:
         log(f"⚠️ 精配解析未启用：{_e}")
 
@@ -1337,6 +1339,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                 total = _dr["total"]
                 real = sample
                 log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
+            elif _dr.get("error"):
+                log(f"⚠️ 精配解析[{_site}]失败：{_dr['error']}")
     except Exception as _e:
         log(f"⚠️ 精配解析未启用：{_e}")
 
