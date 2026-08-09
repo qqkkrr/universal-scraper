@@ -251,13 +251,13 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     st2 = cfg["storage"].get("type", "jsonl")
     if st2 not in ("jsonl", "csv", "sqlite", "multi"):
         cfg["storage"]["type"] = "jsonl"
-    # 规则规范化：match 只支持 regex/contains/startswith
+    # 规则规范化：match 只支持 regex/contains/startswith；parser 必须已声明
     for r in cfg["rules"]:
         if r.get("match") not in ("regex", "contains", "startswith"):
             r["match"] = "contains"
         if not r.get("pattern"):
             r["pattern"] = "/"
-        if not r.get("parser"):
+        if not r.get("parser") or r.get("parser") not in cfg.get("parsers", {}):
             r["parser"] = "default"
     # 分页/列表 allow 自动锚定：非锚定的 page 类正则改为 ^/...$（按路径匹配），
     # 避免 /page/\\d+/ 把 /tag/xxx/page/1/ 这类同构 URL 全部入队导致队列爆炸
@@ -325,6 +325,11 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             if not isinstance(_a, dict):
                 continue
             _t = str(_a.get("type") or _a.get("action") or "").lower()
+            # AI 常写 jQuery 的 :contains("x")，Playwright 不认 → 转 :has-text("x")
+            for _sk in ("selector", "xpath"):
+                _sv = _a.get(_sk)
+                if isinstance(_sv, str):
+                    _a[_sk] = re.sub(r':contains\(\s*["\']([^"\']+)["\']\s*\)', r':has-text("\1")', _sv)
             if _t not in _valid_actions:
                 continue
             if _t in ("wait", "wait_time") and not _a.get("ms") and not _a.get("milliseconds"):
@@ -333,6 +338,12 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
                 continue
             _kept.append(_a)
         cfg.setdefault("source", {})["actions"] = _kept
+
+    # 解析器类型校验：AI 可能输出 pdf/screenshot 等引擎不认识的类型 → 降级 html（保留 fields）
+    _PARSER_OK = {"html", "json", "llm", "article", "table", "json_paged"}
+    for _pname, _pcfg in (cfg.get("parsers") or {}).items():
+        if isinstance(_pcfg, dict) and (_pcfg.get("type") or "html") not in _PARSER_OK:
+            _pcfg["type"] = "html"
 
     # 管道类型校验：AI 可能输出不存在的流水线类型（如 chart/analysis）→ 直接丢弃该步，
     # 否则 validate_task 会 ConfigError 卡死整单
@@ -344,6 +355,17 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     if _det0.get("filters"):
         _det0["filters"] = [pl for pl in _det0["filters"]
                             if isinstance(pl, dict) and pl.get("type") in _PIPE_OK]
+
+    # detail.url_transform.prefix 规范化：纯域名前缀自动补结尾 /（否则相对链接
+    # 会被拼成 https://hostforum-xxx.html 坏地址）
+    _det1 = cfg.get("detail") or {}
+    for _tr in (_det1.get("url_transform") or []):
+        if isinstance(_tr, dict) and _tr.get("prefix"):
+            _p = str(_tr["prefix"])
+            if _p and not _p.endswith(("/", "=", "&", "?")):
+                _after = _p.split("://", 1)[-1] if "://" in _p else _p
+                if "/" not in _after:
+                    _tr["prefix"] = _p + "/"
 
     # 管道过滤字段校验：AI 常把过滤字段写成解析器里不存在的名字（如 published/时间），
     # 不存在的字段过滤会把整单滤成 0 条——直接丢弃这类过滤（ts 是 detail 合并后的日期字段，保留）

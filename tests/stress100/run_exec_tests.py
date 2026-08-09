@@ -7,7 +7,7 @@
     --headless  强制浏览器无头（批量测试不弹窗）
 输出: tests/stress100/results_exec.json (增量)
 """
-import argparse, json, os, sys, threading, time
+import argparse, hashlib, json, os, sys, threading, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -15,11 +15,12 @@ sys.path.insert(0, str(ROOT))
 from universal_scraper.auto import auto_task
 
 BASE = Path(__file__).resolve().parent
-RESULT_FILE = BASE / "results_exec.json"
+RESULT_FILE = Path(os.environ.get("US_RESULT_FILE", str(BASE / "results_exec.json")))
+_TASKS_PATH = os.environ.get("US_TASKS_FILE", str(BASE / "tasks.json"))
 
 
 def load_tasks(path=None):
-    p = Path(path) if path else (BASE / "tasks.json")
+    p = Path(path) if path else Path(_TASKS_PATH)
     return {t["id"]: t["desc"] for t in json.load(open(p, encoding="utf-8"))}
 
 
@@ -84,6 +85,7 @@ def main():
     ap.add_argument("--reuse", action="store_true")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--force", action="store_true", help="覆盖已有结果重跑")
+    ap.add_argument("--ready-only", action="store_true", help="只跑已落盘配置的任务（跳过的算 pending）")
     args = ap.parse_args()
     if args.reuse:
         os.environ["US_REUSE_CONFIG"] = "1"
@@ -100,8 +102,16 @@ def main():
     results = json.load(open(RESULT_FILE, encoding="utf-8")) if RESULT_FILE.exists() else []
     done = {r["id"] for r in results} if not args.force else set()
     todo = [i for i in ids if i not in done and i in TASKS]
+    if args.ready_only:
+        _ready = []
+        for i in todo:
+            _h = hashlib.md5(TASKS[i].encode()).hexdigest()[:10]
+            if (ROOT / "tasks" / f"auto_{_h}" / "config.json").exists():
+                _ready.append(i)
+        print(f"  配置未落盘跳过（pending）: {len(todo) - len(_ready)} 个: {[i for i in todo if i not in _ready][:20]}")
+        todo = _ready
     print(f"执行测试 {len(todo)} 个任务（limit={args.limit}, timeout={args.timeout}s, "
-          f"workers={args.workers}, reuse={bool(args.reuse)}, headless={bool(args.headless)}）")
+          f"workers={args.workers}, reuse={bool(args.reuse)}, headless={bool(args.headless)}, ready_only={bool(args.ready_only)}）")
 
     def worker(ts):
         for tid in ts:
