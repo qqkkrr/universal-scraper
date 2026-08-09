@@ -1,0 +1,1156 @@
+执行测试 79 个任务（limit=3, timeout=90s, workers=3, reuse=True, headless=True, ready_only=False）
+[12:25:05] [INFO] 任务启动: auto_58c445c40e | 队列 1 | 规则 1
+[12:25:05] [INFO] 任务启动: auto_0b702109ce | 队列 1 | 规则 1
+[12:25:05] [INFO] 任务启动: auto_501236fef5 | 队列 1 | 规则 1
+[12:25:09] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:25:09] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:25:10] [WARN]   curl_cffi 请求失败 403，2.8s 后重试
+[12:25:13] [WARN]   curl_cffi 请求失败 403，4.4s 后重试
+[12:25:18] [INFO] 延迟重试 1/2: http://www.bookschina.com/tejia/（2s 后）
+[12:25:18] [WARN] 请求失败 http://www.bookschina.com/tejia/: RateLimitedError: 限流 403: http://www.bookschina.com/tejia/ (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[12:25:21] [WARN]   curl_cffi 请求失败 403，2.8s 后重试
+[12:25:24] [WARN]   curl_cffi 请求失败 403，4.2s 后重试
+[12:25:28] [INFO] 延迟重试 2/2: http://www.bookschina.com/tejia/（4s 后）
+[12:25:28] [WARN] 请求失败 http://www.bookschina.com/tejia/: RateLimitedError: 限流 403: http://www.bookschina.com/tejia/ (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[12:25:33] [WARN]   curl_cffi 请求失败 403，2.0s 后重试
+[12:25:35] [WARN]   curl_cffi 请求失败 403，4.3s 后重试
+[12:25:40] [WARN] 放弃重试 http://www.bookschina.com/tejia/（已达 2 次）
+[12:25:40] [WARN] 请求失败 http://www.bookschina.com/tejia/: RateLimitedError: 限流 403: http://www.bookschina.com/tejia/ (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[12:25:40] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[12:25:40] [INFO] 反爬拦截统计: 403×3
+[12:25:45] [INFO] 任务启动: auto_501236fef5 | 队列 1 | 规则 1
+[12:25:48] [INFO] 任务启动: auto_0b702109ce | 队列 1 | 规则 1
+[12:27:09] [INFO] 任务启动: auto_58c445c40e | 队列 1 | 规则 1
+[12:27:18] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:27:19] [WARN] 任务停止信号已生效，本轮请求中断
+[12:27:19] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 #112 blocked_login total=0 142.6s | 中国图书网“特价书”满减区，每天抓取活动图书清单、原价、特价、剩余库存百分比，为书虫找便 | err:运行超时（>90s）
+[12:27:25] [INFO] 任务启动: auto_f69ff6940d | 队列 1 | 规则 1
+[12:27:32] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:27:32] [WARN] ⚠️ 管道过滤把 50 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 3 条）。如需精确过滤请改配置或加 detail 过滤
+[12:27:35] [INFO] 导出: json=auto_501236fef5.json, csv=auto_501236fef5.csv, xlsx=auto_501236fef5.xlsx
+[12:27:35] [INFO] 完成: 抓取 1 | 条目 3 | 错误 0
+❌ #110 error         total=0 161.4s | 孔夫子旧书网搜索“签名本”，按价格排序抓取前80条商品，包含书名、品相、签名者、售价、卖 | err:运行超时（>90s）
+[12:27:39] [INFO] 任务启动: auto_a86111ceca | 队列 1 | 规则 2
+[12:27:40] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:27:48] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20000 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:28:10] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20005 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:28:21] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #113 empty         total=0 207.0s | 义乌购“圣诞用品”类目下按销量排名前100商品，每月抓取一次名称、价格、起批量、供货商， | err:
+[12:28:25] [INFO] 任务启动: auto_bb4d9ed13b | 队列 1 | 规则 1
+[12:28:25] [WARN]   curl_cffi 请求失败 503，2.9s 后重试
+[12:28:28] [WARN]   curl_cffi 请求失败 503，4.3s 后重试
+[12:28:33] [WARN]   curl_cffi 请求失败 503，8.7s 后重试
+[12:28:41] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:28:41] [INFO] 延迟重试 1/3: https://www.tuliu.com/gongye/（2s 后）
+[12:28:41] [WARN] 请求失败 https://www.tuliu.com/gongye/: RateLimitedError: 限流 503: https://www.tuliu.com/gongye/ (retry_after=0.0s) | 反爬拦截[503] HTTP 503
+[12:28:44] [WARN]   curl_cffi 请求失败 503，2.4s 后重试
+[12:28:47] [WARN]   curl_cffi 请求失败 503，4.8s 后重试
+[12:28:49] [INFO] 延迟重试 1/3: https://search.rakuten.co.jp/search/mall/%E3%81%8A%E8%8F%93%E5%AD%90/?s=2&sort=ranking&p=1（2s 后）
+[12:28:49] [WARN] 请求失败 https://search.rakuten.co.jp/search/mall/%E3%81%8A%E8%8F%93%E5%AD%90/?s=2&sort=ranking&p=1: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcu
+[12:28:52] [WARN]   curl_cffi 请求失败 503，8.8s 后重试
+[12:28:55] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:29:00] [INFO] 延迟重试 2/3: https://www.tuliu.com/gongye/（4s 后）
+[12:29:01] [WARN] 请求失败 https://www.tuliu.com/gongye/: RateLimitedError: 限流 503: https://www.tuliu.com/gongye/ (retry_after=0.0s) | 反爬拦截[503] HTTP 503
+[12:29:06] [WARN]   curl_cffi 请求失败 503，2.5s 后重试
+[12:29:08] [WARN]   curl_cffi 请求失败 503，4.6s 后重试
+[12:29:11] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20008 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:29:13] [WARN]   curl_cffi 请求失败 503，8.4s 后重试
+[12:29:22] [INFO] 延迟重试 3/3: https://www.tuliu.com/gongye/（8s 后）
+[12:29:22] [WARN] 请求失败 https://www.tuliu.com/gongye/: RateLimitedError: 限流 503: https://www.tuliu.com/gongye/ (retry_after=0.0s) | 反爬拦截[503] HTTP 503
+[12:29:32] [WARN]   curl_cffi 请求失败 503，2.9s 后重试
+[12:29:33] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:29:35] [WARN]   curl_cffi 请求失败 503，4.1s 后重试
+[12:29:39] [WARN]   curl_cffi 请求失败 503，9.0s 后重试
+❌ #139 error         total=0 138.1s | 日本乐天市场“Rakuten Ichiba”零食类目排行，每日抓取Top20商品标题、价 | err:运行超时（>90s）
+[12:29:42] [INFO] 任务启动: auto_c539c745c8 | 队列 1 | 规则 1
+[12:29:44] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:29:48] [WARN] 放弃重试 https://www.tuliu.com/gongye/（已达 3 次）
+[12:29:48] [WARN] 请求失败 https://www.tuliu.com/gongye/: RateLimitedError: 限流 503: https://www.tuliu.com/gongye/ (retry_after=0.0s) | 反爬拦截[503] HTTP 503
+[12:29:48] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[12:29:48] [INFO] 反爬拦截统计: 503×4
+[12:29:57] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20006 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+⚠️ #163 empty         total=0 100.8s | 土流网“工业用地转让”，每日抓取长三角地区出让地块的面积、年限、价格、产业要求，为建厂选 | err:[12:30:05] [INFO] 延迟重试 2/3: https://search.rakuten.co.jp/search/mall/%E3%81%8A%E8%8F%93%E5%AD%90/?s=2&sort=ranking&p=1（4s 后）
+
+[12:30:05] [WARN] 请求失败 https://search.rakuten.co.jp/search/mall/%E3%81%8A%E8%8F%93%E5%AD%90/?s=2&sort=ranking&p=1: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20006 milliseconds. See https://curl.se/libcurl/c/libcu
+[12:30:05] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+[12:30:06] [INFO] 任务启动: auto_15502454e9 | 队列 1 | 规则 1
+[12:30:07] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:30:30] [INFO] 任务启动: auto_a86111ceca | 队列 1 | 规则 2
+python3(48045) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:31:29] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #161 empty         total=0 231.6s | 乐居“上海·新盘”动态，每日抓取新取得预售证楼盘的备案名、套数、备案均价、认筹时间，做打 | err:
+[12:31:31] [INFO] 任务启动: auto_d0bda48cdf | 队列 2 | 规则 3
+[12:31:32] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+[12:33:04] [INFO] 任务启动: auto_c539c745c8 | 队列 1 | 规则 1
+python3(48245) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:33:31] [INFO] 任务启动: auto_15502454e9 | 队列 1 | 规则 1
+python3(48264) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:33:59] [INFO] 任务启动: auto_d0bda48cdf | 队列 4 | 规则 1
+python3(48306) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+python3(48310) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:34:31] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:34:34] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+⚠️ #184 empty         total=0 276.8s | 应届生求职网“宣讲会”模块，按城市“西安”过滤，9月每日抓取所有高校宣讲会安排，制作宣讲 | err:
+[12:34:43] [INFO] 任务启动: auto_155d6b0cfb | 队列 1 | 规则 2
+[12:34:44] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:34:53] [INFO] 延迟重试 1/3: https://www.szhome.com/ershoufang/chengjiao/（2s 后）
+[12:34:53] [WARN] 请求失败 https://www.szhome.com/ershoufang/chengjiao/: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+python3(48366) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+🔒 #172 blocked_login total=0 340.5s | 安居客“经纪人”信息，抓取某区域活跃经纪人的服务年限、评分、成交量标签，辅助购房者选择。 | err:运行超时（>90s）
+[12:35:22] [INFO] 任务启动: auto_30d3adeda2 | 队列 1 | 规则 1
+[12:35:24] [WARN] 任务停止信号已生效，本轮请求中断
+[12:35:24] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:35:25] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:35:36] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:35:40] [INFO] 延迟重试 1/2: https://www.haitou.cc/qiuzhao/（2s 后）
+[12:35:41] [WARN] 请求失败 https://www.haitou.cc/qiuzhao/: RuntimeError: HTTP 0: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html
+[12:35:50] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:35:57] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:36:01] [INFO] 延迟重试 2/2: https://www.haitou.cc/qiuzhao/（4s 后）
+[12:36:01] [WARN] 请求失败 https://www.haitou.cc/qiuzhao/: RuntimeError: HTTP 0: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html
+❌ #174 error         total=0 274.9s | 深圳房地产信息网“二手房成交数据”每月公布页面，抓取各片区成交套数、参考均价，与挂牌价对 | err:运行超时（>90s）
+[12:36:06] [INFO] 任务启动: auto_2f194bdb76 | 队列 1 | 规则 1
+[12:36:07] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:36:12] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:36:14] [WARN] 任务停止信号已生效，本轮请求中断
+[12:36:14] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:36:22] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:36:31] [WARN] 放弃重试 https://www.haitou.cc/qiuzhao/（已达 2 次）
+[12:36:31] [WARN] 请求失败 https://www.haitou.cc/qiuzhao/: RuntimeError: HTTP 0: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html
+[12:36:31] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[12:36:53] [INFO] 任务启动: auto_155d6b0cfb | 队列 1 | 规则 2
+python3(48524) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:37:34] [INFO] 任务启动: auto_2f194bdb76 | 队列 1 | 规则 1
+python3(48604) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+⚠️ #185 empty         total=0 144.4s | 海投网“秋招”公司列表，抓取所有开启秋招的公司名称、网申截止日期、招聘岗位数，做进度看板 | err:
+[12:37:48] [INFO] 任务启动: auto_65e2d99ceb | 队列 1 | 规则 1
+[12:37:49] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:38:23] [INFO] 延迟重试 1/3: https://www.szhome.com/news/（2s 后）
+[12:38:24] [WARN] 请求失败 https://www.szhome.com/news/: RuntimeError: browserType.launchPersistentContext: Timeout 180000ms exceeded.
+Call log:
+[2m  - <launching> /Applications/Google Chrom
+[12:38:24] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:38:24] [INFO] 完成: 抓取 3 | 条目 0 | 错误 2
+[12:38:45] [WARN] 任务停止信号已生效，本轮请求中断
+[12:38:45] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 #207 blocked_login total=0 254.6s | 豆瓣“豆列”搜索“2025年度读书清单”，抓取豆列中的图书书名、豆瓣评分、推荐语，生成阅 | err:运行超时（>90s）
+[12:38:59] [INFO] 任务启动: auto_0d15e19488 | 队列 2 | 规则 1
+[12:39:00] [WARN]   curl_cffi 请求失败 500，2.1s 后重试
+[12:39:00] [WARN]   curl_cffi 请求失败 500，2.6s 后重试
+[12:39:03] [WARN]   curl_cffi 请求失败 500，4.2s 后重试
+[12:39:04] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:39:05] [WARN]   curl_cffi 请求失败 500，4.9s 后重试
+[12:39:08] [INFO] 延迟重试 1/2: https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=szse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true（2s 后）
+[12:39:08] [WARN] 请求失败 https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=szse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true: RuntimeError: HTTP 500: HTTP 500
+[12:39:09] [INFO] 延迟重试 1/2: https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=sse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true（2s 后）
+[12:39:09] [WARN] 请求失败 https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=sse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true: RuntimeError: HTTP 500: HTTP 500
+[12:39:10] [WARN]   curl_cffi 请求失败 500，2.6s 后重试
+[12:39:13] [WARN]   curl_cffi 请求失败 500，2.0s 后重试
+[12:39:14] [WARN]   curl_cffi 请求失败 500，4.5s 后重试
+[12:39:16] [WARN]   curl_cffi 请求失败 500，4.1s 后重试
+[12:39:19] [INFO] 延迟重试 2/2: https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=szse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true（4s 后）
+[12:39:19] [WARN] 请求失败 https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=szse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true: RuntimeError: HTTP 500: HTTP 500
+[12:39:20] [INFO] 延迟重试 2/2: https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=sse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true（4s 后）
+[12:39:20] [WARN] 请求失败 https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=sse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true: RuntimeError: HTTP 500: HTTP 500
+[12:39:23] [WARN]   curl_cffi 请求失败 500，2.2s 后重试
+[12:39:27] [WARN]   curl_cffi 请求失败 500，2.1s 后重试
+[12:39:27] [WARN]   curl_cffi 请求失败 500，4.5s 后重试
+[12:39:30] [WARN]   curl_cffi 请求失败 500，4.1s 后重试
+[12:39:32] [WARN] 放弃重试 https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=szse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true（已达 2 次）
+[12:39:32] [WARN] 请求失败 https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=szse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true: RuntimeError: HTTP 500: HTTP 500
+[12:39:34] [WARN] 放弃重试 https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=sse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true（已达 2 次）
+[12:39:34] [WARN] 请求失败 https://www.cninfo.com.cn/new/hisAnnouncement/query?pageNum=1&pageSize=30&tabName=fulltext&column=sse&plate=&stock=&searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true: RuntimeError: HTTP 500: HTTP 500
+[12:39:34] [INFO] 完成: 抓取 6 | 条目 0 | 错误 6
+❌ #199 error         total=0 209.7s | 电鸭社区“远程工作”板块，每日抓取新发布的远程项目名称、预算、技能要求、联系方式，服务自 | err:运行超时（>90s）
+[12:39:37] [INFO] 任务启动: auto_bdfd8f5aa5 | 队列 1 | 规则 1
+[12:39:59] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:40:23] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:40:28] [INFO] 延迟重试 1/2: https://www.pedaily.cn/express/（2s 后）
+[12:40:28] [WARN] 请求失败 https://www.pedaily.cn/express/: RuntimeError: HTTP 0: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See htt
+[12:40:28] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[12:40:40] [INFO] 任务启动: auto_65e2d99ceb | 队列 4 | 规则 1
+python3(48812) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+python3(48923) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:42:45] [WARN] 任务停止信号已生效，本轮请求中断
+[12:42:48] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:42:48] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+[12:42:53] [INFO] 任务启动: auto_0d15e19488 | 队列 2 | 规则 2
+python3(48990) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:43:12] [INFO] 任务启动: auto_bdfd8f5aa5 | 队列 1 | 规则 1
+python3(49023) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:43:55] [INFO] 延迟重试 1/2: https://www.pedaily.cn/express/（2s 后）
+[12:43:55] [WARN] 请求失败 https://www.pedaily.cn/express/: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[12:43:59] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+⚠️ #260 empty         total=0 265.9s | 清科“投资界”快讯，每小时抓取最新发布的投融资快讯标题，汇总实时资本动态。 | err:
+[12:44:02] [INFO] 任务启动: auto_b41ac3799c | 队列 1 | 规则 2
+[12:44:02] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+✅ #244 ok            total=14 377.7s | 堆糖网“壁纸”分类，每日抓取热门壁纸的图片链接、采集数、标签，作为设计灵感素材库。 | err:运行超时（>90s）
+[12:44:04] [INFO] 任务启动: auto_427a0b95cb | 队列 1 | 规则 1
+[12:44:07] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+python3(49077) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:45:28] [WARN] 任务停止信号已生效，本轮请求中断
+[12:45:28] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:45:28] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+✅ #254 ok            total=10 399.1s | 巨潮资讯网“基金公告”栏目，每周抓取所有ETF的申赎清单文件（PCF），分析份额变化。 | err:运行超时（>90s）
+[12:45:37] [INFO] 任务启动: auto_b917db0080 | 队列 1 | 规则 1
+[12:45:39] [WARN] 跳过（412 永久失败）: https://www.czce.com.cn/cn/DFSStaticFiles/Future/2026/20260807/FutureDataWhsheet.htm
+[12:45:39] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0 | 跳过 1
+[12:45:46] [INFO] 任务启动: auto_b41ac3799c | 队列 1 | 规则 1
+python3(49215) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:46:16] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #268 empty         total=0 135.5s | 中国人民银行“货币统计”社会融资规模存量，每月抓取表格数据，制作社融趋势图。 | err:
+[12:46:18] [INFO] 任务启动: auto_694863c08b | 队列 1 | 规则 1
+[12:46:19] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:46:21] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:46:25] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:46:33] [INFO] 延迟重试 1/3: https://www.jintou.com/yinhang/（2s 后）
+[12:46:33] [WARN] 请求失败 https://www.jintou.com/yinhang/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.c
+[12:46:36] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:46:38] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:46:45] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:46:53] [INFO] 延迟重试 2/3: https://www.jintou.com/yinhang/（4s 后）
+[12:46:53] [WARN] 请求失败 https://www.jintou.com/yinhang/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.c
+[12:46:58] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:47:00] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:47:04] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:47:12] [INFO] 延迟重试 3/3: https://www.jintou.com/yinhang/（8s 后）
+[12:47:13] [WARN] 请求失败 https://www.jintou.com/yinhang/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.c
+[12:47:21] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:47:24] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:47:25] [INFO] 任务启动: auto_427a0b95cb | 队列 1 | 规则 1
+python3(49350) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:47:28] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:47:36] [WARN] 放弃重试 https://www.jintou.com/yinhang/（已达 3 次）
+[12:47:36] [WARN] 请求失败 https://www.jintou.com/yinhang/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.jintou.c
+[12:47:37] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[12:47:56] [INFO] 详情：共 30 条，待抓 30（并发 2，字段缺失自动补全）
+python3(49405) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+python3(49406) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:47:59] [INFO] 任务启动: auto_b917db0080 | 队列 1 | 规则 1
+python3(49409) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:48:29] [INFO] 延迟重试 1/3: https://www.czce.com.cn/cn/DFSStaticFiles/Future/2026/20260807/FutureDataWhsheet.htm（2s 后）
+Exception in thread Thread-199 (_read_pool):
+Traceback (most recent call last):
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+[12:48:29] [WARN] 请求失败 https://www.czce.com.cn/cn/DFSStaticFiles/Future/2026/20260807/FutureDataWhsheet.htm: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+    self.run()
+  File "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/kairanqin/Documents/Codex/2026-08-03/ni-ha/outputs/universal-scraper/universal_scraper/modules/fetchers.py", line 378, in _read_pool
+    for line in my_pool.stdout:
+                ^^^^^^^^^^^^^^
+  File "<frozen codecs>", line 322, in decode
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa4 in position 0: invalid start byte
+[12:48:33] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+⚠️ #278 empty         total=0 178.3s | 郑州商品交易所“仓单日报”，每日抓取棉花、白糖等品种的仓单数量，研判交割压力。 | err:
+[12:48:35] [INFO] 任务启动: auto_2583864c49 | 队列 1 | 规则 1
+[12:48:55] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:49:17] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+✅ #259 ok            total=2 325.6s | 投中网“融资事件”频道，每日抓取国内一级市场融资项目的公司、轮次、金额、投资方，输出创投 | err:运行超时（>90s）
+[12:49:30] [INFO] 任务启动: auto_bd63fe733a | 队列 1 | 规则 1
+[12:49:30] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:49:33] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:49:38] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:49:42] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20027 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:49:46] [INFO] 延迟重试 1/3: https://www.zhuwang.cc/zhujia/（2s 后）
+[12:49:46] [WARN] 请求失败 https://www.zhuwang.cc/zhujia/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[12:49:46] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[12:49:50] [INFO] 延迟重试 1/3: https://api.coingecko.com/api/v3/search/trending（2s 后）
+[12:49:50] [WARN] 请求失败 https://api.coingecko.com/api/v3/search/trending: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20027 milliseconds. See https://curl.se/libcurl/c/libcu
+[12:49:50] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[12:49:59] [INFO] 任务启动: auto_694863c08b | 队列 1 | 规则 1
+[12:49:59] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #286 empty         total=0 222.5s | 金投网“银行理财产品”频道，每日抓取在售产品名称、发行银行、期限、预期收益上限，比较理财 | err:
+[12:50:00] [INFO] 任务启动: auto_9eba0075b3 | 队列 1 | 规则 1
+[12:50:00] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:51:24] [INFO] 任务启动: auto_bd63fe733a | 队列 2 | 规则 1
+python3(49562) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:51:51] [INFO] 任务启动: auto_9eba0075b3 | 队列 1 | 规则 1
+python3(49609) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:52:01] [INFO] 任务启动: auto_2583864c49 | 队列 1 | 规则 2
+python3(49622) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:52:21] [INFO] 延迟重试 1/3: http://www.zhuwang.cc/zhujia/（2s 后）
+[12:52:21] [WARN] 请求失败 http://www.zhuwang.cc/zhujia/: RuntimeError: page.goto: net::ERR_CONNECTION_RESET at http://www.zhuwang.cc/zhujia/
+Call log:
+[2m  - navigating to "http://www.zhuwan
+python3(49672) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:52:36] [INFO] 延迟重试 1/3: https://www.kaoyan.com/kaoyan/baolubi/（2s 后）
+[12:52:36] [WARN] 请求失败 https://www.kaoyan.com/kaoyan/baolubi/: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[12:52:53] [INFO] 延迟重试 2/3: https://www.kaoyan.com/kaoyan/baolubi/（4s 后）
+[12:52:53] [WARN] 请求失败 https://www.kaoyan.com/kaoyan/baolubi/: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[12:53:22] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+❌ #285 error         total=0 241.3s | 中国养猪网“猪价系统”，每日抓取外三元、内三元、土杂猪的出栏均价，预测CPI食品项。 | err:运行超时（>90s）
+[12:53:36] [INFO] 任务启动: auto_1799456dfe | 队列 1 | 规则 1
+[12:53:37] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:53:50] [WARN] 任务停止信号已生效，本轮请求中断
+[12:53:50] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:53:51] [INFO] 完成: 抓取 2 | 条目 0 | 错误 1
+❌ #338 error         total=0 238.0s | 考研帮“报录比”查询，批量抓取各校各专业的报考人数、录取人数，整理考研难度系数表。 | err:运行超时（>90s）
+[12:53:59] [INFO] 任务启动: auto_4789a9d4ec | 队列 1 | 规则 1
+[12:54:02] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:54:14] [INFO] 延迟重试 1/3: https://www.coingecko.com/en/trending（2s 后）
+[12:54:14] [WARN] 请求失败 https://www.coingecko.com/en/trending: RuntimeError: page.goto: net::ERR_CONNECTION_TIMED_OUT at https://www.coingecko.com/en/trending
+Call log:
+[2m  - navigating to "https
+[12:54:15] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:54:15] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[12:54:17] [INFO] 任务启动: auto_1799456dfe | 队列 1 | 规则 1
+🔒 #297 blocked_login total=0 342.7s | CoinGecko“Trending”代币，每半小时抓取热门搜索币种，发现短时热点。 | err:运行超时（>90s）
+python3(49811) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:54:21] [INFO] 任务启动: auto_36afd0243a | 队列 1 | 规则 2
+[12:54:38] [INFO] 进度: 抓取 25 | 条目 0 | 队列 240
+[12:54:59] [INFO] 进度: 抓取 50 | 条目 0 | 队列 215
+[12:55:14] [INFO] 进度: 抓取 75 | 条目 0 | 队列 190
+[12:55:34] [INFO] 进度: 抓取 100 | 条目 0 | 队列 165
+[12:55:45] [WARN] 任务停止信号已生效，本轮请求中断
+[12:55:45] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:55:46] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 #320 blocked_login total=0 134.6s | 途牛“跟团游”北京出发，抓取所有目的地为“西藏”的路线名称、天数、价格、景点数量，做传统 | err:运行超时（>90s）
+[12:55:51] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:55:53] [INFO] 任务启动: auto_d3aa3a9bce | 队列 2 | 规则 2
+[12:55:53] [WARN] ⚠️ 管道过滤把 367 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 3 条）。如需精确过滤请改配置或加 detail 过滤
+[12:55:54] [INFO] 导出: json=auto_36afd0243a.json, csv=auto_36afd0243a.csv, xlsx=auto_36afd0243a.xlsx
+[12:55:54] [INFO] 完成: 抓取 116 | 条目 3 | 错误 0
+[12:55:55] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+❌ #349 error         total=0 96.0s | 全国哲学社会科学工作办公室“项目立项”公示，抓取年度立项课题名称、负责人、单位，分析学术 | err:运行超时（>90s）
+[12:55:56] [INFO] 任务启动: auto_2fe840a96a | 队列 1 | 规则 2
+[12:55:57] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:56:55] [INFO] 任务启动: auto_d3aa3a9bce | 队列 2 | 规则 1
+python3(49986) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+python3(49987) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+⚠️ #364 empty         total=0 209.3s | 快速问医生“有问必答”板块，抓取最新提问的标题、科室、悬赏金额、回答数，分析公众健康焦虑 | err:
+[12:57:27] [INFO] 任务启动: auto_83df06dddf | 队列 1 | 规则 1
+[12:57:28] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:57:30] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:57:36] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:57:38] [INFO] 延迟重试 1/3: https://www.babytree.com/ask/hot/（2s 后）
+[12:57:38] [WARN] 请求失败 https://www.babytree.com/ask/hot/: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+python3(50051) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:57:45] [INFO] 延迟重试 1/3: https://www.epet.com/search?keyword=%E8%BF%9B%E5%8F%A3%E7%8B%97%E7%B2%AE（2s 后）
+[12:57:45] [WARN] 请求失败 https://www.epet.com/search?keyword=%E8%BF%9B%E5%8F%A3%E7%8B%97%E7%B2%AE: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com
+[12:57:45] [INFO] 任务启动: auto_2fe840a96a | 队列 1 | 规则 3
+[12:57:49] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:57:49] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:57:51] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+⚠️ #385 empty         total=0 115.4s | 大象公会“医学”话题文章，抓取所有历史文章标题、摘要、阅读数，科普素材沉淀。 **汽车、 | err:
+[12:57:52] [INFO] 任务启动: auto_3429fe085f | 队列 1 | 规则 1
+[12:57:52] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:57:55] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:58:03] [INFO] 延迟重试 2/3: https://www.epet.com/search?keyword=%E8%BF%9B%E5%8F%A3%E7%8B%97%E7%B2%AE（4s 后）
+[12:58:03] [WARN] 请求失败 https://www.epet.com/search?keyword=%E8%BF%9B%E5%8F%A3%E7%8B%97%E7%B2%AE: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com
+[12:58:09] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:58:17] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:58:23] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:58:31] [WARN] 任务停止信号已生效，本轮请求中断
+[12:58:31] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:58:32] [INFO] 延迟重试 3/3: https://www.epet.com/search?keyword=%E8%BF%9B%E5%8F%A3%E7%8B%97%E7%B2%AE（8s 后）
+[12:58:32] [WARN] 请求失败 https://www.epet.com/search?keyword=%E8%BF%9B%E5%8F%A3%E7%8B%97%E7%B2%AE: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com
+[12:58:41] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:58:43] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:58:48] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[12:58:56] [WARN] 放弃重试 https://www.epet.com/search?keyword=%E8%BF%9B%E5%8F%A3%E7%8B%97%E7%B2%AE（已达 3 次）
+[12:58:56] [WARN] 请求失败 https://www.epet.com/search?keyword=%E8%BF%9B%E5%8F%A3%E7%8B%97%E7%B2%AE: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.epet.com
+[12:58:56] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+❌ #380 error         total=0 188.3s | 宝宝树“育儿问答”热门问题，每日抓取问题标题、回答数、关键词，洞察新手妈妈痛点。 | err:运行超时（>90s）
+[12:59:01] [INFO] 任务启动: auto_8821daa654 | 队列 1 | 规则 14
+[12:59:21] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:59:43] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:59:47] [INFO] 延迟重试 1/2: https://www.rp-pet.com/（2s 后）
+[12:59:47] [WARN] 请求失败 https://www.rp-pet.com/: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:00:11] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20003 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:00:31] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:00:34] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:00:38] [INFO] 延迟重试 2/2: https://www.rp-pet.com/（4s 后）
+[13:00:38] [WARN] 请求失败 https://www.rp-pet.com/: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:00:38] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+[13:00:54] [INFO] 延迟重试 2/3: https://www.babytree.com/ask/hot/（4s 后）
+[13:00:54] [WARN] 请求失败 https://www.babytree.com/ask/hot/: RuntimeError: browserType.launchPersistentContext: Timeout 180000ms exceeded.
+Call log:
+[2m  - <launching> /Applications/Google Chrom
+[13:00:54] [INFO] 完成: 抓取 3 | 条目 0 | 错误 2
+❌ #382 error         total=0 115.7s | 宠物医院“瑞鹏”官网，抓取门店地址、营业时间、医师团队，做宠物医疗资源整理。 | err:运行超时（>90s）
+[13:00:57] [INFO] 任务启动: auto_fa6b4f4aa1 | 队列 1 | 规则 1
+[13:00:57] [WARN]   curl_cffi 请求失败 403，2.8s 后重试
+[13:01:00] [WARN]   curl_cffi 请求失败 403，4.4s 后重试
+[13:01:03] [INFO] 任务启动: auto_83df06dddf | 队列 1 | 规则 2
+python3(50350) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:01:06] [INFO] 延迟重试 1/2: https://www.umetrip.com/mskyweb/airport/flight.do（2s 后）
+[13:01:06] [WARN] 请求失败 https://www.umetrip.com/mskyweb/airport/flight.do: RateLimitedError: 限流 403: https://www.umetrip.com/mskyweb/airport/flight.do (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:01:08] [WARN]   curl_cffi 请求失败 403，2.1s 后重试
+[13:01:10] [WARN]   curl_cffi 请求失败 403，4.0s 后重试
+[13:01:14] [INFO] 延迟重试 2/2: https://www.umetrip.com/mskyweb/airport/flight.do（4s 后）
+[13:01:14] [WARN] 请求失败 https://www.umetrip.com/mskyweb/airport/flight.do: RateLimitedError: 限流 403: https://www.umetrip.com/mskyweb/airport/flight.do (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+⚠️ #388 empty         total=0 206.6s | 卡车之家“载货车”报价，每周抓取各品牌轻卡价格、货箱长度、载重，为物流公司购车参考。 | err:
+[13:01:18] [INFO] 任务启动: auto_a4122c71f6 | 队列 1 | 规则 1
+[13:01:18] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.customs.gov.cn'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:01:19] [WARN]   curl_cffi 请求失败 403，2.9s 后重试
+[13:01:21] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.customs.gov.cn'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:01:22] [WARN]   curl_cffi 请求失败 403，4.4s 后重试
+[13:01:25] [INFO] 延迟重试 1/2: https://www.customs.gov.cn/customs/302249/302274/302275/index.html（2s 后）
+[13:01:25] [WARN] 请求失败 https://www.customs.gov.cn/customs/302249/302274/302275/index.html: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.customs.
+[13:01:27] [WARN] 放弃重试 https://www.umetrip.com/mskyweb/airport/flight.do（已达 2 次）
+[13:01:27] [WARN] 请求失败 https://www.umetrip.com/mskyweb/airport/flight.do: RateLimitedError: 限流 403: https://www.umetrip.com/mskyweb/airport/flight.do (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:01:28] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[13:01:28] [INFO] 反爬拦截统计: 403×3
+[13:01:29] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.customs.gov.cn'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:01:34] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.customs.gov.cn'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:01:39] [INFO] 延迟重试 2/2: https://www.customs.gov.cn/customs/302249/302274/302275/index.html（4s 后）
+[13:01:39] [WARN] 请求失败 https://www.customs.gov.cn/customs/302249/302274/302275/index.html: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.customs.
+[13:01:44] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.customs.gov.cn'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:01:47] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.customs.gov.cn'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:01:52] [WARN] 放弃重试 https://www.customs.gov.cn/customs/302249/302274/302275/index.html（已达 2 次）
+[13:01:52] [WARN] 请求失败 https://www.customs.gov.cn/customs/302249/302274/302275/index.html: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: no alternative certificate subject name matches target hostname 'www.customs.
+[13:01:52] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[13:02:31] [WARN] ⚠️ 管道过滤把 30 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 3 条）。如需精确过滤请改配置或加 detail 过滤
+[13:02:31] [INFO] 详情：交互模式改用浏览器池并发（1），失败页自动回退交互串行
+[13:02:31] [INFO] 详情：共 3 条，待抓 3（并发 1，字段缺失自动补全）
+python3(50429) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:02:54] [INFO] 任务启动: auto_fa6b4f4aa1 | 队列 1 | 规则 2
+python3(50471) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:02:56] [INFO] 任务启动: auto_a4122c71f6 | 队列 1 | 规则 1
+[13:02:59] [WARN] 跳过（412 永久失败）: http://www.customs.gov.cn/customs/302249/302274/302275/index.html
+[13:03:00] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0 | 跳过 1
+[13:03:01] [WARN] 收到停止信号，详情补抓提前结束
+⚠️ #450 empty         total=0 103.3s | 海关总署“统计快讯”进出口商品，每月抓取大豆、铁矿石进口量及金额。 | err:
+[13:03:02] [INFO] 任务启动: auto_29da2ed320 | 队列 1 | 规则 1
+[13:03:03] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ #383 error         total=0 338.1s | E宠商城“进口狗粮”品牌列表，抓取品牌名、产地、是否有中国代理、成分表，制作选粮决策树。 | err:运行超时（>90s）
+[13:03:06] [INFO] 任务启动: auto_29a77fcd81 | 队列 1 | 规则 1
+[13:03:07] [WARN] 跳过（406 永久失败）: https://www.decathlon.com.cn/zh/sports/running/
+[13:03:07] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0 | 跳过 1
+[13:03:25] [INFO] 详情完成：成功 0/3，记录 3 条
+[13:03:26] [INFO] 导出: json=auto_83df06dddf.json, csv=auto_83df06dddf.csv, xlsx=auto_83df06dddf.xlsx
+[13:03:26] [INFO] 完成: 抓取 1 | 条目 3 | 错误 0
+[13:04:09] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #408 empty         total=0 195.7s | 航旅纵横“机场大屏”模拟，抓取某机场今日出港航班准点率、延误时间，通过公开接口。 | err:
+[13:04:14] [INFO] 任务启动: auto_8388850500 | 队列 1 | 规则 1
+[13:04:14] [INFO] 任务启动: auto_29da2ed320 | 队列 1 | 规则 1
+python3(50546) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:04:15] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:04:27] [INFO] 任务启动: auto_29a77fcd81 | 队列 1 | 规则 1
+python3(50566) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:05:46] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:05:49] [WARN] 任务停止信号已生效，本轮请求中断
+[13:05:49] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:05:57] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+🔒 #447 blocked_login total=0 175.8s | 应急管理部“灾害预警”通知，抓取地质灾害气象风险预警的省份、等级。 | err:运行超时（>90s）
+[13:05:58] [INFO] 任务启动: auto_f0a8376e7b | 队列 2 | 规则 2
+[13:05:59] [WARN] 任务停止信号已生效，本轮请求中断
+[13:05:59] [WARN] ⚠️ 管道过滤把 26 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 3 条）。如需精确过滤请改配置或加 detail 过滤
+[13:05:59] [INFO] 详情：共 3 条，待抓 3（并发 2，字段缺失自动补全）
+[13:05:59] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 #434 blocked_login total=0 174.7s | 迪卡侬官网“跑步”分类，每周抓取所有跑鞋型号、价格、用户评价数，做运动品牌跟踪。 | err:运行超时（>90s）
+[13:06:00] [INFO] 任务启动: auto_028d124298 | 队列 1 | 规则 1
+[13:06:01] [INFO] 详情进度: 3/3
+[13:06:01] [INFO] 详情过滤：3 -> 0 条（link 详情合并后按条件保留）
+[13:06:01] [INFO] 详情完成：成功 3/3，记录 0 条
+[13:06:01] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:06:01] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+[13:06:04] [INFO] 任务启动: auto_8388850500 | 队列 3 | 规则 1
+python3(50703) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+python3(50707) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:06:36] [INFO] 延迟重试 1/3: https://www.chinapost.com.cn/html1/folder/1809/2157-2.htm（2s 后）
+[13:06:36] [WARN] 请求失败 https://www.chinapost.com.cn/html1/folder/1809/2157-2.htm: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+python3(50747) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:06:56] [INFO] 任务启动: auto_028d124298 | 队列 1 | 规则 1
+[13:07:01] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #443 empty         total=0 61.4s | 商务部“对外投资”统计，每月抓取中国对外直接投资国别、行业数据。 | err:
+[13:07:02] [INFO] 任务启动: auto_ad5c41ea6c | 队列 1 | 规则 1
+[13:07:03] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+python3(50821) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:07:26] [INFO] 任务启动: auto_f0a8376e7b | 队列 2 | 规则 2
+[13:07:54] [WARN] 任务停止信号已生效，本轮请求中断
+[13:07:54] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:07:59] [INFO] 任务启动: auto_ad5c41ea6c | 队列 1 | 规则 1
+[13:07:59] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:07:59] [INFO] 进度: 抓取 25 | 条目 0 | 队列 145
+⚠️ #445 empty         total=0 61.9s | 生态环境部“空气质量预报”，每日抓取重点城市未来3天AQI级别。 | err:
+[13:08:04] [INFO] 任务启动: auto_02eae8804f | 队列 1 | 规则 1
+❌ #429 error         total=0 231.3s | 中国邮政“邮票”网上营业厅，抓取新发行邮票名称、面值、发行量、设计图，收集邮票信息。 | err:运行超时（>90s）
+[13:08:05] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:08:05] [INFO] 任务启动: auto_509887b308 | 队列 1 | 规则 3
+[13:08:05] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:08:09] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:08:13] [INFO] 延迟重试 1/2: https://www.meilele.com/（2s 后）
+[13:08:13] [WARN] 请求失败 https://www.meilele.com/: RuntimeError: HTTP 0: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-erro
+[13:08:15] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:08:25] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:08:29] [INFO] 延迟重试 2/2: https://www.meilele.com/（4s 后）
+[13:08:29] [WARN] 请求失败 https://www.meilele.com/: RuntimeError: HTTP 0: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-erro
+[13:08:34] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:08:36] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:08:38] [INFO] 进度: 抓取 50 | 条目 0 | 队列 121
+[13:08:40] [WARN] 放弃重试 https://www.meilele.com/（已达 2 次）
+[13:08:40] [WARN] 请求失败 https://www.meilele.com/: RuntimeError: HTTP 0: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-erro
+[13:08:41] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[13:08:49] [WARN] 任务停止信号已生效，本轮请求中断
+[13:08:49] [INFO] 完成: 抓取 4 | 条目 0 | 错误 1
+[13:08:56] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:08:56] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:08:56] [WARN] ⚠️ 管道过滤把 500 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 3 条）。如需精确过滤请改配置或加 detail 过滤
+[13:08:56] [INFO] 详情：共 3 条，待抓 3（并发 2，字段缺失自动补全）
+[13:08:57] [WARN] 收到停止信号，详情补抓提前结束
+[13:08:58] [INFO] 详情过滤：3 -> 0 条（link 详情合并后按条件保留）
+[13:08:58] [INFO] 详情完成：成功 0/3，记录 0 条
+[13:08:58] [INFO] 完成: 抓取 65 | 条目 0 | 错误 0
+❌ #449 error         total=0 183.2s | 国家粮食和物资储备局“秋粮收购”进度，每周抓取主产区收购量。 | err:运行超时（>90s）
+[13:09:01] [INFO] 任务启动: auto_f83bc73bf0 | 队列 1 | 规则 1
+[13:09:02] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:09:57] [INFO] 任务启动: auto_509887b308 | 队列 1 | 规则 3
+python3(51056) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:10:13] [INFO] 任务启动: auto_02eae8804f | 队列 2 | 规则 1
+[13:10:15] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+⚠️ #444 empty         total=0 131.6s | 国家能源局“风电并网”数据，每月抓取各省新增装机容量。 | err:
+[13:10:15] [INFO] 任务启动: auto_f82a2bcd81 | 队列 3 | 规则 3
+[13:10:16] [WARN]   curl_cffi 请求失败 403，2.2s 后重试
+[13:10:18] [WARN]   curl_cffi 请求失败 403，2.3s 后重试
+[13:10:19] [WARN]   curl_cffi 请求失败 403，4.6s 后重试
+[13:10:21] [WARN]   curl_cffi 请求失败 403，4.7s 后重试
+[13:10:24] [WARN]   curl_cffi 请求失败 403，8.6s 后重试
+[13:10:26] [WARN]   curl_cffi 请求失败 403，8.3s 后重试
+[13:10:36] [INFO] 延迟重试 1/3: https://www.dongqiudi.com/transfer（2s 后）
+[13:10:37] [INFO] 延迟重试 1/3: https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A（2s 后）
+[13:10:37] [WARN] 请求失败 https://www.dongqiudi.com/transfer: RateLimitedError: 限流 403: https://www.dongqiudi.com/transfer (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:10:37] [WARN] 请求失败 https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A: RateLimitedError: 限流 403: https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A (retry_after=0.0s) | 反爬拦截[403] HTT
+[13:10:40] [WARN]   curl_cffi 请求失败 403，2.8s 后重试[13:10:40] [WARN]   curl_cffi 请求失败 403，2.8s 后重试
+
+[13:10:44] [WARN]   curl_cffi 请求失败 403，4.1s 后重试
+[13:10:44] [WARN]   curl_cffi 请求失败 403，4.4s 后重试
+[13:10:48] [WARN]   curl_cffi 请求失败 403，8.9s 后重试
+[13:10:49] [WARN]   curl_cffi 请求失败 403，8.8s 后重试
+[13:10:57] [INFO] 延迟重试 2/3: https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A（4s 后）
+[13:10:58] [WARN] 请求失败 https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A: RateLimitedError: 限流 403: https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A (retry_after=0.0s) | 反爬拦截[403] HTT
+[13:10:58] [INFO] 延迟重试 2/3: https://www.dongqiudi.com/transfer（4s 后）
+[13:10:58] [WARN] 请求失败 https://www.dongqiudi.com/transfer: RateLimitedError: 限流 403: https://www.dongqiudi.com/transfer (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:11:01] [INFO] 延迟重试 1/2: https://www.meilele.com/（2s 后）
+[13:11:02] [WARN] 请求失败 https://www.meilele.com/: RuntimeError: page.goto: net::ERR_CONNECTION_RESET at https://www.meilele.com/
+Call log:
+[2m  - navigating to "https://www.meilele.co
+[13:11:02] [WARN]   curl_cffi 请求失败 403，2.3s 后重试
+[13:11:04] [WARN]   curl_cffi 请求失败 403，2.0s 后重试
+python3(51125) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:11:08] [WARN]   curl_cffi 请求失败 403，4.6s 后重试
+[13:11:08] [WARN]   curl_cffi 请求失败 403，4.6s 后重试
+[13:11:13] [WARN]   curl_cffi 请求失败 403，8.9s 后重试
+[13:11:13] [WARN]   curl_cffi 请求失败 403，8.4s 后重试
+[13:11:22] [INFO] 延迟重试 3/3: https://www.dongqiudi.com/transfer（8s 后）
+[13:11:22] [WARN] 请求失败 https://www.dongqiudi.com/transfer: RateLimitedError: 限流 403: https://www.dongqiudi.com/transfer (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:11:22] [INFO] 延迟重试 3/3: https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A（8s 后）
+[13:11:22] [WARN] 请求失败 https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A: RateLimitedError: 限流 403: https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A (retry_after=0.0s) | 反爬拦截[403] HTT
+[13:11:32] [WARN]   curl_cffi 请求失败 403，2.7s 后重试[13:11:32] [WARN]   curl_cffi 请求失败 403，3.0s 后重试
+
+[13:11:38] [WARN]   curl_cffi 请求失败 403，4.0s 后重试
+[13:11:38] [WARN]   curl_cffi 请求失败 403，4.4s 后重试
+[13:11:43] [WARN]   curl_cffi 请求失败 403，8.3s 后重试
+[13:11:46] [WARN]   curl_cffi 请求失败 403，8.3s 后重试
+[13:11:51] [WARN] 放弃重试 https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A（已达 3 次）
+[13:11:51] [WARN] 请求失败 https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A: RateLimitedError: 限流 403: https://www.dongqiudi.com/search?keyword=%E4%B8%AD%E8%B6%85%E8%BD%AC%E4%BC%9A (retry_after=0.0s) | 反爬拦截[403] HTT
+[13:11:51] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:11:55] [WARN] 放弃重试 https://www.dongqiudi.com/transfer（已达 3 次）
+[13:11:55] [WARN] 请求失败 https://www.dongqiudi.com/transfer: RateLimitedError: 限流 403: https://www.dongqiudi.com/transfer (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:11:55] [INFO] 完成: 抓取 9 | 条目 0 | 错误 8
+[13:11:55] [INFO] 反爬拦截统计: 403×8
+❌ #437 error         total=0 233.3s | 美乐乐“家具”销量榜，每周抓取Top50家具名称、价格、销量，绘制网销家具图谱。 | err:运行超时（>90s）
+[13:11:58] [INFO] 任务启动: auto_5c9aa09cca | 队列 1 | 规则 1
+❌ #478 error         total=0 103.8s | 懂球帝“中超”转会流言，抓取流言标题、球员、传闻俱乐部、可信度。 | err:运行超时（>90s）
+[13:12:00] [INFO] 任务启动: auto_e3bc2fb28d | 队列 1 | 规则 1
+[13:12:00] [WARN] 跳过（405 永久失败）: https://gitee.com/explore
+[13:12:00] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:12:00] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0 | 跳过 1
+[13:12:08] [WARN] 任务停止信号已生效，本轮请求中断
+[13:12:08] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:12:08] [INFO] 完成: 抓取 2 | 条目 0 | 错误 1
+⚠️ #448 empty         total=0 203.5s | 农业农村部“农产品批发价格200指数”，每日抓取指数值及分项涨跌。 | err:
+[13:12:26] [INFO] 任务启动: auto_fc98d73b95 | 队列 8 | 规则 1
+[13:12:32] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，2.0s 后重试
+[13:12:32] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，2.0s 后重试
+[13:12:34] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，4.0s 后重试
+[13:12:34] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，4.0s 后重试
+[13:12:38] [INFO] 延迟重试 1/2: https://www.sdzk.cn/Business.aspx?BID=1（2s 后）
+[13:12:38] [WARN] 请求失败 https://www.sdzk.cn/Business.aspx?BID=1: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)
+[13:12:38] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，2.0s 后重试
+[13:12:38] [INFO] 延迟重试 1/2: https://www.sdzk.cn/Business.aspx?BID=2（2s 后）
+[13:12:38] [WARN] 请求失败 https://www.sdzk.cn/Business.aspx?BID=2: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)
+[13:12:40] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，4.0s 后重试
+[13:12:44] [INFO] 延迟重试 1/2: https://www.sdzk.cn/Business.aspx?BID=3（2s 后）
+[13:12:44] [WARN] 请求失败 https://www.sdzk.cn/Business.aspx?BID=3: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)
+[13:12:45] [INFO] 重试成功（冲销 1 错误）: https://www.sdzk.cn/Business.aspx?BID=1
+[13:12:46] [INFO] 重试成功（冲销 1 错误）: https://www.sdzk.cn/Business.aspx?BID=2
+[13:12:46] [INFO] 进度: 抓取 25 | 条目 0 | 队列 505
+[13:12:51] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，2.0s 后重试
+[13:12:53] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，4.0s 后重试
+[13:12:54] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，2.0s 后重试
+[13:12:57] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，4.0s 后重试
+[13:12:59] [INFO] 延迟重试 2/2: https://www.sdzk.cn/Business.aspx?BID=3（4s 后）
+[13:12:59] [WARN] 请求失败 https://www.sdzk.cn/Business.aspx?BID=3: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)
+[13:12:59] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，2.0s 后重试
+[13:13:00] [INFO] 任务启动: auto_5c9aa09cca | 队列 1 | 规则 1
+python3(51254) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:13:01] [INFO] 延迟重试 1/2: https://www.sdzk.cn/Business.aspx?BID=4（2s 后）
+[13:13:01] [WARN] 请求失败 https://www.sdzk.cn/Business.aspx?BID=4: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)
+[13:13:02] [INFO] 延迟重试 1/2: https://www.sdzk.cn/Consultation.aspx?BCID=1072&CID=1074（2s 后）
+[13:13:02] [WARN] 请求失败 https://www.sdzk.cn/Consultation.aspx?BCID=1072&CID=1074: RateLimitedError: 限流 200: https://www.sdzk.cn/Consultation.aspx?BCID=1072&CID=1074 (retry_after=0.0s) | 反爬拦截[anti_bot] n1agloz4mwn+wafce68
+[13:13:02] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)，4.0s 后重试
+[13:13:03] [INFO] 延迟重试 1/2: https://www.sdzk.cn/Consultation.aspx?BCID=1072&CID=1097（2s 后）
+[13:13:03] [WARN] 请求失败 https://www.sdzk.cn/Consultation.aspx?BCID=1072&CID=1097: RateLimitedError: 限流 200: https://www.sdzk.cn/Consultation.aspx?BCID=1072&CID=1097 (retry_after=0.0s) | 反爬拦截[anti_bot] hkson1xzxf4bwafpp_r
+[13:13:04] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，2.0s 后重试
+[13:13:06] [INFO] 延迟重试 1/2: https://www.sdzk.cn/Business.aspx?BID=5（2s 后）
+[13:13:06] [WARN] 请求失败 https://www.sdzk.cn/Business.aspx?BID=5: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 6-7: ordinal not in range(256)
+[13:13:06] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，2.0s 后重试
+[13:13:07] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，4.0s 后重试
+[13:13:08] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，4.0s 后重试
+[13:13:11] [INFO] 延迟重试 1/2: https://www.sdzk.cn/NewsInfo.aspx?NewsID=6542（2s 后）
+[13:13:11] [WARN] 请求失败 https://www.sdzk.cn/NewsInfo.aspx?NewsID=6542: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)
+[13:13:11] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，2.0s 后重试
+[13:13:12] [INFO] 延迟重试 1/2: https://www.sdzk.cn/NewsInfo.aspx?NewsID=6814（2s 后）
+[13:13:12] [WARN] 请求失败 https://www.sdzk.cn/NewsInfo.aspx?NewsID=6814: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)
+[13:13:13] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，2.0s 后重试
+[13:13:13] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，4.0s 后重试
+[13:13:16] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，4.0s 后重试
+[13:13:18] [INFO] 延迟重试 1/2: https://www.sdzk.cn/NewsInfo.aspx?NewsID=6815（2s 后）
+[13:13:18] [WARN] 请求失败 https://www.sdzk.cn/NewsInfo.aspx?NewsID=6815: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)
+[13:13:18] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，2.0s 后重试
+[13:13:20] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，4.0s 后重试
+[13:13:20] [INFO] 延迟重试 1/2: https://www.sdzk.cn/NewsInfo.aspx?NewsID=6855（2s 后）
+[13:13:20] [WARN] 请求失败 https://www.sdzk.cn/NewsInfo.aspx?NewsID=6855: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)
+[13:13:20] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，2.0s 后重试
+[13:13:22] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，4.0s 后重试
+[13:13:24] [INFO] 延迟重试 1/2: https://www.sdzk.cn/NewsInfo.aspx?NewsID=6893（2s 后）
+[13:13:24] [WARN] 请求失败 https://www.sdzk.cn/NewsInfo.aspx?NewsID=6893: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)
+[13:13:24] [INFO] 进度: 抓取 50 | 条目 0 | 队列 493
+[13:13:26] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，2.0s 后重试
+[13:13:26] [INFO] 延迟重试 1/2: https://www.sdzk.cn/NewsInfo.aspx?NewsID=6925（2s 后）
+[13:13:26] [WARN] 请求失败 https://www.sdzk.cn/NewsInfo.aspx?NewsID=6925: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)
+[13:13:28] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，4.0s 后重试
+[13:13:28] [INFO] 任务启动: auto_e3bc2fb28d | 队列 1 | 规则 1
+python3(51308) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:13:33] [INFO] 延迟重试 1/2: https://www.sdzk.cn/NewsInfo.aspx?NewsID=7149（2s 后）
+[13:13:33] [WARN] 请求失败 https://www.sdzk.cn/NewsInfo.aspx?NewsID=7149: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)
+[13:13:46] [INFO] 延迟重试 1/2: https://zsxx.e21.cn/assets/video-js-CpJMjAjO.css（2s 后）
+[13:13:47] [WARN] 请求失败 https://zsxx.e21.cn/assets/video-js-CpJMjAjO.css: RateLimitedError: 限流 200: https://zsxx.e21.cn/assets/video-js-CpJMjAjO.css (retry_after=0.0s) | 反爬拦截[anti_bot] t/2i/o73v+ynwafmdzc5ndxyurh
+[13:13:56] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，2.0s 后重试
+[13:13:59] [WARN]   curl_cffi 网络异常: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)，4.0s 后重试
+[13:13:59] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:14:06] [WARN] 放弃重试 https://www.sdzk.cn/Business.aspx?BID=3（已达 2 次）
+[13:14:06] [WARN] 请求失败 https://www.sdzk.cn/Business.aspx?BID=3: RuntimeError: HTTP 0: 'latin-1' codec can't encode characters in position 5-6: ordinal not in range(256)
+[13:14:06] [WARN] ⚠️ 管道过滤把 500 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 3 条）。如需精确过滤请改配置或加 detail 过滤
+[13:14:07] [INFO] 导出: json=auto_fc98d73b95.json, csv=auto_fc98d73b95.csv, xlsx=auto_fc98d73b95.xlsx
+[13:14:07] [INFO] 完成: 抓取 71 | 条目 3 | 错误 15
+[13:14:07] [INFO] 反爬拦截统计: anti_bot×3
+❌ #471 error         total=0 105.4s | 各地方招生考试院“高考”分段表，每年抓取文科理科一分一段表。 | err:运行超时（>90s）
+[13:14:10] [INFO] 任务启动: auto_1ba95f29c8 | 队列 1 | 规则 1
+[13:14:12] [WARN]   curl_cffi 请求失败 403，2.8s 后重试
+[13:14:15] [WARN]   curl_cffi 请求失败 403，4.7s 后重试
+[13:14:21] [WARN]   curl_cffi 请求失败 403，8.7s 后重试
+[13:14:30] [INFO] 延迟重试 1/3: https://bbs.nga.cn/thread.php?fid=464（2s 后）
+[13:14:30] [WARN] 请求失败 https://bbs.nga.cn/thread.php?fid=464: RateLimitedError: 限流 403: https://bbs.nga.cn/thread.php?fid=464 (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:14:35] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:14:42] [WARN]   curl_cffi 请求失败 403，2.2s 后重试
+[13:14:44] [WARN]   curl_cffi 请求失败 403，4.5s 后重试
+[13:14:47] [WARN] 任务停止信号已生效，本轮请求中断
+[13:14:47] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:14:50] [WARN]   curl_cffi 请求失败 403，8.7s 后重试
+🔒 #461 blocked_login total=0 173.9s | 最高人民法院“指导性案例”，抓取案例标题、裁判要点、关键词。 | err:运行超时（>90s）
+[13:14:52] [INFO] 任务启动: auto_bfeaec1726 | 队列 1 | 规则 1
+[13:14:53] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:14:56] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:14:59] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:14:59] [INFO] 延迟重试 2/3: https://bbs.nga.cn/thread.php?fid=464（4s 后）
+[13:14:59] [WARN] 请求失败 https://bbs.nga.cn/thread.php?fid=464: RateLimitedError: 限流 403: https://bbs.nga.cn/thread.php?fid=464 (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:15:01] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:15:04] [WARN]   curl_cffi 请求失败 403，2.9s 后重试
+[13:15:09] [INFO] 延迟重试 1/3: https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1（2s 后）
+[13:15:09] [WARN] 请求失败 https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://c
+[13:15:09] [WARN]   curl_cffi 请求失败 403，4.0s 后重试
+[13:15:12] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:15:18] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:15:18] [WARN]   curl_cffi 请求失败 403，8.2s 后重试
+[13:15:23] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:15:27] [INFO] 延迟重试 3/3: https://bbs.nga.cn/thread.php?fid=464（8s 后）
+[13:15:27] [WARN] 请求失败 https://bbs.nga.cn/thread.php?fid=464: RateLimitedError: 限流 403: https://bbs.nga.cn/thread.php?fid=464 (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:15:31] [INFO] 延迟重试 2/3: https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1（4s 后）
+[13:15:31] [WARN] 请求失败 https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://c
+❌ #503 error         total=0 212.9s | Gitee“推荐”项目，每日抓取前10项目名称、Star数、语言、分类。 | err:运行超时（>90s）
+[13:15:33] [INFO] 任务启动: auto_842bcc6b62 | 队列 1 | 规则 1
+[13:15:33] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:15:35] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:15:35] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:15:35] [WARN]   curl_cffi 请求失败 403，2.6s 后重试
+[13:15:38] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:15:38] [WARN]   curl_cffi 请求失败 403，4.5s 后重试
+[13:15:40] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:15:41] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:15:43] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:15:43] [WARN]   curl_cffi 请求失败 403，8.4s 后重试
+[13:15:44] [WARN] 任务停止信号已生效，本轮请求中断
+[13:15:44] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:15:51] [INFO] 延迟重试 3/3: https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1（8s 后）
+[13:15:51] [INFO] 延迟重试 1/3: https://www.npc.gov.cn/flcaw/（2s 后）
+[13:15:51] [WARN] 请求失败 https://www.npc.gov.cn/flcaw/: RuntimeError: HTTP 0: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSH[13:15:51] [WARN] 请求失败 https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://c
+
+[13:15:52] [WARN] 放弃重试 https://bbs.nga.cn/thread.php?fid=464（已达 3 次）
+[13:15:52] [WARN] 请求失败 https://bbs.nga.cn/thread.php?fid=464: RateLimitedError: 限流 403: https://bbs.nga.cn/thread.php?fid=464 (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:15:52] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[13:15:52] [INFO] 反爬拦截统计: 403×4
+❌ #484 error         total=0 103.3s | NGA“艾泽拉斯国家地理论坛”前瞻区，抓取魔兽世界新版本补丁说明帖子。 | err:运行超时（>90s）
+[13:15:54] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:15:54] [INFO] 任务启动: auto_04a378fdc6 | 队列 1 | 规则 1
+[13:15:54] [WARN] 跳过（412 永久失败）: http://www.nhc.gov.cn/sps/s7891/list.shtml
+[13:15:54] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0 | 跳过 1
+[13:15:57] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:16:00] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:16:02] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:16:02] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:16:06] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:16:10] [INFO] 延迟重试 2/3: https://www.npc.gov.cn/flcaw/（4s 后）
+[13:16:10] [WARN] 请求失败 https://www.npc.gov.cn/flcaw/: RuntimeError: HTTP 0: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSH
+[13:16:14] [WARN] 放弃重试 https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1（已达 3 次）
+[13:16:14] [WARN] 请求失败 https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: certificate has expired (10). See https://c
+[13:16:14] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:16:14] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[13:16:16] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:16:22] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:16:30] [INFO] 延迟重试 3/3: https://www.npc.gov.cn/flcaw/（8s 后）
+[13:16:30] [WARN] 请求失败 https://www.npc.gov.cn/flcaw/: RuntimeError: HTTP 0: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSH
+[13:16:38] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:16:40] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:16:45] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSHAKE_FAILURE. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:16:53] [WARN] 放弃重试 https://www.npc.gov.cn/flcaw/（已达 3 次）
+[13:16:53] [WARN] 请求失败 https://www.npc.gov.cn/flcaw/: RuntimeError: HTTP 0: Failed to perform, curl: (35) TLS connect error: error:10000410:SSL routines:OPENSSL_internal:SSLV3_ALERT_HANDSH
+[13:16:53] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[13:17:35] [INFO] 任务启动: auto_04a378fdc6 | 队列 1 | 规则 1
+python3(51681) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:17:48] [INFO] 任务启动: auto_842bcc6b62 | 队列 1 | 规则 1
+python3(51698) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:18:14] [INFO] 任务启动: auto_bfeaec1726 | 队列 1 | 规则 1
+python3(51757) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:19:06] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:19:18] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:19:23] [INFO] 延迟重试 1/3: https://www.npc.gov.cn/flcaw/（2s 后）
+[13:19:23] [WARN] 请求失败 https://www.npc.gov.cn/flcaw/: RuntimeError: page.goto: net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH at https://www.npc.gov.cn/flcaw/
+Call log:
+[2m  - navigating to "htt
+[13:19:24] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+❌ #464 error         total=0 233.0s | 中国人大网“法律草案”征求意见，抓取草案名称、征求意见截止日、参与人数。 | err:运行超时（>90s）
+[13:19:26] [INFO] 任务启动: auto_638eee5857 | 队列 1 | 规则 1
+[13:19:29] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+🔒 #468 blocked_login total=0 227.0s | 国家卫健委“食品安全标准”数据，抓取最新污染物限量标准表格。 | err:运行超时（>90s）
+[13:19:41] [INFO] 任务启动: auto_a5ed6119c7 | 队列 1 | 规则 1
+[13:19:41] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:19:42] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:19:46] [INFO] 延迟重试 1/2: https://china.nba.com/static/data/league/playerstats_All_All_All_0_0.json（2s 后）
+[13:19:46] [WARN] 请求失败 https://china.nba.com/static/data/league/playerstats_All_All_All_0_0.json: RuntimeError: HTTP 0: Failed to perform, curl: (47) Maximum (30) redirects followed. See https://curl.se/libcurl/c/libcurl-errors.html
+[13:19:47] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[13:19:53] [WARN] 任务停止信号已生效，本轮请求中断
+[13:19:53] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:20:03] [INFO] 任务启动: auto_a5ed6119c7 | 队列 1 | 规则 1
+python3(51920) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+❌ #452 error         total=0 325.5s | 中国地震台网“最近24小时地震”，抓取震级、地点、震源深度，绘制分布。 | err:运行超时（>90s）
+[13:20:18] [INFO] 任务启动: auto_7f3284b9c3 | 队列 1 | 规则 1
+[13:20:21] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:20:30] [INFO] 延迟重试 1/2: https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1（2s 后）
+[13:20:30] [WARN] 请求失败 https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%2023:59:59&jingdu1=&jingdu2=&weidu1=&weidu2=&zhenduan=&zhenfu1=&zhenfu2=&zm=0&page=1: RuntimeError: page.goto: net::ERR_CERT_DATE_INVALID at https://news.ceic.ac.cn/ajax/search?start=2026-08-08%2000:00:00&end=2026-08-09%
+[13:20:30] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:20:30] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[13:20:47] [INFO] 任务启动: auto_638eee5857 | 队列 2 | 规则 1
+python3(51983) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:21:21] [INFO] 任务启动: auto_7f3284b9c3 | 队列 1 | 规则 1
+[13:21:35] [INFO] 延迟重试 1/3: https://www.imdb.com/chart/top/（2s 后）
+[13:21:35] [WARN] 请求失败 https://www.imdb.com/chart/top/: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[13:21:35] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:21:35] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[13:21:36] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #476 empty         total=0 82.0s | 腾讯体育“NBA”赛程，每日抓取所有比赛的对阵、时间、直播链接。 | err:
+❌ #500 error         total=0 119.2s | IMDb“Top 250 Movies”完整榜单，每月抓取电影名、年份、评分、排名变动。 | err:运行超时（>90s）
+[13:21:40] [INFO] 任务启动: auto_6489085005 | 队列 1 | 规则 1
+[13:21:40] [INFO] 任务启动: auto_ec807ca9a9 | 队列 1 | 规则 1
+[13:21:44] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:21:45] [WARN]   curl_cffi 请求失败 403，2.2s 后重试
+[13:21:54] [WARN]   curl_cffi 请求失败 403，4.1s 后重试
+[13:22:02] [WARN]   curl_cffi 请求失败 403，8.7s 后重试
+[13:22:11] [INFO] 延迟重试 1/3: https://stackoverflow.com/tags?tab=popular（2s 后）
+[13:22:11] [WARN] 请求失败 https://stackoverflow.com/tags?tab=popular: RateLimitedError: 限流 403: https://stackoverflow.com/tags?tab=popular (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:22:14] [WARN]   curl_cffi 请求失败 403，2.5s 后重试
+[13:22:18] [WARN]   curl_cffi 请求失败 403，4.1s 后重试
+[13:22:26] [WARN]   curl_cffi 请求失败 403，8.5s 后重试[13:22:26] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+
+[13:22:26] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ #477 error         total=0 188.4s | NBA中国官网“数据”球员场均得分榜，每日抓取前50球员得分、篮板、助攻。 | err:运行超时（>90s）
+[13:22:35] [INFO] 延迟重试 2/3: https://stackoverflow.com/tags?tab=popular（4s 后）
+[13:22:35] [WARN] 请求失败 https://stackoverflow.com/tags?tab=popular: RateLimitedError: 限流 403: https://stackoverflow.com/tags?tab=popular (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:22:35] [INFO] 任务启动: auto_07b15e1ac5 | 队列 1 | 规则 1
+[13:22:41] [WARN]   curl_cffi 请求失败 403，2.8s 后重试
+[13:22:47] [WARN]   curl_cffi 请求失败 403，4.5s 后重试
+[13:23:07] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timeout after 22293 ms. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:23:10] [WARN]   curl_cffi 请求失败 403，8.4s 后重试
+[13:23:10] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:23:14] [INFO] 任务启动: auto_6489085005 | 队列 1 | 规则 1
+[13:23:15] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:23:19] [INFO] 延迟重试 3/3: https://stackoverflow.com/tags?tab=popular（8s 后）
+[13:23:19] [WARN] 请求失败 https://stackoverflow.com/tags?tab=popular: RateLimitedError: 限流 403: https://stackoverflow.com/tags?tab=popular (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:23:19] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[13:23:19] [INFO] 反爬拦截统计: 403×3
+⚠️ #506 empty         total=0 103.9s | PyPI“最近更新”RSS，监控包名出现“security”标识，触发内部漏洞检查。 | err:
+[13:23:25] [INFO] 任务启动: auto_507ebc922e | 队列 1 | 规则 1
+❌ #507 error         total=0 105.6s | Stack Overflow“Tags”热度，每月抓取所有技术标签的问题总量、本周提问量 | err:运行超时（>90s）
+[13:23:26] [INFO] 任务启动: auto_6e41d87d6b | 队列 1 | 规则 1
+[13:23:27] [WARN] 跳过（412 永久失败）: https://gaokao.chsi.com.cn/zsgs/zhangcheng/listVerifedZszc--method-index,lb-1,start-0.dhtml
+[13:23:27] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0 | 跳过 1
+[13:23:31] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20060 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:23:32] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:23:36] [INFO] 延迟重试 1/2: https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100（2s 后）
+[13:23:36] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20060 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:23:59] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20013 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:24:07] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:24:22] [INFO] 任务启动: auto_6e41d87d6b | 队列 1 | 规则 1
+python3(52273) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:24:30] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20210 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:24:35] [INFO] 延迟重试 2/2: https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100（4s 后）
+[13:24:35] [WARN] 请求失败 https://hub.docker.com/v2/repositories/library/python/tags/?page_size=100: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20210 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:24:35] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+❌ #504 error         total=0 137.2s | Docker Hub“python”官方镜像标签列表，监控每次构建的Digest和大小。 | err:运行超时（>90s）
+[13:24:53] [INFO] 任务启动: auto_bd63dcf6e3 | 队列 1 | 规则 1
+[13:24:55] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:25:17] [INFO] 任务启动: auto_507ebc922e | 队列 1 | 规则 1
+[13:25:18] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20000 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:25:22] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #518 empty         total=0 125.9s | AWS“价格计算器”页面，抓取EC2各实例规格的按需价格，更新云成本模型。 | err:
+[13:25:31] [INFO] 任务启动: auto_3de986da7c | 队列 3 | 规则 2
+[13:25:34] [INFO] 完成: 抓取 3 | 条目 0 | 错误 0
+[13:25:42] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20001 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:25:51] [INFO] 延迟重试 1/3: https://www.reddit.com/r/MachineLearning/top.json?t=day&limit=100（2s 后）
+[13:25:51] [WARN] 请求失败 https://www.reddit.com/r/MachineLearning/top.json?t=day&limit=100: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20001 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:25:52] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:26:01] [WARN] 任务停止信号已生效，本轮请求中断
+[13:26:01] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 #472 blocked_login total=0 163.2s | 阳光高考“招生章程”，抓取所有双一流高校章程的链接、招生人数限制。 | err:运行超时（>90s）
+[13:26:10] [INFO] 任务启动: auto_40fd636ede | 队列 1 | 规则 1
+[13:26:11] [WARN]   curl_cffi 请求失败 403，2.4s 后重试
+[13:26:14] [WARN]   curl_cffi 请求失败 403，4.5s 后重试
+[13:26:15] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (35) Recv failure: Connection reset by peer. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:26:19] [WARN]   curl_cffi 请求失败 403，8.1s 后重试
+[13:26:27] [INFO] 延迟重试 1/3: https://www.cnnvd.org.cn/web/vulnerability/querylist.tag（2s 后）
+[13:26:27] [WARN] 请求失败 https://www.cnnvd.org.cn/web/vulnerability/querylist.tag: RateLimitedError: 限流 403: https://www.cnnvd.org.cn/web/vulnerability/querylist.tag (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:26:30] [WARN]   curl_cffi 请求失败 403，2.3s 后重试
+[13:26:33] [WARN]   curl_cffi 请求失败 403，4.3s 后重试
+[13:26:37] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:26:38] [WARN]   curl_cffi 请求失败 403，8.6s 后重试
+[13:26:49] [INFO] 延迟重试 2/3: https://www.cnnvd.org.cn/web/vulnerability/querylist.tag（4s 后）
+[13:26:49] [WARN] 请求失败 https://www.cnnvd.org.cn/web/vulnerability/querylist.tag: RateLimitedError: 限流 403: https://www.cnnvd.org.cn/web/vulnerability/querylist.tag (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:26:56] [WARN]   curl_cffi 请求失败 403，2.5s 后重试
+[13:26:59] [WARN]   curl_cffi 请求失败 403，4.6s 后重试
+[13:27:01] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20021 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+❌ #512 error         total=0 131.5s | Reddit“r/MachineLearning”热帖，每日抓取标题、分数、评论数。 | err:运行超时（>90s）
+[13:27:04] [WARN]   curl_cffi 请求失败 403，8.2s 后重试
+[13:27:04] [INFO] 任务启动: auto_21ab5378f2 | 队列 1 | 规则 1
+[13:27:10] [INFO] 延迟重试 2/3: https://www.reddit.com/r/MachineLearning/top.json?t=day&limit=100（4s 后）
+[13:27:10] [WARN] 请求失败 https://www.reddit.com/r/MachineLearning/top.json?t=day&limit=100: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20021 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:27:11] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:27:11] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+[13:27:12] [INFO] 延迟重试 3/3: https://www.cnnvd.org.cn/web/vulnerability/querylist.tag（8s 后）
+[13:27:12] [WARN] 请求失败 https://www.cnnvd.org.cn/web/vulnerability/querylist.tag: RateLimitedError: 限流 403: https://www.cnnvd.org.cn/web/vulnerability/querylist.tag (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:27:21] [WARN]   curl_cffi 请求失败 403，2.7s 后重试
+[13:27:24] [WARN]   curl_cffi 请求失败 403，4.9s 后重试
+[13:27:24] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20005 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:27:29] [WARN]   curl_cffi 请求失败 403，8.8s 后重试
+[13:27:38] [WARN] 放弃重试 https://www.cnnvd.org.cn/web/vulnerability/querylist.tag（已达 3 次）
+[13:27:38] [WARN] 请求失败 https://www.cnnvd.org.cn/web/vulnerability/querylist.tag: RateLimitedError: 限流 403: https://www.cnnvd.org.cn/web/vulnerability/querylist.tag (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:27:38] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[13:27:38] [INFO] 反爬拦截统计: 403×4
+[13:27:47] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20033 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:27:51] [INFO] 延迟重试 1/2: https://www.v2ex.com/?tab=hot（2s 后）
+[13:27:51] [WARN] 请求失败 https://www.v2ex.com/?tab=hot: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20033 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:28:14] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20001 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:28:34] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:28:34] [INFO] 任务启动: auto_3de986da7c | 队列 1 | 规则 1
+[13:28:36] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20001 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:28:40] [INFO] 延迟重试 2/2: https://www.v2ex.com/?tab=hot（4s 后）
+[13:28:41] [WARN] 请求失败 https://www.v2ex.com/?tab=hot: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20001 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:28:41] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+❌ #509 error         total=0 115.0s | V2EX“最热”节点每日新主题，抓取标题、节点、回复数。 | err:运行超时（>90s）
+[13:29:00] [INFO] 任务启动: auto_db1ff7db17 | 队列 1 | 规则 1
+[13:29:02] [WARN]   curl_cffi 请求失败 403，2.7s 后重试
+[13:29:06] [WARN]   curl_cffi 请求失败 403，4.2s 后重试
+[13:29:07] [INFO] 进度: 抓取 25 | 条目 0 | 队列 386
+[13:29:10] [INFO] 延迟重试 1/2: https://www.iea.org/topics/oil-market-report（2s 后）
+[13:29:10] [WARN] 请求失败 https://www.iea.org/topics/oil-market-report: RateLimitedError: 限流 403: https://www.iea.org/topics/oil-market-report (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:29:14] [WARN]   curl_cffi 请求失败 403，2.4s 后重试
+[13:29:18] [WARN]   curl_cffi 请求失败 403，4.6s 后重试
+[13:29:23] [INFO] 延迟重试 2/2: https://www.iea.org/topics/oil-market-report（4s 后）
+[13:29:23] [WARN] 请求失败 https://www.iea.org/topics/oil-market-report: RateLimitedError: 限流 403: https://www.iea.org/topics/oil-market-report (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:29:26] [INFO] 进度: 抓取 50 | 条目 0 | 队列 363
+[13:29:28] [WARN]   curl_cffi 请求失败 403，3.0s 后重试
+[13:29:31] [WARN]   curl_cffi 请求失败 403，4.3s 后重试
+[13:29:36] [WARN] 放弃重试 https://www.iea.org/topics/oil-market-report（已达 2 次）
+[13:29:36] [WARN] 请求失败 https://www.iea.org/topics/oil-market-report: RateLimitedError: 限流 403: https://www.iea.org/topics/oil-market-report (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:29:36] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[13:29:36] [INFO] 反爬拦截统计: 403×3
+[13:29:44] [INFO] 进度: 抓取 75 | 条目 0 | 队列 338
+[13:29:56] [INFO] 任务启动: auto_40fd636ede | 队列 2 | 规则 1
+python3(52783) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+python3(52788) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:30:04] [INFO] 进度: 抓取 100 | 条目 0 | 队列 313
+[13:30:05] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:30:06] [WARN] ⚠️ 管道过滤把 500 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 3 条）。如需精确过滤请改配置或加 detail 过滤
+[13:30:06] [INFO] 详情：共 3 条，待抓 3（并发 2，字段缺失自动补全）
+[13:30:07] [WARN] 收到停止信号，详情补抓提前结束
+[13:30:08] [INFO] 详情过滤：3 -> 3 条（link 详情合并后按条件保留）
+[13:30:08] [INFO] 详情完成：成功 0/3，记录 3 条
+[13:30:09] [INFO] 导出: json=auto_3de986da7c.json, csv=auto_3de986da7c.csv, xlsx=auto_3de986da7c.xlsx
+[13:30:09] [INFO] 完成: 抓取 101 | 条目 3 | 错误 0
+? #538 ok_late       total=3 285.1s | 中果网“苹果”期货交割品报价，每日抓取各产区纸袋苹果价格。 | err:超时但已产出数据
+[13:30:16] [INFO] 任务启动: auto_4a51b7db70 | 队列 1 | 规则 2
+[13:30:17] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:30:20] [INFO] 任务启动: auto_db1ff7db17 | 队列 1 | 规则 1
+python3(52833) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:30:39] [INFO] 任务启动: auto_4a51b7db70 | 队列 1 | 规则 1
+python3(52856) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:30:39] [INFO] 延迟重试 1/2: https://www.cnnvd.org.cn/web/vulnerability/querylist.tag?pageNo=1&pageSize=100&orderBy=publishDate&order=desc&startDate=2026-08-09&endDate=2026-08-09（2s 后）
+[13:30:39] [WARN] 请求失败 https://www.cnnvd.org.cn/web/vulnerability/querylist.tag?pageNo=1&pageSize=100&orderBy=publishDate&order=desc&startDate=2026-08-09&endDate=2026-08-09: RuntimeError: browserType.launchPersistentContext: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /Applica
+python3(52874) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:31:37] [WARN] 任务停止信号已生效，本轮请求中断
+[13:31:40] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+🔒 #523 blocked_login total=0 351.5s | 国家信息安全漏洞库(CNNVD)，每日抓取新增漏洞名称、危害等级、影响产品。 | err:运行超时（>90s）
+[13:32:04] [INFO] 任务启动: auto_d7043debf4 | 队列 1 | 规则 1
+[13:32:05] [WARN] 跳过（400 永久失败）: https://hn.algolia.com/api/v1/search?tags=ask_hn&hitsPerPage=10&sortBy=search_by_date
+[13:32:06] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0 | 跳过 1
+[13:32:09] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:32:18] [WARN] 任务停止信号已生效，本轮请求中断
+[13:32:19] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:32:19] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:32:30] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ #545 error         total=0 135.9s | 中华商标协会“商标品牌价值”排名，每年抓取上榜品牌名称、价值、排名变动。 | err:运行超时（>90s）
+[13:32:32] [INFO] 任务启动: auto_d7043debf4 | 队列 1 | 规则 1
+[13:32:33] [INFO] 任务启动: auto_654b992c6b | 队列 1 | 规则 1
+🔒 #564 blocked_login total=0 215.1s | 国际能源署“石油市场报告”，每月抓取全球供需平衡表关键数字。 | err:运行超时（>90s）
+[13:32:34] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:32:35] [INFO] 任务启动: auto_161ad1c2f8 | 队列 1 | 规则 1
+[13:32:36] [INFO] 延迟重试 1/2: https://cx.cnca.cn/CertECloud/result/skipResultList?certItemOne=&certItemTwo=&certItemThree=&certNo=&certFlag=1&fullName=$北京中经科环质量认证有限公司&searchMode=Advanced（2s 后）
+[13:32:36] [WARN] 请求失败 https://cx.cnca.cn/CertECloud/result/skipResultList?certItemOne=&certItemTwo=&certItemThree=&certNo=&certFlag=1&fullName=$北京中经科环质量认证有限公司&searchMode=Advanced: RuntimeError: HTTP 521: <script>document.cookie=('_')+('_')+('j')+('s')+('l')+('_')+('c')+('l')+('e')+('a')+('r')+('a')+('n')+('c')+('
+[13:32:36] [INFO] 导出: json=auto_d7043debf4.json, csv=auto_d7043debf4.csv, xlsx=auto_d7043debf4.xlsx
+[13:32:36] [INFO] 完成: 抓取 1 | 条目 10 | 错误 0
+✅ #510 ok            total=10 36.8s | Hacker News“Ask HN”板块，每日抓取Top 10的标题与评论数，观察技术 | err:
+[13:32:38] [INFO] 延迟重试 2/2: https://cx.cnca.cn/CertECloud/result/skipResultList?certItemOne=&certItemTwo=&certItemThree=&certNo=&certFlag=1&fullName=$北京中经科环质量认证有限公司&searchMode=Advanced（4s 后）
+[13:32:38] [WARN] 请求失败 https://cx.cnca.cn/CertECloud/result/skipResultList?certItemOne=&certItemTwo=&certItemThree=&certNo=&certFlag=1&fullName=$北京中经科环质量认证有限公司&searchMode=Advanced: RuntimeError: HTTP 521: <script>document.cookie=('_')+('_')+('j')+('s')+('l')+('_')+('c')+('l')+('e')+('a')+('r')+('a')+('n')+('c')+('
+[13:32:38] [INFO] 任务启动: auto_219112673f | 队列 1 | 规则 1
+[13:32:43] [WARN] 放弃重试 https://cx.cnca.cn/CertECloud/result/skipResultList?certItemOne=&certItemTwo=&certItemThree=&certNo=&certFlag=1&fullName=$北京中经科环质量认证有限公司&searchMode=Advanced（已达 2 次）
+[13:32:43] [WARN] 请求失败 https://cx.cnca.cn/CertECloud/result/skipResultList?certItemOne=&certItemTwo=&certItemThree=&certNo=&certFlag=1&fullName=$北京中经科环质量认证有限公司&searchMode=Advanced: RuntimeError: HTTP 521: <script>document.cookie=('_')+('_')+('j')+('s')+('l')+('_')+('c')+('l')+('e')+('a')+('r')+('a')+('n')+('c')+('
+[13:32:43] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[13:33:01] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:33:28] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:33:29] [INFO] 任务启动: auto_161ad1c2f8 | 队列 1 | 规则 1
+python3(53187) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:33:32] [INFO] 延迟重试 1/2: https://raw.githubusercontent.com/Fyrd/caniuse/main/features/css-grid.json（2s 后）
+[13:33:32] [WARN] 请求失败 https://raw.githubusercontent.com/Fyrd/caniuse/main/features/css-grid.json: RuntimeError: HTTP 0: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See htt
+[13:33:36] [INFO] 重试成功（冲销 1 错误）: https://raw.githubusercontent.com/Fyrd/caniuse/main/features/css-grid.json
+[13:33:36] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+[13:33:54] [INFO] 延迟重试 2/2: https://www.cnnvd.org.cn/web/vulnerability/querylist.tag?pageNo=1&pageSize=100&orderBy=publishDate&order=desc&startDate=2026-08-09&endDate=2026-08-09（4s 后）
+[13:33:54] [WARN] 请求失败 https://www.cnnvd.org.cn/web/vulnerability/querylist.tag?pageNo=1&pageSize=100&orderBy=publishDate&order=desc&startDate=2026-08-09&endDate=2026-08-09: RuntimeError: browserType.launchPersistentContext: Timeout 180000ms exceeded.
+Call log:
+[2m  - <launching> /Applications/Google Chrom
+[13:33:54] [INFO] 完成: 抓取 3 | 条目 0 | 错误 2
+[13:34:22] [INFO] 延迟重试 1/3: https://cx.cnca.cn/CertECloud/result/skipResultList?certItemOne=&certItemTwo=&certItemThree=&certNo=&certFlag=1&fullName=北京中经科环质量认证有限公司&searchMode=Advanced（2s 后）
+[13:34:22] [WARN] 请求失败 https://cx.cnca.cn/CertECloud/result/skipResultList?certItemOne=&certItemTwo=&certItemThree=&certNo=&certFlag=1&fullName=北京中经科环质量认证有限公司&searchMode=Advanced: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+python3(53270) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:34:33] [INFO] 任务启动: auto_654b992c6b | 队列 1 | 规则 1
+python3(53277) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:34:59] [INFO] 任务启动: auto_219112673f | 队列 1 | 规则 1
+[13:34:59] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:35:27] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+❌ #584 error         total=0 176.3s | 全国认证认可信息公共服务平台，抓取某机构的ISO认证范围、有效期。 | err:运行超时（>90s）
+[13:35:33] [INFO] 任务启动: auto_39c08589b0 | 队列 1 | 规则 1
+[13:35:51] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:35:54] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:35:55] [INFO] 延迟重试 1/2: https://raw.githubusercontent.com/Fyrd/caniuse/master/features-json/css-grid.json（2s 后）
+[13:35:55] [WARN] 请求失败 https://raw.githubusercontent.com/Fyrd/caniuse/master/features-json/css-grid.json: RuntimeError: HTTP 0: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See htt
+[13:36:03] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:36:20] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20000 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:36:33] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+❌ #575 error         total=0 244.8s | 文化和旅游部“出境旅游目的地”名单，抓取新增恢复出境团队游国家。 | err:运行超时（>90s）
+[13:36:37] [INFO] 延迟重试 1/2: https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv（2s 后）
+[13:36:37] [WARN] 请求失败 https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv: RuntimeError: HTTP 0: Failed to perform, curl: (28) Operation too slow. Less than 1 bytes/sec transferred the last 20 seconds. See htt
+[13:36:37] [INFO] 完成: 抓取 1 | 条目 0 | 错误 1
+[13:36:37] [INFO] 任务启动: auto_4a27aba37f | 队列 2 | 规则 1
+[13:36:38] [WARN]   curl_cffi 请求失败 403，2.4s 后重试
+[13:36:41] [WARN]   curl_cffi 请求失败 403，4.7s 后重试
+[13:36:46] [INFO] 延迟重试 1/2: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?poolCode=hhad,had,hhgg,bqc&channel=c（2s 后）
+[13:36:46] [WARN] 请求失败 https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?poolCode=hhad,had,hhgg,bqc&channel=c: RateLimitedError: 限流 403: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?poolCode=hhad,had,hhgg,bqc&channel=c (retry_a
+[13:36:50] [WARN]   curl_cffi 请求失败 403，2.3s 后重试
+[13:36:53] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20305 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:36:54] [WARN]   curl_cffi 请求失败 403，4.5s 后重试
+[13:36:57] [INFO] 延迟重试 2/2: https://raw.githubusercontent.com/Fyrd/caniuse/master/features-json/css-grid.json（4s 后）
+[13:36:58] [WARN] 请求失败 https://raw.githubusercontent.com/Fyrd/caniuse/master/features-json/css-grid.json: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20305 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:36:58] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:36:58] [INFO] 完成: 抓取 2 | 条目 0 | 错误 2
+[13:36:59] [INFO] 延迟重试 1/2: https://webapi.sporttery.cn/gateway/jc/basketball/getMatchListV1.qry?poolCode=hhgg,had,sfc&channel=c（2s 后）
+[13:36:59] [WARN] 请求失败 https://webapi.sporttery.cn/gateway/jc/basketball/getMatchListV1.qry?poolCode=hhgg,had,sfc&channel=c: RateLimitedError: 限流 403: https://webapi.sporttery.cn/gateway/jc/basketball/getMatchListV1.qry?poolCode=hhgg,had,sfc&channel=c (retry_afte
+[13:36:59] [WARN]   curl_cffi 请求失败 403，2.6s 后重试
+[13:37:04] [WARN]   curl_cffi 请求失败 403，4.6s 后重试
+[13:37:09] [INFO] 延迟重试 2/2: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?poolCode=hhad,had,hhgg,bqc&channel=c（4s 后）
+[13:37:09] [WARN] 请求失败 https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?poolCode=hhad,had,hhgg,bqc&channel=c: RateLimitedError: 限流 403: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?poolCode=hhad,had,hhgg,bqc&channel=c (retry_a
+[13:37:14] [WARN]   curl_cffi 请求失败 403，2.7s 后重试
+[13:37:17] [WARN]   curl_cffi 请求失败 403，5.0s 后重试
+[13:37:22] [INFO] 延迟重试 2/2: https://webapi.sporttery.cn/gateway/jc/basketball/getMatchListV1.qry?poolCode=hhgg,had,sfc&channel=c（4s 后）
+[13:37:22] [WARN] 请求失败 https://webapi.sporttery.cn/gateway/jc/basketball/getMatchListV1.qry?poolCode=hhgg,had,sfc&channel=c: RateLimitedError: 限流 403: https://webapi.sporttery.cn/gateway/jc/basketball/getMatchListV1.qry?poolCode=hhgg,had,sfc&channel=c (retry_afte
+[13:37:25] [WARN]   curl_cffi 请求失败 403，2.8s 后重试
+[13:37:38] [WARN]   curl_cffi 请求失败 403，4.6s 后重试
+[13:37:44] [WARN] 放弃重试 https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?poolCode=hhad,had,hhgg,bqc&channel=c（已达 2 次）
+[13:37:44] [WARN] 请求失败 https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?poolCode=hhad,had,hhgg,bqc&channel=c: RateLimitedError: 限流 403: https://webapi.sporttery.cn/gateway/jc/football/getMatchListV1.qry?poolCode=hhad,had,hhgg,bqc&channel=c (retry_a
+[13:37:44] [INFO] 完成: 抓取 5 | 条目 0 | 错误 5
+[13:37:44] [INFO] 反爬拦截统计: 403×5
+[13:37:48] [WARN] 任务停止信号已生效，本轮请求中断
+[13:37:48] [INFO] 完成: 抓取 2 | 条目 0 | 错误 1
+❌ #522 error         total=0 332.1s | Can I Use“特性”兼容表，抓取CSS Grid在各浏览器的支持版本，自动更新前端 | err:运行超时（>90s）
+[13:38:13] [INFO] 任务启动: auto_cc60dd4cf7 | 队列 1 | 规则 1
+[13:38:16] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:38:29] [INFO] 任务启动: auto_39c08589b0 | 队列 2 | 规则 1
+[13:38:50] [INFO] 任务启动: auto_4a27aba37f | 队列 2 | 规则 1
+python3(53661) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:38:54] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20002 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:39:20] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20004 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:39:49] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (28) Connection timed out after 20113 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，8.0s 后重试
+[13:39:59] [INFO] 延迟重试 1/3: https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv（2s 后）
+[13:39:59] [WARN] 请求失败 https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv: RuntimeError: HTTP 0: Failed to perform, curl: (28) Connection timed out after 20113 milliseconds. See https://curl.se/libcurl/c/libcu
+[13:40:00] [INFO] 完成: 抓取 2 | 条目 0 | 错误 1
+❌ #561 error         total=0 282.9s | 约翰·霍普金斯大学（镜像）“COVID-19”全球确诊仪表盘历史数据。 | err:运行超时（>90s）
+[13:40:15] [INFO] 任务启动: auto_9374dc6e98 | 队列 1 | 规则 2
+[13:40:16] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:40:19] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:40:23] [INFO] 延迟重试 1/2: https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html（2s 后）
+[13:40:24] [WARN] 请求失败 https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[13:40:26] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:40:29] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:40:33] [INFO] 延迟重试 2/2: https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html（4s 后）
+[13:40:34] [WARN] 请求失败 https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[13:40:37] [WARN] 任务停止信号已生效，本轮请求中断
+[13:40:37] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:40:37] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:40:39] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+🔒 #587 blocked_login total=0 242.6s | 中国体育彩票“竞彩”每日受注赛程，抓取对阵、停售时间。 | err:运行超时（>90s）
+[13:40:40] [INFO] 任务启动: auto_4d81657d66 | 队列 1 | 规则 1
+[13:40:48] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:40:48] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20). See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:40:52] [WARN] 放弃重试 https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html（已达 2 次）
+[13:40:52] [WARN] 请求失败 https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[13:40:53] [INFO] 完成: 抓取 3 | 条目 0 | 错误 3
+[13:41:04] [INFO] 任务启动: auto_cc60dd4cf7 | 队列 1 | 规则 1
+[13:41:08] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #570 empty         total=0 178.5s | 日本央行“短观”调查，每季抓取大型制造业景气判断指数。 | err:
+[13:41:11] [INFO] 任务启动: auto_33e0533f4b | 队列 1 | 规则 1
+[13:41:12] [WARN]   curl_cffi 请求失败 403，2.6s 后重试
+[13:41:15] [WARN]   curl_cffi 请求失败 403，4.9s 后重试
+[13:41:20] [WARN]   curl_cffi 请求失败 403，8.2s 后重试
+[13:41:29] [INFO] 延迟重试 1/3: https://www.bls.gov/news.release/empsit.nr0.htm（2s 后）
+[13:41:29] [WARN] 请求失败 https://www.bls.gov/news.release/empsit.nr0.htm: RateLimitedError: 限流 403: https://www.bls.gov/news.release/empsit.nr0.htm (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:41:36] [WARN]   curl_cffi 请求失败 403，2.7s 后重试
+[13:41:39] [WARN]   curl_cffi 请求失败 403，4.6s 后重试
+[13:41:40] [INFO] 任务启动: auto_9374dc6e98 | 队列 1 | 规则 2
+python3(53927) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:41:45] [WARN]   curl_cffi 请求失败 403，8.5s 后重试
+[13:41:54] [INFO] 延迟重试 2/3: https://www.bls.gov/news.release/empsit.nr0.htm（4s 后）
+[13:41:54] [WARN] 请求失败 https://www.bls.gov/news.release/empsit.nr0.htm: RateLimitedError: 限流 403: https://www.bls.gov/news.release/empsit.nr0.htm (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:41:59] [WARN]   curl_cffi 请求失败 403，2.3s 后重试
+[13:42:02] [WARN]   curl_cffi 请求失败 403，4.5s 后重试
+[13:42:11] [WARN]   curl_cffi 请求失败 403，8.1s 后重试
+[13:42:20] [INFO] 延迟重试 3/3: https://www.bls.gov/news.release/empsit.nr0.htm（8s 后）
+[13:42:20] [WARN] 请求失败 https://www.bls.gov/news.release/empsit.nr0.htm: RateLimitedError: 限流 403: https://www.bls.gov/news.release/empsit.nr0.htm (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:42:39] [INFO] 任务启动: auto_4d81657d66 | 队列 1 | 规则 1
+[13:42:40] [WARN]   curl_cffi 请求失败 403，2.8s 后重试
+python3(53989) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:42:52] [WARN]   curl_cffi 请求失败 403，4.9s 后重试
+[13:43:06] [WARN]   curl_cffi 请求失败 403，8.9s 后重试
+[13:43:11] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+❌ #567 error         total=0 123.7s | 美国劳工部“非农就业”数据，每月抓取新增就业、失业率、时薪。 | err:运行超时（>90s）
+[13:43:15] [WARN] 放弃重试 https://www.bls.gov/news.release/empsit.nr0.htm（已达 3 次）
+[13:43:15] [WARN] 请求失败 https://www.bls.gov/news.release/empsit.nr0.htm: RateLimitedError: 限流 403: https://www.bls.gov/news.release/empsit.nr0.htm (retry_after=0.0s) | 反爬拦截[403] HTTP 403
+[13:43:15] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:43:15] [INFO] 完成: 抓取 4 | 条目 0 | 错误 4
+[13:43:15] [INFO] 反爬拦截统计: 403×4
+[13:43:15] [INFO] 任务启动: auto_38f9e2b32d | 队列 1 | 规则 1
+[13:43:16] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ #569 error         total=0 209.9s | 欧洲央行“利率决议”新闻稿，抓取关键利率与声明措辞。 | err:运行超时（>90s）
+[13:43:45] [INFO] 任务启动: auto_969f6d40a7 | 队列 1 | 规则 1
+[13:43:52] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 #573 blocked_login total=0 243.7s | 各地人社局“人才引进”落户政策，抓取学历、社保、年龄要求，汇总各地落户门槛。 | err:运行超时（>90s）
+[13:44:47] [INFO] 任务启动: auto_8de2742355 | 队列 1 | 规则 1
+[13:44:50] [INFO] 任务启动: auto_969f6d40a7 | 队列 1 | 规则 2
+python3(54187) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:44:52] [INFO] 完成: 抓取 4 | 条目 0 | 错误 0
+[13:45:11] [WARN] 任务停止信号已生效，本轮请求中断
+[13:45:12] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:45:12] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:45:55] [INFO] 延迟重试 1/3: https://www.nfra.gov.cn/cn/view/pages/ItemList.html?itemPId=923&itemId=935（2s 后）
+[13:45:56] [WARN] 请求失败 https://www.nfra.gov.cn/cn/view/pages/ItemList.html?itemPId=923&itemId=935: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[13:46:05] [INFO] 延迟重试 2/3: https://www.nfra.gov.cn/cn/view/pages/ItemList.html?itemPId=923&itemId=935（4s 后）
+[13:46:05] [WARN] 请求失败 https://www.nfra.gov.cn/cn/view/pages/ItemList.html?itemPId=923&itemId=935: RuntimeError: page.evaluate: Execution context was destroyed, most likely because of a navigation
+[13:46:22] [INFO] 任务启动: auto_38f9e2b32d | 队列 2 | 规则 1
+python3(54290) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:46:48] [INFO] 任务启动: auto_8de2742355 | 队列 1 | 规则 1
+python3(54339) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+❌ #270 error         total=0 190.3s | 银保监会“行政许可”公开，每日抓取新批复的保险公司高管任职、机构开业，分析监管动向。 | err:运行超时（>90s）
+[13:47:06] [INFO] 完成: 抓取 2 | 条目 0 | 错误 0
+⚠️ #596 empty         total=0 231.6s | 国家邮政局“快递申诉”红黑榜，每月抓取快递企业有效申诉率。 | err:
+[13:47:07] [INFO] 任务启动: auto_910aee1b2e | 队列 1 | 规则 2
+[13:47:10] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:48:19] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:48:35] [WARN] 任务停止信号已生效，本轮请求中断
+[13:48:39] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ #474 error         total=0 237.2s | 国家医保局“药品目录”，每年抓取新增药品名称、支付标准。 | err:运行超时（>90s）
+[13:48:55] [INFO] 任务启动: auto_910aee1b2e | 队列 1 | 规则 2
+python3(54524) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:50:26] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+🔒 #591 blocked_login total=0 235.4s | 国家广播电视总局“电视剧备案”公示，每月抓取剧目名称、题材、集数。 | err:运行超时（>90s）
+[13:51:03] [WARN] 任务停止信号已生效，本轮请求中断
+[13:51:04] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:51:04] [INFO] 任务启动: auto_8faf26a869 | 队列 2 | 规则 2
+[13:51:07] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:51:07] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:51:13] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:51:13] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:51:18] [INFO] 延迟重试 1/2: https://www.changfang.com/chuzu/dongguan/（2s 后）[13:51:18] [INFO] 延迟重试 1/2: https://www.changfang.com/chuzu/（2s 后）
+
+[13:51:18] [WARN] 请求失败 https://www.changfang.com/chuzu/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+[13:51:18] [WARN] 请求失败 https://www.changfang.com/chuzu/dongguan/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+[13:51:21] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:51:21] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:51:32] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:51:32] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[13:51:36] [INFO] 延迟重试 2/2: https://www.changfang.com/chuzu/（4s 后）
+[13:51:36] [INFO] 延迟重试 2/2: https://www.changfang.com/chuzu/dongguan/（4s 后）
+[13:51:36] [WARN] 请求失败 https://www.changfang.com/chuzu/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+[13:51:36] [WARN] 请求失败 https://www.changfang.com/chuzu/dongguan/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+[13:51:41] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:51:41] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[13:51:44] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试[13:51:44] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+
+[13:51:48] [WARN] 放弃重试 https://www.changfang.com/chuzu/（已达 2 次）
+[13:51:48] [WARN] 放弃重试 https://www.changfang.com/chuzu/dongguan/（已达 2 次）
+[13:51:48] [WARN] 请求失败 https://www.changfang.com/chuzu/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf[13:51:48] [WARN] 请求失败 https://www.changfang.com/chuzu/dongguan/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+
+[13:51:48] [INFO] 完成: 抓取 6 | 条目 0 | 错误 6
+[13:54:37] [INFO] 任务启动: auto_8faf26a869 | 队列 1 | 规则 2
+python3(54825) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[13:56:33] [WARN] 任务停止信号已生效，本轮请求中断
+[13:56:33] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[13:56:33] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+🔒 #164 blocked_login total=0 344.6s | 厂房在线“广东·东莞”出租信息，抓取厂房面积、层高、承重、货梯数量，筛选适合精密制造的场 | err:运行超时（>90s）
+[13:56:47] [INFO] 任务启动: auto_b782e26a30 | 队列 1 | 规则 1
+[13:56:50] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[13:57:59] [INFO] 任务启动: auto_b782e26a30 | 队列 1 | 规则 1
+[13:58:02] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #365 empty         total=0 76.2s | 药房网商城“阿托伐他汀”所有品牌价格，每周抓取不同厂家规格的价格、是否处方药，对比药店售 | err:
+
+完成 79：{'blocked_login': 16, 'error': 34, 'empty': 24, 'ok': 4, 'ok_late': 1}

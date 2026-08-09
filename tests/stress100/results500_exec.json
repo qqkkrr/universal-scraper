@@ -92,19 +92,6 @@
   "desc": "多抓鱼微信小程序（通过抓包）在售二手书“文学”分类，抓取全部书目名称、品相折扣、预计收书价，分析二手书流转。"
  },
  {
-  "id": 112,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 31.3,
-  "desc": "中国图书网“特价书”满减区，每天抓取活动图书清单、原价、特价、剩余库存百分比，为书虫找便宜货源。"
- },
- {
   "id": 106,
   "ok": true,
   "total": 3,
@@ -121,19 +108,6 @@
   },
   "secs": 57.5,
   "desc": "网易严选“居家”类目热销榜，每周抓取前30商品的名称、价格、好评率、材质描述，分析精品电商爆款要素。"
- },
- {
-  "id": 110,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 2.9,
-  "desc": "孔夫子旧书网搜索“签名本”，按价格排序抓取前80条商品，包含书名、品相、签名者、售价、卖家，服务藏书爱好者。"
  },
  {
   "id": 114,
@@ -173,19 +147,6 @@
   "first": {},
   "secs": 5.2,
   "desc": "当当网“图书畅销榜·经管”Top100，每周一抓取书名、作者、出版社、当当价、评论数，构建商科阅读风向标。"
- },
- {
-  "id": 113,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 0.6,
-  "desc": "义乌购“圣诞用品”类目下按销量排名前100商品，每月抓取一次名称、价格、起批量、供货商，预测外贸热点。"
  },
  {
   "id": 116,
@@ -551,19 +512,6 @@
   "desc": "京东“发现”频道好物推荐帖，抓取帖子标题、内容商品卡片、阅读量，识别官方主推的合作商品。"
  },
  {
-  "id": 139,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 91.9,
-  "desc": "日本乐天市场“Rakuten Ichiba”零食类目排行，每日抓取Top20商品标题、价格、评分、配送方式，用于日货代购选品。"
- },
- {
   "id": 140,
   "ok": false,
   "total": 0,
@@ -765,19 +713,6 @@
   "desc": "日本不动产网站“SUUMO”搜索“东京都·中古マンション”，每月抓取前100房源的价格、面积、築年数、车站距离，分析东京二手房价。"
  },
  {
-  "id": 161,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 0.7,
-  "desc": "乐居“上海·新盘”动态，每日抓取新取得预售证楼盘的备案名、套数、备案均价、认筹时间，做打新攻略。"
- },
- {
   "id": 158,
   "ok": false,
   "total": 0,
@@ -903,19 +838,6 @@
   "desc": "日本At Home“大阪·民宿”出售一栋物件，抓取价格、客房数、牌照类型、年化回报率，为投资移民提供标的。 **招聘、职场与人力（176–200）**"
  },
  {
-  "id": 163,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 85.3,
-  "desc": "土流网“工业用地转让”，每日抓取长三角地区出让地块的面积、年限、价格、产业要求，为建厂选址。"
- },
- {
   "id": 166,
   "ok": false,
   "total": 0,
@@ -979,19 +901,6 @@
   "first": {},
   "secs": 23.1,
   "desc": "巴乐兔“上海·闵行”合租房源，抓取单间价格、面积、独卫/阳台、室友性别要求，分析合租市场细分。"
- },
- {
-  "id": 172,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 0.5,
-  "desc": "安居客“经纪人”信息，抓取某区域活跃经纪人的服务年限、评分、成交量标签，辅助购房者选择。"
  },
  {
   "id": 173,
@@ -1076,19 +985,6 @@
   "desc": "贝壳找房“VR看房”标记房源，抓取带VR标签的房源数量及在不同城市占比，衡量技术渗透率。"
  },
  {
-  "id": 174,
-  "ok": false,
-  "total": 0,
-  "fetched": 2,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 1.9,
-  "desc": "深圳房地产信息网“二手房成交数据”每月公布页面，抓取各片区成交套数、参考均价，与挂牌价对比。"
- },
- {
   "id": 176,
   "ok": true,
   "total": 14,
@@ -1138,19 +1034,6 @@
   "first": {},
   "secs": 33.3,
   "desc": "拉勾教育“训练营”课程页面，抓取课程大纲、价格、导师、学员评价，输出IT培训产品分析。"
- },
- {
-  "id": 184,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 8.7,
-  "desc": "应届生求职网“宣讲会”模块，按城市“西安”过滤，9月每日抓取所有高校宣讲会安排，制作宣讲行程地图。"
  },
  {
   "id": 181,
@@ -1216,32 +1099,6 @@
   "first": {},
   "secs": 33.4,
   "desc": "Glassdoor“Salaries”页面，搜索“Product Manager San Francisco”，每月抓取薪资样本量、均值、区间，做海外薪酬对标。"
- },
- {
-  "id": 185,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 45.7,
-  "desc": "海投网“秋招”公司列表，抓取所有开启秋招的公司名称、网申截止日期、招聘岗位数，做进度看板。"
- },
- {
-  "id": 199,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 2.4,
-  "desc": "电鸭社区“远程工作”板块，每日抓取新发布的远程项目名称、预算、技能要求、联系方式，服务自由职业。"
  },
  {
   "id": 182,
@@ -1331,19 +1188,6 @@
   "first": {},
   "secs": 107.8,
   "desc": "小红书“官方薯”账号发布的所有笔记，抓取活动主题、规则、参与品牌，收集平台官方运营风向。"
- },
- {
-  "id": 207,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 3.2,
-  "desc": "豆瓣“豆列”搜索“2025年度读书清单”，抓取豆列中的图书书名、豆瓣评分、推荐语，生成阅读推荐。"
  },
  {
   "id": 200,
@@ -2039,19 +1883,6 @@
   "desc": "唱吧“热门作品”，每日抓取翻唱歌曲名、原唱、收听量、礼物，看翻唱趋势。"
  },
  {
-  "id": 244,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 1.3,
-  "desc": "堆糖网“壁纸”分类，每日抓取热门壁纸的图片链接、采集数、标签，作为设计灵感素材库。"
- },
- {
   "id": 256,
   "ok": true,
   "total": 50,
@@ -2070,19 +1901,6 @@
   },
   "secs": 44.1,
   "desc": "好买基金网“私募排行”，抓取头部私募基金的名称、经理、年化收益、最大回撤，服务高净值客户推荐。"
- },
- {
-  "id": 260,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 6.4,
-  "desc": "清科“投资界”快讯，每小时抓取最新发布的投融资快讯标题，汇总实时资本动态。"
  },
  {
   "id": 226,
@@ -2301,19 +2119,6 @@
   "first": {},
   "secs": 188.9,
   "desc": "微博“iPanda熊猫频道”账号，抓取所有熊猫趣图的高清原图链接与文案，作为萌宠内容源。"
- },
- {
-  "id": 254,
-  "ok": false,
-  "total": 0,
-  "fetched": 6,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 40.5,
-  "desc": "巨潮资讯网“基金公告”栏目，每周抓取所有ETF的申赎清单文件（PCF），分析份额变化。"
  },
  {
   "id": 283,
@@ -2604,19 +2409,6 @@
   "desc": "天天基金网“基金吧”热门帖子，每日抓取关于某明星基金经理的讨论主题和情绪词，做基民舆情。"
  },
  {
-  "id": 259,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 1.8,
-  "desc": "投中网“融资事件”频道，每日抓取国内一级市场融资项目的公司、轮次、金额、投资方，输出创投日报。"
- },
- {
   "id": 299,
   "ok": false,
   "total": 0,
@@ -2656,19 +2448,6 @@
   "desc": "IT桔子“行业图谱”新能源车企列表，抓取企业估值、融资历程、主要产品，制作竞争格局图。"
  },
  {
-  "id": 268,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 1.2,
-  "desc": "中国人民银行“货币统计”社会融资规模存量，每月抓取表格数据，制作社融趋势图。"
- },
- {
   "id": 273,
   "ok": true,
   "total": 19,
@@ -2700,19 +2479,6 @@
   "first": {},
   "secs": 52.8,
   "desc": "飞常准“机场延误”页面，每日抓取全国千万级机场的准点率、延误时长，制作航空出行参考。"
- },
- {
-  "id": 278,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 0.5,
-  "desc": "郑州商品交易所“仓单日报”，每日抓取棉花、白糖等品种的仓单数量，研判交割压力。"
  },
  {
   "id": 288,
@@ -2760,19 +2526,6 @@
   },
   "secs": 101.3,
   "desc": "中国煤炭市场网“环渤海动力煤价格指数”，每周三抓取最新指数，跟踪煤价。"
- },
- {
-  "id": 285,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 18.6,
-  "desc": "中国养猪网“猪价系统”，每日抓取外三元、内三元、土杂猪的出栏均价，预测CPI食品项。"
  },
  {
   "id": 307,
@@ -2846,19 +2599,6 @@
   "first": {},
   "secs": 106.3,
   "desc": "小猪民宿“成都·春熙路”附近两居室，每日抓取可预订房源价格、好评率、设施，服务家庭出游。"
- },
- {
-  "id": 286,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 81.7,
-  "desc": "金投网“银行理财产品”频道，每日抓取在售产品名称、发行银行、期限、预期收益上限，比较理财收益。"
  },
  {
   "id": 296,
@@ -2944,19 +2684,6 @@
   "first": {},
   "secs": 137.2,
   "desc": "华泰证券“涨乐财富通”公开课，抓取课程标题、讲师、预约人数，了解券商投教重点。"
- },
- {
-  "id": 297,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 91.8,
-  "desc": "CoinGecko“Trending”代币，每半小时抓取热门搜索币种，发现短时热点。"
  },
  {
   "id": 294,
@@ -3233,19 +2960,6 @@
   "first": {},
   "secs": 154.4,
   "desc": "世界邦“定制游”案例展示，抓取公开的旅行方案行程、天数、人均价格，分析定制游偏好。"
- },
- {
-  "id": 320,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 3.6,
-  "desc": "途牛“跟团游”北京出发，抓取所有目的地为“西藏”的路线名称、天数、价格、景点数量，做传统旅行社产品对比。"
  },
  {
   "id": 324,
@@ -3635,19 +3349,6 @@
   "desc": "学堂在线“清华大学”所有开放课程，每月抓取选课人数、课程评价，评估校内对外影响力。"
  },
  {
-  "id": 338,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 9.8,
-  "desc": "考研帮“报录比”查询，批量抓取各校各专业的报考人数、录取人数，整理考研难度系数表。"
- },
- {
   "id": 340,
   "ok": false,
   "total": 0,
@@ -3788,19 +3489,6 @@
   "desc": "知网“学科分类·计算机软件及应用”下学位论文，抓取2025年优秀博士论文的标题、学校、导师，用于研究生参考选题。"
  },
  {
-  "id": 349,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 87.4,
-  "desc": "全国哲学社会科学工作办公室“项目立项”公示，抓取年度立项课题名称、负责人、单位，分析学术资源分布。"
- },
- {
   "id": 375,
   "ok": false,
   "total": 0,
@@ -3812,19 +3500,6 @@
   "first": {},
   "secs": 85.1,
   "desc": "爱康国宾“体检套餐”，抓取所有套餐名称、包含项目、价格、适用性别，对比不同体检机构。"
- },
- {
-  "id": 380,
-  "ok": false,
-  "total": 0,
-  "fetched": 2,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 12.1,
-  "desc": "宝宝树“育儿问答”热门问题，每日抓取问题标题、回答数、关键词，洞察新手妈妈痛点。"
  },
  {
   "id": 384,
@@ -3949,19 +3624,6 @@
   "first": {},
   "secs": 67.5,
   "desc": "知识星球“生财有术”精华贴（需抓包），抓取标题和点赞数，不抓内容仅做趋势。"
- },
- {
-  "id": 364,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 9.4,
-  "desc": "快速问医生“有问必答”板块，抓取最新提问的标题、科室、悬赏金额、回答数，分析公众健康焦虑。"
  },
  {
   "id": 368,
@@ -4113,19 +3775,6 @@
   }
  },
  {
-  "id": 385,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 3.7,
-  "desc": "大象公会“医学”话题文章，抓取所有历史文章标题、摘要、阅读数，科普素材沉淀。 **汽车、交通与出行服务（386–410）**"
- },
- {
   "id": 370,
   "ok": true,
   "total": 20,
@@ -4220,19 +3869,6 @@
   "desc": "快狗打车“企业服务”报价页面，抓取车型与基础运价，供行政采购对比。"
  },
  {
-  "id": 382,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 121.1,
-  "desc": "宠物医院“瑞鹏”官网，抓取门店地址、营业时间、医师团队，做宠物医疗资源整理。"
- },
- {
   "id": 378,
   "ok": false,
   "total": 0,
@@ -4285,19 +3921,6 @@
   "desc": "易车“降价”频道，每日抓取经销商对外报价的降价幅度，针对“奔驰C级”跟踪终端优惠。"
  },
  {
-  "id": 383,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 105.8,
-  "desc": "E宠商城“进口狗粮”品牌列表，抓取品牌名、产地、是否有中国代理、成分表，制作选粮决策树。"
- },
- {
   "id": 402,
   "ok": false,
   "total": 0,
@@ -4309,19 +3932,6 @@
   "first": {},
   "secs": 68.6,
   "desc": "滴滴出行“青菜拼车”入口价格估算，模拟指定路线上下班拼车价，每早抓取，分析通勤成本。"
- },
- {
-  "id": 388,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 4.8,
-  "desc": "卡车之家“载货车”报价，每周抓取各品牌轻卡价格、货箱长度、载重，为物流公司购车参考。"
  },
  {
   "id": 413,
@@ -4532,19 +4142,6 @@
   "desc": "嘀嗒出行“顺风车”热门线路，抓取北京-燕郊线路的每日发布订单数、均价，反映跨城通勤。"
  },
  {
-  "id": 408,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 45.5,
-  "desc": "航旅纵横“机场大屏”模拟，抓取某机场今日出港航班准点率、延误时间，通过公开接口。"
- },
- {
   "id": 430,
   "ok": false,
   "total": 0,
@@ -4556,19 +4153,6 @@
   "first": {},
   "secs": 82.3,
   "desc": "全国12315平台“消费投诉”公示，针对“健身卡”投诉，每日抓取投诉标题、企业名称、处理结果，消费者预警。"
- },
- {
-  "id": 434,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 4.0,
-  "desc": "迪卡侬官网“跑步”分类，每周抓取所有跑鞋型号、价格、用户评价数，做运动品牌跟踪。"
  },
  {
   "id": 418,
@@ -4715,19 +4299,6 @@
   "desc": "大众点评“酒吧”静吧分类，抓取鸡尾酒吧的招牌酒名称、人均、环境评分，形成酒吧打卡清单。"
  },
  {
-  "id": 450,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 52.4,
-  "desc": "海关总署“统计快讯”进出口商品，每月抓取大豆、铁矿石进口量及金额。"
- },
- {
   "id": 415,
   "ok": false,
   "total": 0,
@@ -4819,19 +4390,6 @@
   "desc": "爱宠医生“在线问诊”公开问答，抓取常见宠物病症与医生建议，建立宠物常见病问答。"
  },
  {
-  "id": 429,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 4.3,
-  "desc": "中国邮政“邮票”网上营业厅，抓取新发行邮票名称、面值、发行量、设计图，收集邮票信息。"
- },
- {
   "id": 424,
   "ok": false,
   "total": 0,
@@ -4871,19 +4429,6 @@
   "desc": "齐家网“装修日记”，抓取日记中的费用清单、避坑指南，提取装修项目价格基准。"
  },
  {
-  "id": 443,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 0.8,
-  "desc": "商务部“对外投资”统计，每月抓取中国对外直接投资国别、行业数据。"
- },
- {
   "id": 433,
   "ok": false,
   "total": 0,
@@ -4895,19 +4440,6 @@
   "first": {},
   "secs": 103.3,
   "desc": "Keep“商城”热销运动装备，每日抓取商品名称、价格、评分，分析运动消费趋势。"
- },
- {
-  "id": 447,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 2.7,
-  "desc": "应急管理部“灾害预警”通知，抓取地质灾害气象风险预警的省份、等级。"
  },
  {
   "id": 428,
@@ -4933,19 +4465,6 @@
    "description": "豆瓣",
    "detail_status": "200"
   }
- },
- {
-  "id": 437,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 36.4,
-  "desc": "美乐乐“家具”销量榜，每周抓取Top50家具名称、价格、销量，绘制网销家具图谱。"
  },
  {
   "id": 462,
@@ -5005,32 +4524,6 @@
    "body": "",
    "detail_status": "200"
   }
- },
- {
-  "id": 445,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 3.3,
-  "desc": "生态环境部“空气质量预报”，每日抓取重点城市未来3天AQI级别。"
- },
- {
-  "id": 449,
-  "ok": false,
-  "total": 0,
-  "fetched": 2,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 15.9,
-  "desc": "国家粮食和物资储备局“秋粮收购”进度，每周抓取主产区收购量。"
  },
  {
   "id": 466,
@@ -5103,19 +4596,6 @@
   "desc": "信用中国“失信被执行人”曝光台，抓取每日新增的“老赖”姓名、案号、履行情况。"
  },
  {
-  "id": 461,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 9.7,
-  "desc": "最高人民法院“指导性案例”，抓取案例标题、裁判要点、关键词。"
- },
- {
   "id": 475,
   "ok": false,
   "total": 0,
@@ -5153,32 +4633,6 @@
   "first": {},
   "secs": 99.0,
   "desc": "地方数据开放平台（如上海数据开放），“交通”类数据集列表，抓取数据集名称、更新频率、下载量。"
- },
- {
-  "id": 444,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 1.7,
-  "desc": "国家能源局“风电并网”数据，每月抓取各省新增装机容量。"
- },
- {
-  "id": 448,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 2.2,
-  "desc": "农业农村部“农产品批发价格200指数”，每日抓取指数值及分项涨跌。"
  },
  {
   "id": 455,
@@ -5223,19 +4677,6 @@
   },
   "secs": 150.7,
   "desc": "直播吧“足球”视频集锦，每日抓取新发布集锦的标题、比赛、时长。"
- },
- {
-  "id": 452,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 84.5,
-  "desc": "中国地震台网“最近24小时地震”，抓取震级、地点、震源深度，绘制分布。"
  },
  {
   "id": 469,
@@ -5331,19 +4772,6 @@
   "desc": "深圳市“i深圳”公开服务事项列表，抓取所有可在线办理事项名称、部门。"
  },
  {
-  "id": 478,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 120.8,
-  "desc": "懂球帝“中超”转会流言，抓取流言标题、球员、传闻俱乐部、可信度。"
- },
- {
   "id": 491,
   "ok": true,
   "total": 1,
@@ -5390,32 +4818,6 @@
   "desc": "唱吧“热门比赛”主题，抓取比赛名称、参与人数、截止时间。"
  },
  {
-  "id": 471,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 99.9,
-  "desc": "各地方招生考试院“高考”分段表，每年抓取文科理科一分一段表。"
- },
- {
-  "id": 476,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 22.3,
-  "desc": "腾讯体育“NBA”赛程，每日抓取所有比赛的对阵、时间、直播链接。"
- },
- {
   "id": 486,
   "ok": false,
   "total": 0,
@@ -5453,19 +4855,6 @@
   "first": {},
   "secs": 110.8,
   "desc": "烂番茄“New Movies”影评，抓取新鲜度、观众评分、影评人共识。"
- },
- {
-  "id": 503,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 23.2,
-  "desc": "Gitee“推荐”项目，每日抓取前10项目名称、Star数、语言、分类。"
  },
  {
   "id": 480,
@@ -5517,45 +4906,6 @@
   "desc": "中国版权保护中心“作品登记公告”，每月抓取软件著作权登记的软件名称、著作权人。"
  },
  {
-  "id": 484,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 114.9,
-  "desc": "NGA“艾泽拉斯国家地理论坛”前瞻区，抓取魔兽世界新版本补丁说明帖子。"
- },
- {
-  "id": 507,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 149.0,
-  "desc": "Stack Overflow“Tags”热度，每月抓取所有技术标签的问题总量、本周提问量，出技术趋势报告。"
- },
- {
-  "id": 464,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 159.9,
-  "desc": "中国人大网“法律草案”征求意见，抓取草案名称、征求意见截止日、参与人数。"
- },
- {
   "id": 488,
   "ok": false,
   "total": 0,
@@ -5580,45 +4930,6 @@
   "first": {},
   "secs": 168.1,
   "desc": "Product Hunt“Today”页面，每日抓取所有产品名称、简介、upvotes数、制作人。"
- },
- {
-  "id": 468,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 44.5,
-  "desc": "国家卫健委“食品安全标准”数据，抓取最新污染物限量标准表格。"
- },
- {
-  "id": 472,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 3.9,
-  "desc": "阳光高考“招生章程”，抓取所有双一流高校章程的链接、招生人数限制。"
- },
- {
-  "id": 477,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 20.3,
-  "desc": "NBA中国官网“数据”球员场均得分榜，每日抓取前50球员得分、篮板、助攻。"
  },
  {
   "id": 515,
@@ -5699,19 +5010,6 @@
   "desc": "任天堂eShop“畅销”Switch游戏，每周抓取前20游戏名称、价格、发行商。"
  },
  {
-  "id": 500,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 6.7,
-  "desc": "IMDb“Top 250 Movies”完整榜单，每月抓取电影名、年份、评分、排名变动。 **科技、极客与数据源（501–525）**"
- },
- {
   "id": 519,
   "ok": true,
   "total": 13,
@@ -5760,19 +5058,6 @@
   "desc": "游民星空“单机游戏”发售表，每月抓取当月发售游戏名称、平台、类型、是否支持中文。"
  },
  {
-  "id": 523,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 130.9,
-  "desc": "国家信息安全漏洞库(CNNVD)，每日抓取新增漏洞名称、危害等级、影响产品。"
- },
- {
   "id": 502,
   "ok": false,
   "total": 0,
@@ -5784,19 +5069,6 @@
   "first": {},
   "secs": 151.5,
   "desc": "GitLab“Explore”公开项目，抓取最近更新项目的名称、星数、主题。"
- },
- {
-  "id": 504,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 144.8,
-  "desc": "Docker Hub“python”官方镜像标签列表，监控每次构建的Digest和大小。"
  },
  {
   "id": 508,
@@ -5818,32 +5090,6 @@
   "desc": "SegmentFault“问答”频道，抓取带有“区块链”标签的最新问题标题与回复数。"
  },
  {
-  "id": 506,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 24.8,
-  "desc": "PyPI“最近更新”RSS，监控包名出现“security”标识，触发内部漏洞检查。"
- },
- {
-  "id": 510,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 11.1,
-  "desc": "Hacker News“Ask HN”板块，每日抓取Top 10的标题与评论数，观察技术圈热点问题。"
- },
- {
   "id": 493,
   "ok": false,
   "total": 0,
@@ -5855,19 +5101,6 @@
   "first": {},
   "secs": 107.1,
   "desc": "企鹅电竞“和平精英”赛事直播间，抓取赛程标题、观看人气、礼物收入。"
- },
- {
-  "id": 512,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 158.0,
-  "desc": "Reddit“r/MachineLearning”热帖，每日抓取标题、分数、评论数。"
  },
  {
   "id": 527,
@@ -5928,19 +5161,6 @@
   "desc": "阿里云“帮助文档”某个产品所有API名称和描述，用于文档索引。"
  },
  {
-  "id": 518,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 11.7,
-  "desc": "AWS“价格计算器”页面，抓取EC2各实例规格的按需价格，更新云成本模型。"
- },
- {
   "id": 501,
   "ok": false,
   "total": 0,
@@ -5959,19 +5179,6 @@
   },
   "secs": 12.3,
   "desc": "GitHub“Explore”页面，每日抓取Trending repositories的name, description, language, stars。"
- },
- {
-  "id": 522,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 2.2,
-  "desc": "Can I Use“特性”兼容表，抓取CSS Grid在各浏览器的支持版本，自动更新前端知识库。"
  },
  {
   "id": 526,
@@ -6193,19 +5400,6 @@
   "desc": "我的农产品网“豆粕”基差报价，每日抓取沿海主要油厂报价。"
  },
  {
-  "id": 509,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 149.2,
-  "desc": "V2EX“最热”节点每日新主题，抓取标题、节点、回复数。"
- },
- {
   "id": 532,
   "ok": true,
   "total": 19,
@@ -6227,19 +5421,6 @@
   },
   "secs": 56.2,
   "desc": "各地农产品批发市场官网（如北京新发地），每日抓取常见蔬菜的最高价最低价。"
- },
- {
-  "id": 538,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 54.0,
-  "desc": "中果网“苹果”期货交割品报价，每日抓取各产区纸袋苹果价格。"
  },
  {
   "id": 536,
@@ -6633,32 +5814,6 @@
   "desc": "标普全球“PMI”初值发布，每月抓取美国、欧元区制造业PMI。"
  },
  {
-  "id": 570,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 9.9,
-  "desc": "日本央行“短观”调查，每季抓取大型制造业景气判断指数。"
- },
- {
-  "id": 564,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 86.1,
-  "desc": "国际能源署“石油市场报告”，每月抓取全球供需平衡表关键数字。"
- },
- {
   "id": 568,
   "ok": true,
   "total": 3,
@@ -6683,19 +5838,6 @@
   "first": {},
   "secs": 114.5,
   "desc": "北大法宝“法律法规”中央司法解释，抓取最新发布的司法解释标题、发布日期、效力。"
- },
- {
-  "id": 545,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 11.5,
-  "desc": "中华商标协会“商标品牌价值”排名，每年抓取上榜品牌名称、价值、排名变动。"
  },
  {
   "id": 563,
@@ -6834,32 +5976,6 @@
   "desc": "中国货币网“中债估值”，每日抓取指定债券的估值收益率。"
  },
  {
-  "id": 567,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 111.9,
-  "desc": "美国劳工部“非农就业”数据，每月抓取新增就业、失业率、时薪。"
- },
- {
-  "id": 584,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 12.7,
-  "desc": "全国认证认可信息公共服务平台，抓取某机构的ISO认证范围、有效期。"
- },
- {
   "id": 578,
   "ok": false,
   "total": 0,
@@ -6944,32 +6060,6 @@
   "desc": "中国保险行业协会“互联网保险”产品信息，抓取产品名称、备案号。"
  },
  {
-  "id": 575,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 8.3,
-  "desc": "文化和旅游部“出境旅游目的地”名单，抓取新增恢复出境团队游国家。"
- },
- {
-  "id": 596,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 8.4,
-  "desc": "国家邮政局“快递申诉”红黑榜，每月抓取快递企业有效申诉率。"
- },
- {
   "id": 557,
   "ok": false,
   "total": 0,
@@ -7027,19 +6117,6 @@
   "desc": "全球风能理事会“GWEC”年报，抓取各国风电新增装机容量，更新新能源数据库。"
  },
  {
-  "id": 561,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 78.7,
-  "desc": "约翰·霍普金斯大学（镜像）“COVID-19”全球确诊仪表盘历史数据。"
- },
- {
   "id": 590,
   "ok": false,
   "total": 0,
@@ -7066,19 +6143,6 @@
   "desc": "芝麻信用“企业信用”公开展示页，抓取某企业信用评分及维度（如公开）。"
  },
  {
-  "id": 587,
-  "ok": false,
-  "total": 0,
-  "fetched": 0,
-  "kind": "error",
-  "error": "运行超时（>75s）",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 98.9,
-  "desc": "中国体育彩票“竞彩”每日受注赛程，抓取对阵、停售时间。"
- },
- {
   "id": 565,
   "ok": false,
   "total": 0,
@@ -7103,45 +6167,6 @@
   "first": {},
   "secs": 123.3,
   "desc": "各地通管局“ICP备案”批量查询，验证域名备案主体。"
- },
- {
-  "id": 591,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 2.5,
-  "desc": "国家广播电视总局“电视剧备案”公示，每月抓取剧目名称、题材、集数。"
- },
- {
-  "id": 569,
-  "ok": false,
-  "total": 0,
-  "fetched": 3,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 67.9,
-  "desc": "欧洲央行“利率决议”新闻稿，抓取关键利率与声明措辞。"
- },
- {
-  "id": 573,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 9.8,
-  "desc": "各地人社局“人才引进”落户政策，抓取学历、社保、年龄要求，汇总各地落户门槛。"
  },
  {
   "id": 598,
@@ -7280,19 +6305,6 @@
   "desc": "微拍堂“紫砂壶”类目下正在进行的热拍商品，每10分钟抓取出价记录、当前价、落槌倒计时，辅助捡漏。"
  },
  {
-  "id": 164,
-  "ok": false,
-  "total": 0,
-  "fetched": 6,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 42.4,
-  "desc": "厂房在线“广东·东莞”出租信息，抓取厂房面积、层高、承重、货梯数量，筛选适合精密制造的场地。"
- },
- {
   "id": 107,
   "ok": false,
   "total": 0,
@@ -7356,19 +6368,6 @@
   },
   "secs": 13.4,
   "desc": "第一太平戴维斯官网“研究报告”板块，抓取各城市甲级写字楼季度报告pdf链接，自动下载并解析空置率、租金指数。"
- },
- {
-  "id": 270,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 3.7,
-  "desc": "银保监会“行政许可”公开，每日抓取新批复的保险公司高管任职、机构开业，分析监管动向。"
  },
  {
   "id": 362,
@@ -7436,32 +6435,6 @@
   "desc": "万门大学（已关闭，可换）类似平台“小鹅通”某店铺所有课程，抓取课程封面、标题、价格、购买人数。"
  },
  {
-  "id": 474,
-  "ok": false,
-  "total": 0,
-  "fetched": 4,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 10.2,
-  "desc": "国家医保局“药品目录”，每年抓取新增药品名称、支付标准。"
- },
- {
-  "id": 365,
-  "ok": false,
-  "total": 0,
-  "fetched": 1,
-  "kind": "empty",
-  "error": "",
-  "sample_n": 0,
-  "source": "http",
-  "first": {},
-  "secs": 4.2,
-  "desc": "药房网商城“阿托伐他汀”所有品牌价格，每周抓取不同厂家规格的价格、是否处方药，对比药店售价。"
- },
- {
   "id": 363,
   "ok": false,
   "total": 0,
@@ -7499,5 +6472,1078 @@
   "first": {},
   "secs": 94.9,
   "desc": "汽车之家“车型库”，抓取所有在售SUV的参数：长宽高、轴距、油箱容积、后备箱体积，构建车型参数数据库。"
+ },
+ {
+  "id": 112,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 142.6,
+  "desc": "中国图书网“特价书”满减区，每天抓取活动图书清单、原价、特价、剩余库存百分比，为书虫找便宜货源。"
+ },
+ {
+  "id": 110,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 161.4,
+  "desc": "孔夫子旧书网搜索“签名本”，按价格排序抓取前80条商品，包含书名、品相、签名者、售价、卖家，服务藏书爱好者。"
+ },
+ {
+  "id": 113,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 207.0,
+  "desc": "义乌购“圣诞用品”类目下按销量排名前100商品，每月抓取一次名称、价格、起批量、供货商，预测外贸热点。"
+ },
+ {
+  "id": 139,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 138.1,
+  "desc": "日本乐天市场“Rakuten Ichiba”零食类目排行，每日抓取Top20商品标题、价格、评分、配送方式，用于日货代购选品。"
+ },
+ {
+  "id": 163,
+  "ok": false,
+  "total": 0,
+  "fetched": 4,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 100.8,
+  "desc": "土流网“工业用地转让”，每日抓取长三角地区出让地块的面积、年限、价格、产业要求，为建厂选址。"
+ },
+ {
+  "id": 161,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 231.6,
+  "desc": "乐居“上海·新盘”动态，每日抓取新取得预售证楼盘的备案名、套数、备案均价、认筹时间，做打新攻略。"
+ },
+ {
+  "id": 184,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 276.8,
+  "desc": "应届生求职网“宣讲会”模块，按城市“西安”过滤，9月每日抓取所有高校宣讲会安排，制作宣讲行程地图。"
+ },
+ {
+  "id": 172,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 340.5,
+  "desc": "安居客“经纪人”信息，抓取某区域活跃经纪人的服务年限、评分、成交量标签，辅助购房者选择。"
+ },
+ {
+  "id": 174,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 274.9,
+  "desc": "深圳房地产信息网“二手房成交数据”每月公布页面，抓取各片区成交套数、参考均价，与挂牌价对比。"
+ },
+ {
+  "id": 185,
+  "ok": false,
+  "total": 0,
+  "fetched": 3,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 144.4,
+  "desc": "海投网“秋招”公司列表，抓取所有开启秋招的公司名称、网申截止日期、招聘岗位数，做进度看板。"
+ },
+ {
+  "id": 207,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 254.6,
+  "desc": "豆瓣“豆列”搜索“2025年度读书清单”，抓取豆列中的图书书名、豆瓣评分、推荐语，生成阅读推荐。"
+ },
+ {
+  "id": 199,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 209.7,
+  "desc": "电鸭社区“远程工作”板块，每日抓取新发布的远程项目名称、预算、技能要求、联系方式，服务自由职业。"
+ },
+ {
+  "id": 260,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 265.9,
+  "desc": "清科“投资界”快讯，每小时抓取最新发布的投融资快讯标题，汇总实时资本动态。"
+ },
+ {
+  "id": 244,
+  "ok": true,
+  "total": 14,
+  "fetched": 0,
+  "kind": "ok",
+  "error": "运行超时（>90s）",
+  "sample_n": 5,
+  "source": "browser",
+  "first": {
+   "标题": "Holle Kitty壁纸套图",
+   "图片链接": "https://c-ssl.dtstatic.com/uploads/blog/202604/07/JOS32qq4fWwWoNO.thumb.400_0.jpg_webp",
+   "链接": "https://www.duitang.com/blog/?id=1570823697",
+   "作者": "豆豆豆丫",
+   "作者链接": "https://www.duitang.com/people/?id=23512783",
+   "专辑": "是壁纸套图啊！",
+   "专辑链接": "https://www.duitang.com/album/?id=109820811",
+   "采集数": 0,
+   "标签": "是壁纸套图啊！",
+   "_url": "https://www.duitang.com/napi/blog/list/by_keyword/?kw=%E5%A3%81%E7%BA%B8&start=0&limit=24",
+   "_parser": "llm_fallback"
+  },
+  "secs": 377.7,
+  "desc": "堆糖网“壁纸”分类，每日抓取热门壁纸的图片链接、采集数、标签，作为设计灵感素材库。"
+ },
+ {
+  "id": 254,
+  "ok": true,
+  "total": 10,
+  "fetched": 0,
+  "kind": "ok",
+  "error": "运行超时（>90s）",
+  "sample_n": 5,
+  "source": "browser",
+  "first": {
+   "标题": "美国50ETF：汇添富基金管理股份有限公司关于调整旗下部分ETF申购赎回清单计算公式的公告",
+   "链接": "finalpage/2024-06-15/1220358024.PDF",
+   "时间": "2024-06-15",
+   "证券代码": "159577",
+   "证券名称": "美国50ETF",
+   "_url": "https://www.cninfo.com.cn/new/fulltextSearch/full?searchkey=%E7%94%B3%E8%B5%8E%E6%B8%85%E5%8D%95&column=szse&tabName=fulltext&plate=&stock=&secid=&category=&trade=&seDate=2026-08-03~2026-08-09&sortName=&sortType=&isHLtitle=true&notautosubmit=",
+   "_parser": "llm_fallback"
+  },
+  "secs": 399.1,
+  "desc": "巨潮资讯网“基金公告”栏目，每周抓取所有ETF的申赎清单文件（PCF），分析份额变化。"
+ },
+ {
+  "id": 268,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 135.5,
+  "desc": "中国人民银行“货币统计”社会融资规模存量，每月抓取表格数据，制作社融趋势图。"
+ },
+ {
+  "id": 278,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 178.3,
+  "desc": "郑州商品交易所“仓单日报”，每日抓取棉花、白糖等品种的仓单数量，研判交割压力。"
+ },
+ {
+  "id": 259,
+  "ok": true,
+  "total": 2,
+  "fetched": 0,
+  "kind": "ok",
+  "error": "运行超时（>90s）",
+  "sample_n": 2,
+  "source": "browser",
+  "first": {
+   "标题": "中科奥格完成超2亿元A3轮融资",
+   "链接": "https://www.chinaventure.com.cn/news/111-20260807-392652.html",
+   "摘要": "本轮融资由中科创星领投，联想创投、牧原集团、威高血净、华立集团、华方资本、成都科创投跟投，老股东贝达基金、光合创投持续加注。",
+   "来源": "投中网",
+   "时间": "1天前",
+   "_url": "https://www.chinaventure.com.cn/event/",
+   "_parser": "llm_fallback"
+  },
+  "secs": 325.6,
+  "desc": "投中网“融资事件”频道，每日抓取国内一级市场融资项目的公司、轮次、金额、投资方，输出创投日报。"
+ },
+ {
+  "id": 286,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 222.5,
+  "desc": "金投网“银行理财产品”频道，每日抓取在售产品名称、发行银行、期限、预期收益上限，比较理财收益。"
+ },
+ {
+  "id": 285,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 241.3,
+  "desc": "中国养猪网“猪价系统”，每日抓取外三元、内三元、土杂猪的出栏均价，预测CPI食品项。"
+ },
+ {
+  "id": 338,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 238.0,
+  "desc": "考研帮“报录比”查询，批量抓取各校各专业的报考人数、录取人数，整理考研难度系数表。"
+ },
+ {
+  "id": 297,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 342.7,
+  "desc": "CoinGecko“Trending”代币，每半小时抓取热门搜索币种，发现短时热点。"
+ },
+ {
+  "id": 320,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 134.6,
+  "desc": "途牛“跟团游”北京出发，抓取所有目的地为“西藏”的路线名称、天数、价格、景点数量，做传统旅行社产品对比。"
+ },
+ {
+  "id": 349,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 96.0,
+  "desc": "全国哲学社会科学工作办公室“项目立项”公示，抓取年度立项课题名称、负责人、单位，分析学术资源分布。"
+ },
+ {
+  "id": 364,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 209.3,
+  "desc": "快速问医生“有问必答”板块，抓取最新提问的标题、科室、悬赏金额、回答数，分析公众健康焦虑。"
+ },
+ {
+  "id": 385,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 115.4,
+  "desc": "大象公会“医学”话题文章，抓取所有历史文章标题、摘要、阅读数，科普素材沉淀。 **汽车、交通与出行服务（386–410）**"
+ },
+ {
+  "id": 380,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 188.3,
+  "desc": "宝宝树“育儿问答”热门问题，每日抓取问题标题、回答数、关键词，洞察新手妈妈痛点。"
+ },
+ {
+  "id": 382,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 115.7,
+  "desc": "宠物医院“瑞鹏”官网，抓取门店地址、营业时间、医师团队，做宠物医疗资源整理。"
+ },
+ {
+  "id": 388,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 206.6,
+  "desc": "卡车之家“载货车”报价，每周抓取各品牌轻卡价格、货箱长度、载重，为物流公司购车参考。"
+ },
+ {
+  "id": 450,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 103.3,
+  "desc": "海关总署“统计快讯”进出口商品，每月抓取大豆、铁矿石进口量及金额。"
+ },
+ {
+  "id": 383,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 338.1,
+  "desc": "E宠商城“进口狗粮”品牌列表，抓取品牌名、产地、是否有中国代理、成分表，制作选粮决策树。"
+ },
+ {
+  "id": 408,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 195.7,
+  "desc": "航旅纵横“机场大屏”模拟，抓取某机场今日出港航班准点率、延误时间，通过公开接口。"
+ },
+ {
+  "id": 447,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 175.8,
+  "desc": "应急管理部“灾害预警”通知，抓取地质灾害气象风险预警的省份、等级。"
+ },
+ {
+  "id": 434,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 174.7,
+  "desc": "迪卡侬官网“跑步”分类，每周抓取所有跑鞋型号、价格、用户评价数，做运动品牌跟踪。"
+ },
+ {
+  "id": 443,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 61.4,
+  "desc": "商务部“对外投资”统计，每月抓取中国对外直接投资国别、行业数据。"
+ },
+ {
+  "id": 445,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 61.9,
+  "desc": "生态环境部“空气质量预报”，每日抓取重点城市未来3天AQI级别。"
+ },
+ {
+  "id": 429,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 231.3,
+  "desc": "中国邮政“邮票”网上营业厅，抓取新发行邮票名称、面值、发行量、设计图，收集邮票信息。"
+ },
+ {
+  "id": 449,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 183.2,
+  "desc": "国家粮食和物资储备局“秋粮收购”进度，每周抓取主产区收购量。"
+ },
+ {
+  "id": 444,
+  "ok": false,
+  "total": 0,
+  "fetched": 2,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 131.6,
+  "desc": "国家能源局“风电并网”数据，每月抓取各省新增装机容量。"
+ },
+ {
+  "id": 437,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 233.3,
+  "desc": "美乐乐“家具”销量榜，每周抓取Top50家具名称、价格、销量，绘制网销家具图谱。"
+ },
+ {
+  "id": 478,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 103.8,
+  "desc": "懂球帝“中超”转会流言，抓取流言标题、球员、传闻俱乐部、可信度。"
+ },
+ {
+  "id": 448,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 203.5,
+  "desc": "农业农村部“农产品批发价格200指数”，每日抓取指数值及分项涨跌。"
+ },
+ {
+  "id": 471,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 105.4,
+  "desc": "各地方招生考试院“高考”分段表，每年抓取文科理科一分一段表。"
+ },
+ {
+  "id": 461,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 173.9,
+  "desc": "最高人民法院“指导性案例”，抓取案例标题、裁判要点、关键词。"
+ },
+ {
+  "id": 503,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 212.9,
+  "desc": "Gitee“推荐”项目，每日抓取前10项目名称、Star数、语言、分类。"
+ },
+ {
+  "id": 484,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 103.3,
+  "desc": "NGA“艾泽拉斯国家地理论坛”前瞻区，抓取魔兽世界新版本补丁说明帖子。"
+ },
+ {
+  "id": 464,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 233.0,
+  "desc": "中国人大网“法律草案”征求意见，抓取草案名称、征求意见截止日、参与人数。"
+ },
+ {
+  "id": 468,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 227.0,
+  "desc": "国家卫健委“食品安全标准”数据，抓取最新污染物限量标准表格。"
+ },
+ {
+  "id": 452,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 325.5,
+  "desc": "中国地震台网“最近24小时地震”，抓取震级、地点、震源深度，绘制分布。"
+ },
+ {
+  "id": 476,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 82.0,
+  "desc": "腾讯体育“NBA”赛程，每日抓取所有比赛的对阵、时间、直播链接。"
+ },
+ {
+  "id": 500,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 119.2,
+  "desc": "IMDb“Top 250 Movies”完整榜单，每月抓取电影名、年份、评分、排名变动。 **科技、极客与数据源（501–525）**"
+ },
+ {
+  "id": 477,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 188.4,
+  "desc": "NBA中国官网“数据”球员场均得分榜，每日抓取前50球员得分、篮板、助攻。"
+ },
+ {
+  "id": 506,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 103.9,
+  "desc": "PyPI“最近更新”RSS，监控包名出现“security”标识，触发内部漏洞检查。"
+ },
+ {
+  "id": 507,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 105.6,
+  "desc": "Stack Overflow“Tags”热度，每月抓取所有技术标签的问题总量、本周提问量，出技术趋势报告。"
+ },
+ {
+  "id": 504,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 137.2,
+  "desc": "Docker Hub“python”官方镜像标签列表，监控每次构建的Digest和大小。"
+ },
+ {
+  "id": 518,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 125.9,
+  "desc": "AWS“价格计算器”页面，抓取EC2各实例规格的按需价格，更新云成本模型。"
+ },
+ {
+  "id": 472,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 163.2,
+  "desc": "阳光高考“招生章程”，抓取所有双一流高校章程的链接、招生人数限制。"
+ },
+ {
+  "id": 512,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 131.5,
+  "desc": "Reddit“r/MachineLearning”热帖，每日抓取标题、分数、评论数。"
+ },
+ {
+  "id": 509,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 115.0,
+  "desc": "V2EX“最热”节点每日新主题，抓取标题、节点、回复数。"
+ },
+ {
+  "id": 538,
+  "ok": true,
+  "total": 3,
+  "fetched": 3,
+  "kind": "ok_late",
+  "error": "超时但已产出数据",
+  "secs": 285.1,
+  "desc": "中果网“苹果”期货交割品报价，每日抓取各产区纸袋苹果价格。",
+  "first": {
+   "title": "",
+   "link": "/zb/xinxilanlian/",
+   "date": "11:00",
+   "_url": "https://www.pingguo7.com/",
+   "_parser": "list",
+   "publish_time": "2026-08-09 星期日",
+   "content": "",
+   "price_table": "",
+   "detail_status": "200",
+   "ts": 1786204800
+  }
+ },
+ {
+  "id": 523,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 351.5,
+  "desc": "国家信息安全漏洞库(CNNVD)，每日抓取新增漏洞名称、危害等级、影响产品。"
+ },
+ {
+  "id": 545,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 135.9,
+  "desc": "中华商标协会“商标品牌价值”排名，每年抓取上榜品牌名称、价值、排名变动。"
+ },
+ {
+  "id": 564,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 215.1,
+  "desc": "国际能源署“石油市场报告”，每月抓取全球供需平衡表关键数字。"
+ },
+ {
+  "id": 510,
+  "ok": true,
+  "total": 10,
+  "fetched": 1,
+  "kind": "ok",
+  "error": "",
+  "sample_n": 5,
+  "source": "http",
+  "first": {
+   "title": "Ask HN: How do you go from writing code to deploying with agents?",
+   "comments_count": 7,
+   "points": 8,
+   "author": "sakuraiben",
+   "created_at": "2026-08-08T23:54:42Z",
+   "objectID": "49227024",
+   "_url": "https://hn.algolia.com/api/v1/search_by_date?tags=ask_hn&hitsPerPage=10",
+   "_parser": "list"
+  },
+  "secs": 36.8,
+  "desc": "Hacker News“Ask HN”板块，每日抓取Top 10的标题与评论数，观察技术圈热点问题。"
+ },
+ {
+  "id": 584,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 176.3,
+  "desc": "全国认证认可信息公共服务平台，抓取某机构的ISO认证范围、有效期。"
+ },
+ {
+  "id": 575,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 244.8,
+  "desc": "文化和旅游部“出境旅游目的地”名单，抓取新增恢复出境团队游国家。"
+ },
+ {
+  "id": 522,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 332.1,
+  "desc": "Can I Use“特性”兼容表，抓取CSS Grid在各浏览器的支持版本，自动更新前端知识库。"
+ },
+ {
+  "id": 561,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 282.9,
+  "desc": "约翰·霍普金斯大学（镜像）“COVID-19”全球确诊仪表盘历史数据。"
+ },
+ {
+  "id": 587,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 242.6,
+  "desc": "中国体育彩票“竞彩”每日受注赛程，抓取对阵、停售时间。"
+ },
+ {
+  "id": 570,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 178.5,
+  "desc": "日本央行“短观”调查，每季抓取大型制造业景气判断指数。"
+ },
+ {
+  "id": 567,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 123.7,
+  "desc": "美国劳工部“非农就业”数据，每月抓取新增就业、失业率、时薪。"
+ },
+ {
+  "id": 569,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 209.9,
+  "desc": "欧洲央行“利率决议”新闻稿，抓取关键利率与声明措辞。"
+ },
+ {
+  "id": 573,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 243.7,
+  "desc": "各地人社局“人才引进”落户政策，抓取学历、社保、年龄要求，汇总各地落户门槛。"
+ },
+ {
+  "id": 270,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 190.3,
+  "desc": "银保监会“行政许可”公开，每日抓取新批复的保险公司高管任职、机构开业，分析监管动向。"
+ },
+ {
+  "id": 596,
+  "ok": false,
+  "total": 0,
+  "fetched": 2,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 231.6,
+  "desc": "国家邮政局“快递申诉”红黑榜，每月抓取快递企业有效申诉率。"
+ },
+ {
+  "id": 474,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "error",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 237.2,
+  "desc": "国家医保局“药品目录”，每年抓取新增药品名称、支付标准。"
+ },
+ {
+  "id": 591,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 235.4,
+  "desc": "国家广播电视总局“电视剧备案”公示，每月抓取剧目名称、题材、集数。"
+ },
+ {
+  "id": 164,
+  "ok": false,
+  "total": 0,
+  "fetched": 0,
+  "kind": "blocked_login",
+  "error": "运行超时（>90s）",
+  "sample_n": 0,
+  "source": "browser",
+  "first": {},
+  "secs": 344.6,
+  "desc": "厂房在线“广东·东莞”出租信息，抓取厂房面积、层高、承重、货梯数量，筛选适合精密制造的场地。"
+ },
+ {
+  "id": 365,
+  "ok": false,
+  "total": 0,
+  "fetched": 1,
+  "kind": "empty",
+  "error": "",
+  "sample_n": 0,
+  "source": "http",
+  "first": {},
+  "secs": 76.2,
+  "desc": "药房网商城“阿托伐他汀”所有品牌价格，每周抓取不同厂家规格的价格、是否处方药，对比药店售价。"
  }
 ]
