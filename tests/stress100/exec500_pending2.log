@@ -1,0 +1,109 @@
+执行测试 16 个任务（limit=3, timeout=75s, workers=3, reuse=True, headless=True, ready_only=False）
+[12:16:56] [INFO] 任务启动: auto_c8ca379764 | 队列 1 | 规则 2
+[12:16:56] [INFO] 任务启动: auto_38b90ebc19 | 队列 1 | 规则 1
+[12:16:58] [INFO] 任务启动: auto_8faf26a869 | 队列 2 | 规则 2
+[12:16:59] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:16:59] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:17:03] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:17:03] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:17:07] [INFO] 延迟重试 1/2: https://www.changfang.com/chuzu/dongguan/（2s 后）
+[12:17:07] [INFO] 延迟重试 1/2: https://www.changfang.com/chuzu/（2s 后）
+[12:17:07] [WARN] 请求失败 https://www.changfang.com/chuzu/dongguan/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+[12:17:07] [WARN] 请求失败 https://www.changfang.com/chuzu/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+[12:17:09] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:17:10] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:17:11] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:17:12] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+[12:17:16] [INFO] 延迟重试 2/2: https://www.changfang.com/chuzu/dongguan/（4s 后）
+[12:17:16] [WARN] 请求失败 https://www.changfang.com/chuzu/dongguan/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+[12:17:16] [INFO] 延迟重试 2/2: https://www.changfang.com/chuzu/（4s 后）
+[12:17:16] [WARN] 请求失败 https://www.changfang.com/chuzu/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+[12:17:21] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:17:21] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，2.0s 后重试
+[12:17:25] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试[12:17:25] [WARN]   curl_cffi 网络异常: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changfang.com'. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.，4.0s 后重试
+
+[12:17:31] [WARN] 放弃重试 https://www.changfang.com/chuzu/dongguan/（已达 2 次）[12:17:31] [WARN] 放弃重试 https://www.changfang.com/chuzu/（已达 2 次）
+
+[12:17:31] [WARN] 请求失败 https://www.changfang.com/chuzu/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf[12:17:31] [WARN] 请求失败 https://www.changfang.com/chuzu/dongguan/: RuntimeError: HTTP 0: Failed to perform, curl: (60) SSL: certificate subject name 'unknown' does not match target hostname 'www.changf
+
+[12:17:33] [INFO] 完成: 抓取 6 | 条目 0 | 错误 6
+⚠️ #164 empty         total=0 42.4s | 厂房在线“广东·东莞”出租信息，抓取厂房面积、层高、承重、货梯数量，筛选适合精密制造的场 | err:
+[12:17:36] [INFO] 任务启动: auto_9942128bbf | 队列 1 | 规则 1
+python3(47163) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:18:09] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:18:22] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:18:22] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:18:24] [WARN] 任务停止信号已生效，本轮请求中断
+[12:18:24] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ #107 error         total=0 91.2s | 小米有品“众筹”频道进行中的项目，每日抓取项目名称、已筹金额、支持人数、剩余天数，追踪硬 | err:运行超时（>75s）
+[12:18:25] [INFO] 任务启动: auto_0d4525b55c | 队列 1 | 规则 1
+❌ #119 error         total=0 97.3s | 微店平台某个头部烘焙博主“我慢商店”全部商品，每日抓取商品名称、价格、销量、图文描述，学 | err:运行超时（>75s）
+[12:18:31] [INFO] 任务启动: auto_cb7ba8908e | 队列 1 | 规则 1
+[12:18:34] [INFO] 导出: json=auto_0d4525b55c.json, csv=auto_0d4525b55c.csv, xlsx=auto_0d4525b55c.xlsx
+[12:18:34] [INFO] 导出: json=auto_cb7ba8908e.json, csv=auto_cb7ba8908e.csv, xlsx=auto_cb7ba8908e.xlsx
+[12:18:34] [INFO] 完成: 抓取 1 | 条目 31 | 错误 0
+[12:18:34] [INFO] 完成: 抓取 1 | 条目 20 | 错误 0
+✅ #250 ok            total=20 5.6s | 豆瓣“我读”随机用户想读列表，抓取公开的想读书目，做协同过滤推荐数据（需脱敏处理）。 * | err:
+[12:18:36] [INFO] 任务启动: auto_18c04d0e85 | 队列 1 | 规则 1
+python3(47215) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+✅ #165 ok            total=31 13.4s | 第一太平戴维斯官网“研究报告”板块，抓取各城市甲级写字楼季度报告pdf链接，自动下载并解 | err:
+[12:18:38] [INFO] 任务启动: auto_969f6d40a7 | 队列 1 | 规则 1
+[12:18:39] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #270 empty         total=0 3.7s | 银保监会“行政许可”公开，每日抓取新批复的保险公司高管任职、机构开业，分析监管动向。 | err:
+[12:18:42] [INFO] 任务启动: auto_242a761a93 | 队列 1 | 规则 1
+[12:18:46] [WARN] ⚠️ 管道过滤把 48 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 3 条）。如需精确过滤请改配置或加 detail 过滤
+[12:18:46] [WARN] ⚠️ 管道过滤把 90 条全部滤成 0（多为 contains/non_empty 字段与真实数据不匹配），已放宽保留（最多 3 条）。如需精确过滤请改配置或加 detail 过滤
+[12:18:47] [INFO] 导出: json=auto_242a761a93.json, csv=auto_242a761a93.csv, xlsx=auto_242a761a93.xlsx
+[12:18:47] [INFO] 完成: 抓取 1 | 条目 3 | 错误 0
+[12:18:49] [INFO] 导出: json=auto_9942128bbf.json, csv=auto_9942128bbf.csv, xlsx=auto_9942128bbf.xlsx
+[12:18:49] [INFO] 完成: 抓取 1 | 条目 3 | 错误 0
+✅ #362 ok            total=3 14.5s | 好大夫在线“北京·协和医院”大夫列表，抓取大夫姓名、科室、职称、患者投票、感谢信数，辅助 | err:
+[12:18:58] [INFO] 任务启动: auto_696787c620 | 队列 1 | 规则 1
+python3(47229) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+✅ #265 ok            total=3 84.2s | 北交所官网“审核项目动态”，每周抓取IPO问询回复的企业名称与最新进展，积累审核案例。 | err:
+[12:19:00] [INFO] 任务启动: auto_b0d23b7239 | 队列 1 | 规则 2
+python3(47233) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:20:10] [WARN] 任务停止信号已生效，本轮请求中断
+[12:20:10] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:20:11] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:20:13] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:20:15] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+❌ #274 error         total=0 101.3s | 大智慧365个股“技术指标”页面，批量抓取自选股MACD金叉/死叉信号状态，辅助技术面提 | err:运行超时（>75s）
+[12:20:19] [INFO] 任务启动: auto_990be196ae | 队列 1 | 规则 2
+python3(47356) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+🔒 #379 blocked_login total=0 109.9s | 大姨妈App“社区”经期讨论，抓取痛经缓解话题的点赞最高方法，提取产品/药物提及。 | err:运行超时（>75s）
+[12:20:47] [INFO] 任务启动: auto_8de2742355 | 队列 1 | 规则 1
+[12:20:54] [WARN] 任务停止信号已生效，本轮请求中断
+[12:20:54] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+[12:20:54] [INFO] 完成: 抓取 4 | 条目 0 | 错误 0
+❌ #359 error         total=0 117.1s | 万门大学（已关闭，可换）类似平台“小鹅通”某店铺所有课程，抓取课程封面、标题、价格、购买 | err:运行超时（>75s）
+⚠️ #474 empty         total=0 10.2s | 国家医保局“药品目录”，每年抓取新增药品名称、支付标准。 | err:
+[12:20:57] [INFO] 任务启动: auto_b782e26a30 | 队列 1 | 规则 1
+[12:21:00] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+⚠️ #365 empty         total=0 4.2s | 药房网商城“阿托伐他汀”所有品牌价格，每周抓取不同厂家规格的价格、是否处方药，对比药店售 | err:
+[12:21:06] [INFO] 任务启动: auto_b6d610abee | 队列 1 | 规则 7
+python3(47423) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:21:35] [WARN] 任务停止信号已生效，本轮请求中断
+[12:21:35] [INFO] 延迟重试 1/3: https://www.fengchao.com/（2s 后）
+[12:21:35] [WARN] 请求失败 https://www.fengchao.com/: RuntimeError: page.goto: net::ERR_CONNECTION_REFUSED at https://www.fengchao.com/
+Call log:
+[2m  - navigating to "https://www.fengcha
+[12:21:35] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:21:35] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ #363 error         total=0 77.4s | 微医“在线问诊”某个医生的患者评价，抓取评价内容、态度、效果打分，形成医生口碑。 | err:运行超时（>75s）
+[12:21:42] [INFO] 任务启动: auto_266e5fc379 | 队列 1 | 规则 1
+python3(47463) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+[12:21:56] [INFO] 延迟重试 2/3: https://www.fengchao.com/（4s 后）
+[12:21:56] [WARN] 请求失败 https://www.fengchao.com/: RuntimeError: page.goto: net::ERR_CONNECTION_REFUSED at https://www.fengchao.com/
+Call log:
+[2m  - navigating to "https://www.fengcha
+[12:22:05] [INFO] 延迟重试 3/3: https://www.fengchao.com/（8s 后）
+[12:22:05] [WARN] 请求失败 https://www.fengchao.com/: RuntimeError: page.goto: net::ERR_CONNECTION_REFUSED at https://www.fengchao.com/
+Call log:
+[2m  - navigating to "https://www.fengcha
+❌ #421 error         total=0 111.9s | 丰巢“寄件柜”价格，抓取不同格口大小价格，辅助微商发货选择。 | err:运行超时（>75s）
+[12:22:58] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+[12:23:13] [INFO] 完成: 抓取 1 | 条目 0 | 错误 0
+❌ #386 error         total=0 94.9s | 汽车之家“车型库”，抓取所有在售SUV的参数：长宽高、轴距、油箱容积、后备箱体积，构建车 | err:运行超时（>75s）
+
+完成 16：{'empty': 4, 'error': 7, 'ok': 4, 'blocked_login': 1}

@@ -1,0 +1,8 @@
+  配置未落盘跳过（pending）: 0 个: []
+执行测试 500 个任务（limit=3, timeout=75s, workers=3, reuse=True, headless=True, ready_only=True）
+[12:12:54] [INFO] 任务启动: auto_ac16e83eed | 队列 1 | 规则 1[12:12:54] [INFO] 任务启动: auto_a39270b120 | 队列 1 | 规则 1
+
+[12:13:17] [INFO] 任务启动: auto_5985cc51c7 | 队列 1 | 规则 1
+[12:14:09] [WARN] 收到停止信号（.stop），正在保存检查点并退出...
+🔒 #103 blocked_login total=0 122.1s | 微拍堂“紫砂壶”类目下正在进行的热拍商品，每10分钟抓取出价记录、当前价、落槌倒计时，辅 | err:运行超时（>75s）
+[12:14:48] [INFO] 任务启动: auto_d175929c11 | 队列 1 | 规则 1
