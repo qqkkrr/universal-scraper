@@ -39,6 +39,53 @@ JOBS_LOCK = threading.Lock()
 JOBS_MAX = 50
 AUTH_TOKEN = ""
 
+# 任务历史持久化：重启不丢，可复盘（用户说"跑过"的任务必须能回看）
+HISTORY_FILE = ROOT / "jobs_history.json"
+CODE_DIRS = (ROOT / "universal_scraper", ROOT / "scripts", ROOT / "webui")
+_CODE_FP_START = ""
+
+
+def _code_fingerprint() -> str:
+    import hashlib
+    h = hashlib.md5()
+    try:
+        for d in CODE_DIRS:
+            for p in sorted(d.glob("*")) if d.exists() else []:
+                if p.suffix in (".py", ".cjs", ".js", ".html", ".css"):
+                    st = p.stat()
+                    h.update(f"{p.name}:{st.st_mtime_ns}:{st.st_size};".encode())
+    except Exception:
+        pass
+    return h.hexdigest()[:16]
+
+
+def _persist_jobs():
+    try:
+        slim = {jid: {"id": j.get("id"), "kind": j.get("kind"), "title": j.get("title"),
+                      "description": j.get("description", ""), "status": j.get("status"),
+                      "summary": j.get("summary"), "error": j.get("error"),
+                      "created": j.get("created"), "messages": (j.get("messages") or [])[-30:]}
+                for jid, j in JOBS.items()}
+        tmp = HISTORY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(slim, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        tmp.replace(HISTORY_FILE)
+    except Exception:
+        pass
+
+
+def _load_jobs():
+    try:
+        if HISTORY_FILE.exists():
+            data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+            for jid, j in data.items():
+                j.setdefault("messages", [])
+                if j.get("status") == "running":
+                    j["status"] = "interrupted"
+                    j["messages"] = (j.get("messages") or []) + ["⚠️ 服务重启，任务中断（历史记录已保留）"]
+                JOBS[jid] = j
+    except Exception:
+        pass
+
 
 # --------------------------------------------------------------------------
 # 后台任务
@@ -64,6 +111,7 @@ def _new_job(kind: str, title: str, description: str = "") -> dict:
         if len(JOBS) > JOBS_MAX:
             for k in list(JOBS)[: len(JOBS) - JOBS_MAX]:
                 JOBS.pop(k, None)
+    _persist_jobs()
     return job
 
 
@@ -81,6 +129,7 @@ def _job_done(job, result, summary=None, verify=None):
         job["result"] = result
         job["summary"] = summary
         job["verify"] = verify
+    _persist_jobs()
 
 
 def _job_error(job, err: str):
@@ -88,10 +137,12 @@ def _job_error(job, err: str):
         job["status"] = "error"
         job["error"] = str(err)
         job["messages"].append(f"❌ 失败：{err}")
+    _persist_jobs()
     # 自动诊断失败类型并附加解决方案（WebUI 会展示给使用者）
     try:
         from .solutions import attach_solution
         attach_solution(job, str(err))
+        _persist_jobs()
     except Exception:
         pass
 
@@ -381,6 +432,9 @@ class Handler(BaseHTTPRequestHandler):
                             "status": j["status"], "summary": j["summary"],
                             "created": j["created"]} for j in reversed(list(JOBS.values()))][:20]
                 self._json(lst)
+            elif u.path == "/api/code_changed":
+                self._json({"changed": _code_fingerprint() != _CODE_FP_START,
+                            "current": _code_fingerprint(), "start": _CODE_FP_START})
             elif u.path == "/api/ip":
                 from .net import detect_ip
                 self._json(detect_ip())
@@ -477,6 +531,23 @@ class Handler(BaseHTTPRequestHandler):
                                        config, name, task_dir),
                                  daemon=True).start()
                 self._json({"job": job["id"]})
+            elif u.path == "/api/restart":
+                # 代码已更新时一键重启服务（同参数拉起新进程后退出当前进程）
+                try:
+                    import subprocess as _sp, sys as _sys
+                    _cmd = [_sys.executable, "-m", "universal_scraper.cli", "webui"]
+                    if host != "127.0.0.1":
+                        _cmd += ["--host", str(host)]
+                    _cmd += ["--port", str(port)]
+                    if AUTH_TOKEN:
+                        _cmd += ["--token", AUTH_TOKEN]
+                    _sp.Popen(_cmd, cwd=str(ROOT), start_new_session=True,
+                              stdout=open(ROOT / "outputs" / "webui_restart.log", "a"),
+                              stderr=_sp.STDOUT)
+                    self._json({"ok": True, "message": "重启中，3 秒后自动恢复…"})
+                    threading.Timer(0.5, os._exit, args=(0,)).start()
+                except Exception as e:
+                    self._json({"ok": False, "message": f"重启失败：{type(e).__name__}: {e}"})
             elif u.path == "/api/test-cookie":
                 cookie = str(body.get("cookie", ""))
                 url = str(body.get("url", ""))
@@ -616,6 +687,9 @@ def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
           share: bool = False, token: str = "") -> int:
     global PY, AUTH_TOKEN
     import sys, secrets
+    global _CODE_FP_START
+    _load_jobs()
+    _CODE_FP_START = _code_fingerprint()
     PY = sys.executable
     AUTH_TOKEN = token or os.environ.get("US_WEBUI_TOKEN", "")
     print("🕷️ 万能爬虫工具 · 可视化版 v3", flush=True)

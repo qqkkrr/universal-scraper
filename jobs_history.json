@@ -1,0 +1,151 @@
+{
+ "0004a0405e99": {
+  "id": "0004a0405e99",
+  "kind": "paste",
+  "title": "https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655",
+  "description": "https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm",
+  "status": "done",
+  "summary": "✅ 任务结束：精配[zige] 96 条，导出 ['outputs/site_zige_www_gov_cn.json', 'outputs/site_zige_www_gov_cn.csv', 'outputs/site_zige_www_gov_cn.xlsx']",
+  "error": null,
+  "created": 1786279703.729931,
+  "messages": [
+   "▶️ 任务已创建，开始执行...",
+   "🌐 正在抓取 https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm",
+   "🏆 命中精配[zige]，走精配解析（不空转通用引擎）...",
+   "✅ 精配[zige]完成：96 条"
+  ]
+ },
+ "320c7d065d42": {
+  "id": "320c7d065d42",
+  "kind": "auto",
+  "title": "抓取国家职业资格目录的所有职业名称和资格类别",
+  "description": "抓取国家职业资格目录的所有职业名称和资格类别",
+  "status": "done",
+  "summary": "✅ 任务结束：成功 96 条（抽样 5 条有真实字段）｜复核 ⚠️ 字段完整率 · 具体职业/工种；字段完整率 · 备注，导出 ['json', 'csv', 'xlsx']",
+  "error": null,
+  "created": 1786279705.739743,
+  "messages": [
+   "▶️ 任务已创建，开始执行...",
+   "🤖 AI 正在理解任务并生成配置...",
+   "✅ 配置已生成（source=browser）",
+   "🏆 任务描述命中精配[zige]（AI 入口不正确，改用精配种子入口）...",
+   "🏆 命中直达精配[zige]：优先用精配（不空转通用引擎）...",
+   "🏆 直达精配[zige]成功：96 条"
+  ]
+ },
+ "ee69cb2423ef": {
+  "id": "ee69cb2423ef",
+  "kind": "auto",
+  "title": "抓最近24小时中国地震的震级、地点、震源深度",
+  "description": "抓最近24小时中国地震的震级、地点、震源深度",
+  "status": "done",
+  "summary": "✅ 任务结束：成功 1 条（抽样 1 条有真实字段）｜复核 ✅ 通过，导出 ['json', 'csv', 'xlsx']",
+  "error": null,
+  "created": 1786279774.004864,
+  "messages": [
+   "▶️ 任务已创建，开始执行...",
+   "🤖 AI 正在理解任务并生成配置...",
+   "✅ 配置已生成（source=http）",
+   "🏆 命中直达精配[eq]：优先用精配（不空转通用引擎）...",
+   "🏆 直达精配[eq]成功：1 条"
+  ]
+ },
+ "2090504757b6": {
+  "id": "2090504757b6",
+  "kind": "paste",
+  "title": "https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655",
+  "description": "https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm",
+  "status": "done",
+  "summary": "✅ 任务结束：精配[zige] 96 条，导出 ['outputs/site_zige_www_gov_cn.json', 'outputs/site_zige_www_gov_cn.csv', 'outputs/site_zige_www_gov_cn.xlsx']",
+  "error": null,
+  "created": 1786279903.094383,
+  "messages": [
+   "▶️ 任务已创建，开始执行...",
+   "🌐 正在抓取 https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm",
+   "🏆 命中精配[zige]，走精配解析（不空转通用引擎）...",
+   "✅ 精配[zige]完成：96 条"
+  ]
+ },
+ "1d536ccb8acf": {
+  "id": "1d536ccb8acf",
+  "kind": "paste",
+  "title": "https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655",
+  "description": "https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm",
+  "status": "done",
+  "summary": "✅ 任务结束：精配[zige] 96 条，导出 ['outputs/site_zige_www_gov_cn.json', 'outputs/site_zige_www_gov_cn.csv', 'outputs/site_zige_www_gov_cn.xlsx']",
+  "error": null,
+  "created": 1786279908.0104582,
+  "messages": [
+   "▶️ 任务已创建，开始执行...",
+   "🌐 正在抓取 https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm",
+   "🏆 命中精配[zige]，走精配解析（不空转通用引擎）...",
+   "✅ 精配[zige]完成：96 条"
+  ]
+ },
+ "05747f299084": {
+  "id": "05747f299084",
+  "kind": "auto",
+  "title": "抓取国家职业资格目录的所有职业名称和资格类别",
+  "description": "抓取国家职业资格目录的所有职业名称和资格类别",
+  "status": "done",
+  "summary": "✅ 任务结束：成功 96 条（抽样 5 条有真实字段）｜复核 ⚠️ 字段完整率 · 具体职业/工种；字段完整率 · 备注，导出 ['json', 'csv', 'xlsx']",
+  "error": null,
+  "created": 1786279910.032823,
+  "messages": [
+   "▶️ 任务已创建，开始执行...",
+   "🤖 AI 正在理解任务并生成配置...",
+   "✅ 配置已生成（source=http）",
+   "🏆 任务描述命中精配[zige]（AI 入口不正确，改用精配种子入口）...",
+   "🏆 命中直达精配[zige]：优先用精配（不空转通用引擎）...",
+   "🏆 直达精配[zige]成功：96 条"
+  ]
+ },
+ "70d67e36c17c": {
+  "id": "70d67e36c17c",
+  "kind": "auto",
+  "title": "抓最近24小时中国地震的震级、地点、震源深度",
+  "description": "抓最近24小时中国地震的震级、地点、震源深度",
+  "status": "done",
+  "summary": "✅ 任务结束：成功 1 条（抽样 1 条有真实字段）｜复核 ✅ 通过，导出 ['json', 'csv', 'xlsx']",
+  "error": null,
+  "created": 1786279978.386389,
+  "messages": [
+   "▶️ 任务已创建，开始执行...",
+   "🤖 AI 正在理解任务并生成配置...",
+   "✅ 配置已生成（source=http）",
+   "🏆 任务描述命中精配[eq]（AI 入口不正确，改用精配种子入口）...",
+   "🏆 命中直达精配[eq]：优先用精配（不空转通用引擎）...",
+   "🏆 直达精配[eq]成功：1 条"
+  ]
+ },
+ "08d4ea7bd828": {
+  "id": "08d4ea7bd828",
+  "kind": "auto",
+  "title": "抓取国家职业资格目录的所有职业名称和资格类别",
+  "description": "抓取国家职业资格目录的所有职业名称和资格类别",
+  "status": "done",
+  "summary": "✅ 任务结束：精配[zige] 96 条，导出 ['outputs/auto_ce0175eec0.json', 'outputs/auto_ce0175eec0.csv', 'outputs/auto_ce0175eec0.xlsx']",
+  "error": null,
+  "created": 1786280140.6971982,
+  "messages": [
+   "▶️ 任务已创建，开始执行...",
+   "🏆 任务描述直接命中精配[zige]：跳过 AI 生成配置，秒级出结果…",
+   "✅ 任务结束：精配[zige] 96 条，导出 ['outputs/auto_ce0175eec0.json', 'outputs/auto_ce0175eec0.csv', 'outputs/auto_ce0175eec0.xlsx']"
+  ]
+ },
+ "be05bdeab62d": {
+  "id": "be05bdeab62d",
+  "kind": "auto",
+  "title": "抓最近24小时中国地震的震级、地点、震源深度",
+  "description": "抓最近24小时中国地震的震级、地点、震源深度",
+  "status": "done",
+  "summary": "✅ 任务结束：精配[eq] 1 条，导出 ['outputs/auto_8433b9fc4f.json', 'outputs/auto_8433b9fc4f.csv', 'outputs/auto_8433b9fc4f.xlsx']",
+  "error": null,
+  "created": 1786280142.718973,
+  "messages": [
+   "▶️ 任务已创建，开始执行...",
+   "🏆 任务描述直接命中精配[eq]：跳过 AI 生成配置，秒级出结果…",
+   "✅ 任务结束：精配[eq] 1 条，导出 ['outputs/auto_8433b9fc4f.json', 'outputs/auto_8433b9fc4f.csv', 'outputs/auto_8433b9fc4f.xlsx']"
+  ]
+ }
+}

@@ -74,9 +74,66 @@ SITES: Dict[str, Dict[str, Any]] = {}
 
 
 def register(name: str, matcher: Callable[[str], bool], parser: Callable,
-             fetch: Optional[Callable] = None, desc: str = "", run: Optional[Callable] = None):
+             fetch: Optional[Callable] = None, desc: str = "", run: Optional[Callable] = None,
+             keywords: tuple = (), seed_url: str = ""):
     SITES[name] = {"name": name, "match": matcher, "parse": parser,
-                   "fetch": fetch, "desc": desc, "run": run}
+                   "fetch": fetch, "desc": desc, "run": run,
+                   "keywords": tuple(keywords), "seed_url": seed_url}
+
+
+# 任务描述 → 精配语义路由：一句话任务时，AI 可能选错入口 URL，
+# 用描述关键词直接命中精配库（Firecrawl feature-routing 思路），
+# 命中即用精配种子 URL 跑，不再让 AI 乱猜入口。
+_DESC_ROUTE = [
+    ("zige", ("职业资格", "职业目录", "资格考试目录", "职业技能等级", "国家职业资格"), "https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm"),
+    ("eq", ("地震", "震级", "震源深度", "earthquake"), "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=NOW24H&minlatitude=18&maxlatitude=54&minlongitude=73&maxlongitude=135&minmagnitude=0"),
+    ("miit", ("工信部", "app通报", "侵害用户权益", "app（sdk）", "违规收集个人信息"), ""),
+    ("std", ("国家标准", "标准平台", "标准号", "国标", "标准搜索"), ""),
+    ("ggzy", ("公共资源交易", "招标", "中标", "采购公告", "ggzy"), ""),
+    ("cninfo", ("巨潮", "上市公司公告", "年报", "公告查询"), ""),
+    ("zszc", ("招生章程", "阳光高考", "招生简章"), ""),
+    ("sytyxb", ("沈阳体育学院学报", "体育学院学报"), ""),
+    ("ajcass", ("社科院期刊", "期刊系", "ajcass"), ""),
+    ("weathercn", ("中国天气", "天气", "天气预报", "实时气温"), ""),
+    ("github_trending", ("github trending", "github热榜", "热门仓库"), ""),
+    ("arxiv", ("arxiv", "论文预印本", "每日论文"), ""),
+    ("leetcode", ("leetcode", "力扣", "题库"), ""),
+    ("douban", ("豆瓣", "豆瓣电影", "豆瓣读书"), ""),
+    ("bilibili", ("b站", "bilibili", "哔哩哔哩", "视频搜索"), ""),
+    ("dianping", ("大众点评", "点评", "美食商家"), ""),
+    ("douyin", ("抖音", "douyin", "短视频"), ""),
+    ("kuaishou", ("快手", "kuaishou"), ""),
+    ("weibo", ("微博", "weibo"), ""),
+    ("zhihu", ("知乎", "zhihu"), ""),
+    ("jd", ("京东", "jd.com", "京东商城"), ""),
+    ("tmall_taobao", ("淘宝", "天猫", "taobao", "tmall", "店铺"), ""),
+]
+
+
+def match_site_by_description(desc: str) -> Optional[str]:
+    """按任务描述关键词匹配精配，返回精配名；未命中 None。"""
+    d = (desc or "").lower()
+    for name, kws, _seed in _DESC_ROUTE:
+        for kw in kws:
+            if kw in d:
+                return name
+    return None
+
+
+def seed_url_for(desc: str) -> str:
+    """描述命中的精配种子 URL（TODAY 占位符替换为今天）。"""
+    d = (desc or "").lower()
+    for name, kws, seed in _DESC_ROUTE:
+        if any(kw in d for kw in kws):
+            if "NOW24H" in seed:
+                from datetime import datetime, timedelta, timezone
+                seed = seed.replace("NOW24H",
+                                    (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S"))
+            elif "TODAY" in seed:
+                from datetime import date
+                seed = seed.replace("TODAY", date.today().strftime("%Y-%m-%dT%H:%M:%S"))
+            return seed
+    return ""
 
 
 def _dianping_fetch(url, cookie="", proxy=None):

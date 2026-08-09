@@ -446,6 +446,17 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         cfg["source"] = {"type": "http"}
         cfg["_force_run_site"] = "cninfo"
 
+    # 工信部 APP 侵害用户权益通报：AI 常猜错栏目（司局动态/文件发布等），
+    # 只要任务明确是「工信部 + APP/应用 + 通报/违规」，一律强制走 miit 精配
+    # （精配内部会自动归一化到 APP侵害用户权益专项整治行动-通知公告 专用栏目）
+    if re.search(r"工信部|miit\.gov", description or "", re.I) and \
+       re.search(r"APP|App|应用", description or "") and \
+       re.search(r"通报|违规|侵害用户权益|侵权", description or ""):
+        cfg["_force_run_site"] = "miit"
+        cfg["start_urls"] = ["https://www.miit.gov.cn/jgsj/xgj/APPqhyhqyzxzzxd/tzgg/"]
+        cfg["source"] = {"type": "browser", "headless": True}
+        _su0 = cfg["start_urls"][0]
+
     # 上交所 vs 上海交大：AI 常混淆（sjtu.cn 是上海交大）。任务含"上交所/科创板"就强制换入口
     # 注意 kcb.sse.com.cn 域名在本网络 NXDOMAIN，用 www.sse.com.cn/listing/renewal/ipo/
     if re.search(r"上交所|科创板", description or "") and ("sjtu" in _su0 or "kcb.sse.com.cn" in _su0):
@@ -798,11 +809,19 @@ def _try_precise_first(description: str, cfg: dict, limit, log, out_name: str = 
     """改造2：命中「直达型精配」（run 型，如 ggzy）时，首轮前先跑精配，成功直接返回。
     避免空转 N 轮通用引擎。带超时保护（WAF 卡住时不阻塞整个任务）。返回 run_site 结果；未命中返回 None。"""
     su = (cfg.get("start_urls") or [""])[0]
-    if not su:
-        return None
     try:
-        from .sites import match_site, run_site, SITES
+        from .sites import match_site, run_site, SITES, match_site_by_description, seed_url_for
         site = cfg.get("_force_run_site") or match_site(su)
+        # 🏆 描述语义路由：AI 选的入口不对（如选了搜索页）时，按任务描述直接命中精配库
+        _desc_site = ""
+        if not site:
+            _desc_site = match_site_by_description(description)
+            if _desc_site and (SITES.get(_desc_site) or {}).get("run"):
+                _seed = seed_url_for(description)
+                if _seed:
+                    su = _seed
+                    log(f"🏆 任务描述命中精配[{_desc_site}]（AI 入口不正确，改用精配种子入口）...")
+                    site = _desc_site
         if not site or not (SITES.get(site) or {}).get("run"):
             return None
         _ch = ((cfg.get("source") or {}).get("headers") or {}).get("Cookie") or ""
@@ -1510,6 +1529,52 @@ def plan_task(description: str, limit: Optional[int] = None, proxy: Optional[str
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "messages": lines}
 
 
+def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> dict:
+    """描述路由快速通道：命中带 seed 的 run 型精配 → 直接 run_site 秒出。
+
+    返回 {}（未命中/失败，调用方继续 AI 流程）或完整 auto_task 结果。"""
+    try:
+        from .sites import match_site_by_description, seed_url_for, SITES, run_site
+        site = match_site_by_description(description)
+        if not site or not (SITES.get(site) or {}).get("run"):
+            return {}
+        seed = seed_url_for(description)
+        if not seed:
+            return {}
+        import hashlib as _hl
+        name = f"auto_{_hl.md5(description.encode()).hexdigest()[:10]}"
+        log(f"🏆 任务描述直接命中精配[{site}]：跳过 AI 生成配置，秒级出结果…")
+        try:
+            dr = run_site(seed, cookie=cookie or "", proxy=proxy or None,
+                          limit=int(limit or 0), out_name=name)
+        except Exception as e:
+            log(f"⚠️ 精配[{site}]直接跑异常（{type(e).__name__}: {e}），回退 AI 流程")
+            return {}
+        if not (dr or {}).get("rows"):
+            log(f"⚠️ 精配[{site}]直接跑失败（{(dr or {}).get('error', '0 条')}），回退 AI 流程")
+            return {}
+        rows = dr["rows"]
+        sample = rows[:5]
+        files = dr.get("files") or {}
+        total = len(rows)
+        cfg = {"name": name, "start_urls": [seed], "_force_run_site": site}
+        verify = None
+        try:
+            from .verify import verify_rows
+            verify = verify_rows(sample, cfg, sample_n=0, network=False, declared=total)
+        except Exception:
+            pass
+        summary = f"✅ 任务结束：精配[{site}] {total} 条，导出 {list(files.values())}"
+        log(summary)
+        return {"name": name, "config": cfg, "result": {"total": total, "fetched": total,
+                "errors": 0, "precise": site, "files": files}, "log": "",
+                "sample": sample, "files": files, "summary": summary, "verify": verify,
+                "done": True}
+    except Exception as e:
+        log(f"⚠️ 描述路由快速通道不可用：{e}")
+        return {}
+
+
 def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
               log_cb=None, round_timeout: Optional[int] = None,
               proxy: Optional[str] = None,
@@ -1549,6 +1614,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             log(f"⚠️ 复用配置校验失败，退回原配置：{_e}")
         (task_dir / "modules").mkdir(parents=True, exist_ok=True)
     else:
+        # 🏆 描述路由优先：先于 AI 生成配置，命中带种子 URL 的 run 型精配 → 秒级出结果
+        # （解决"AI 选错入口导致失败"：职业资格/地震/天气等已知站不再让 AI 猜入口）
+        _fast = _try_desc_route_fast(description, limit, log, proxy=proxy, cookie=cookie)
+        if _fast.get("done"):
+            return _fast
         cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
         try:
             (task_dir / "config.json").write_text(

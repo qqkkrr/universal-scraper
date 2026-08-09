@@ -166,6 +166,7 @@
   <div class="hdr-right">
     <span class="pill" id="server"><span class="dot"></span>服务已启动</span>
     <span class="pill ip" id="ipinfo">出口 IP…</span>
+    <span class="pill upd" id="updatePill" style="display:none;cursor:pointer;background:#fff3cd;color:#8a6d3b;border-color:#f0d88a" onclick="restartServer()">🔄 代码已更新 · 点此重启</span>
   </div>
 </header>
 
@@ -376,9 +377,22 @@ function renderProgress(box,d){
   box.innerHTML=html; box.style.display='block';
   const pre=box.querySelector('pre'); if(pre) pre.scrollTop=pre.scrollHeight;
 }
+function renderSolution(d){
+  const sol=d.solution; if(!sol) return '';
+  let h='<div class="card" style="margin-top:14px;border:1px solid var(--amber);background:rgba(255,180,0,.05)">'
+    +'<div class="card-title"><span class="idx">SOLVE</span><h2 style="color:var(--amber)">'+esc(sol.title||'解决方案')+'</h2></div>'
+    +'<div class="sub" style="margin-bottom:8px;font-size:12.5px">'+esc(sol.reason||'')+'</div>'
+    +'<ol style="margin:0 0 8px 20px;font-size:13px;line-height:1.9">';
+  (sol.steps||[]).forEach(st=>{ h+='<li>'+esc(st)+'</li>'; });
+  h+='</ol>';
+  if(sol.resources) h+='<div class="muted" style="font-size:12px">资源：'+esc(sol.resources)+'</div>';
+  h+='<div class="muted" style="font-size:11.5px;margin-top:6px">完整手册：《使用者解决方案手册.md》｜ 仍无法解决就把红色错误发我</div>';
+  h+='</div>';
+  return h;
+}
 function renderResult(box,d){
   let html='';
-  if(d.error){ html='<div class="banner err">失败：'+esc(d.error)+'</div>'; }
+  if(d.error){ html='<div class="banner err">失败：'+esc(d.error)+'</div>'+renderSolution(d); }
   else {
     const ok=!!(d.result&&d.result.total);
     html+='<div class="banner '+(ok?'ok':'warn')+'">'+(ok?'任务结束 · 抓取成功':'任务结束 · 0 条')+'<div class="sub">'+esc(d.summary||'')+'</div></div>';
@@ -445,7 +459,12 @@ async function planAuto(){
     +'<div style="display:flex;gap:10px;margin-top:16px">'
     +'<button class="btn btn-primary" style="flex:1" onclick="confirmAuto()">确认无误，开始执行</button>'
     +'<button class="btn btn-ghost" style="flex:1" onclick="planAuto()">重新生成</button>'
-    +'</div></div>';
+    +'</div>'
+    +(d.precise_hint && d.precise_hint.needed ? '<div style="margin-top:12px;padding:10px 12px;border:1px dashed var(--amber);border-radius:10px;background:rgba(255,180,0,.06)">'
+      +'<div style="font-size:12.5px;color:var(--amber);margin-bottom:8px">💡 '+esc(d.precise_hint.reason||'推荐自动精配')+'</div>'
+      +'<button class="btn" id="a_precise_btn" style="width:100%" onclick="startPrecise()">🤖 一键自动精配（自动探测站点 + 生成解析器 + 试跑）</button>'
+      +'</div>' : '')
+    +'</div>';
   if(d.warnings && d.warnings.length){
     const wb=document.getElementById('a_warns');
     if(wb) wb.innerHTML=d.warnings.map(w=>'<div class="banner warn">'+esc(w)+'</div>').join('');
@@ -471,6 +490,22 @@ async function confirmAuto(){
     cookie:$('#a_cookie').value.trim()};
   startJob('/api/auto/start',payload,$('#a_btn'),$('#a_progress'));
   $('#a_progress').innerHTML='<div class="card"><h4>已确认，开始执行…</h4></div>';
+}
+async function startPrecise(){
+  if(!lastPlan) return;
+  const d=lastPlan;
+  if(!d.description || !d.description.trim()){
+    alert('一键精配需要知道任务内容：请先在「任务描述」框写清楚要抓什么（如：抓取四川省高考一分一段表的分数/人数/排名），再点一键精配。');
+    return;
+  }
+  const url=(d.precise_hint && d.precise_hint.url) || ((d.config && d.config.start_urls)||[])[0] || '';
+  if(!url){ alert('没有可用的入口 URL，请先在配置里填写 start_urls 再试'); return; }
+  const box=$('#a_progress');
+  const btn=document.getElementById('a_precise_btn') || $('#a_btn');
+  startJob('/api/precise/start',
+    {description:d.description, url, config:d.config},
+    btn, box);
+  box.style.display='block';
 }
 async function startPaste(){
   const url=$('#p_url').value.trim(); if(!url){alert('请粘贴网址');return;}
@@ -527,7 +562,7 @@ async function loadRecent(){
     d.forEach(j=>{
       const li=document.createElement('li');
       const st=STATUS[j.status]||['',''];
-      const kn=j.kind==='auto'?'一句话':j.kind==='journal'?'期刊':'贴网页';
+      const kn=j.kind==='auto'?'一句话':j.kind==='journal'?'期刊':j.kind==='precise'?'精配':'贴网页';
       li.innerHTML='<span class="dot '+st[0]+'"></span><span class="kind">'+kn+'</span><span class="title">'+esc(j.title||'')+'</span><span class="meta">'+esc((j.summary||j.status||'').slice(0,80))+'</span>';
       li.onclick=()=>{ const box=document.createElement('div'); box.style.display='block';
         document.querySelector('#tab-auto').appendChild(box);
@@ -537,6 +572,23 @@ async function loadRecent(){
   }catch(e){}
 }
 loadRecent();
+// 代码变更检测：每 20s 对比服务端代码指纹，变了提示一键重启（避免"你跑过但我这边是旧代码"）
+async function checkCodeChanged(){
+  try{
+    const d=await api('/api/code_changed');
+    if(d && d.changed){
+      const el=$('#updatePill'); if(el) el.style.display='inline-flex';
+    }
+  }catch(e){}
+}
+async function restartServer(){
+  if(!confirm('重启服务会中断正在运行的任务，确认重启？')) return;
+  const el=$('#updatePill'); if(el){ el.textContent='⏳ 重启中…'; }
+  try{ await api('/api/restart',{method:'POST',body:'{}'}); }catch(e){}
+  setTimeout(()=>{ location.reload(); }, 3500);
+}
+setInterval(checkCodeChanged, 20000);
+checkCodeChanged();
 </script>
 </body>
 </html>
