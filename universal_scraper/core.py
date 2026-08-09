@@ -605,7 +605,7 @@ class RequestsClient:
                  timeout: float = 20, rotate_ua: bool = True,
                  proxy: Optional[str] = None, cookies: Optional[Dict[str, str]] = None,
                  extra_headers: Optional[Dict[str, str]] = None,
-                 backoff_base: float = 2.0):
+                 backoff_base: float = 2.0, verify: bool = False):
         import requests
         self.requests = requests
         self.min_interval = min_interval
@@ -617,6 +617,7 @@ class RequestsClient:
         self.extra_headers = dict(extra_headers or {})
         self._last_ts = 0.0
         self.session = requests.Session()
+        self.session.verify = verify
         if proxy:
             self.session.proxies = {"http": proxy, "https": proxy}
         if cookies:
@@ -734,7 +735,7 @@ class CurlCffiClient:
                  timeout: float = 20, rotate_ua: bool = True,
                  proxy: Optional[str] = None, cookies: Optional[Dict[str, str]] = None,
                  extra_headers: Optional[Dict[str, str]] = None,
-                 impersonate: str = "chrome"):
+                 impersonate: str = "chrome", verify: bool = False):
         import curl_cffi.requests  # noqa: F401  # 未安装则抛 ImportError
         self.min_interval = min_interval
         self.max_retries = max_retries
@@ -742,6 +743,7 @@ class CurlCffiClient:
         self.rotate_ua = rotate_ua
         self.proxy = proxy
         self.impersonate = impersonate
+        self.verify = verify
         self._throttle_lock = threading.Lock()
         self.extra_headers = dict(extra_headers or {})
         self.cookies = dict(cookies or {})
@@ -780,7 +782,7 @@ class CurlCffiClient:
             else:
                 imp = random.choice(self.impersonate_pool)
         kw = dict(impersonate=imp, timeout=self.timeout, headers=h,
-                  allow_redirects=True, verify=True)
+                  allow_redirects=True, verify=self.verify)
         if max_size:
             kw["stream"] = True  # iter_content 需要流式模式
         if proxy_use:
@@ -874,6 +876,7 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
         proxy=anti.get("proxy"),
         cookies=anti.get("cookies") or {},
         extra_headers=anti.get("headers") or {},
+        verify=bool(anti.get("verify", False)),
     )
     common.update(kw)
     if backend in ("auto", "curl_cffi"):

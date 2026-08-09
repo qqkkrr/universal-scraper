@@ -47,7 +47,7 @@ async function main() {
   const browser = await loadChromium().launch({
     headless: process.env.US_HEADLESS !== "0",
     executablePath: CHROMIUM_EXE,
-    args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+    args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-blink-features=AutomationControlled"],
   });
   const ss = process.env.US_STORAGE_STATE;
   const ctxOpts = { viewport: { width: 1440, height: 900 } };

@@ -193,7 +193,7 @@ async function main() {
   let browser = null;
   try {
     if (captchaDir) fs.mkdirSync(captchaDir, { recursive: true });
-    browser = await chromium.launch({ headless: true, executablePath: EXE, args: ["--no-sandbox"] });
+    browser = await chromium.launch({ headless: true, executablePath: EXE, args: ["--no-sandbox", "--ignore-certificate-errors"] });
     // 关键：WAF 对 HeadlessChrome UA 直接返回拦截页（无 #app），必须用真实 Chrome UA
     const ctx = await browser.newContext({
       userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",

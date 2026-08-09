@@ -27,7 +27,7 @@ async function main() {
   const stopRequested = () => stopFile && fs.existsSync(stopFile);
   let browser = null;
   try {
-    browser = await loadChromium().launch({ headless, executablePath: CHROMIUM_EXE, args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"] });
+    browser = await loadChromium().launch({ headless, executablePath: CHROMIUM_EXE, args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-blink-features=AutomationControlled"] });
     const ctxOpts = storageState && fs.existsSync(storageState) ? { storageState } : {};
     ctxOpts.viewport = { width: 1440, height: 900 };
     if (proxy) ctxOpts.proxy = proxy;

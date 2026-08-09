@@ -208,10 +208,10 @@ async function main() {
   } else {
     const headless = String(args.headless || "1") !== "0";
     try {
-      browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox"] });
+      browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox", "--ignore-certificate-errors"] });
     } catch (e) {
       // 无该 chromium 版本时回退 playwright 默认
-      try { browser = await chromium.launch({ headless, args: ["--no-sandbox"] }); }
+      try { browser = await chromium.launch({ headless, args: ["--no-sandbox", "--ignore-certificate-errors"] }); }
       catch (e2) { out({ type: "error", message: "浏览器启动失败: " + (e2.message||e2).slice(0,120) }); process.exit(1); }
     }
     ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: "zh-CN",

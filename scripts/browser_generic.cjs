@@ -281,12 +281,12 @@ function centerCaptcha(page) {
         ...ctxOpts,
         headless: arg("headless", "0") !== "0",
         executablePath: CHROME_EXE,
-        args: ["--no-sandbox", "--disable-blink-features=AutomationControlled", "--lang=zh-CN"],
+        args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-blink-features=AutomationControlled", "--lang=zh-CN"],
       });
       page = context.pages()[0] || await context.newPage();
       if (arg("headless", "0") === "0") focusWindowMac();  // 有头：窗口居中放大
     } else {
-      browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox"] });
+      browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox", "--ignore-certificate-errors"] });
       context = await browser.newContext(ctxOpts);
       page = await context.newPage();
     }

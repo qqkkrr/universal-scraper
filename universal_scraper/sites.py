@@ -2299,3 +2299,109 @@ def _zige_run(url: str, cookie: str = "", proxy: Optional[str] = None,
 
 register("zige", match_zige, lambda html, url: [], run=_zige_run,
          desc="人社部《国家职业资格目录（2021年版）》：公告页/PDF附件 → 72 项职业资格表格")
+
+
+# ---------------------------------------------------------------------------
+# 地震（USGS 中国区域 API）：最近24小时地震 + 震级分布图
+# 官方源 news.ceic.ac.cn/ajax/google 常被阿里云盾 invisible bucket 拦截，
+# 备用源 earthquake.usgs.gov 免费可靠、字段齐全（时间/震级/地点/深度/经纬度）。
+# ---------------------------------------------------------------------------
+def match_eq(url: str) -> bool:
+    return "earthquake.usgs.gov/fdsnws/event/1/query" in (url or "")
+
+
+def _eq_run(url: str, cookie: str = "", proxy: Optional[str] = None,
+            limit: int = 0) -> List[Dict[str, Any]]:
+    import requests as _req
+    from datetime import datetime, timedelta, timezone
+    headers = {"User-Agent": UA}
+    r = _req.get(url, headers=headers, timeout=40, verify=False,
+                 proxies={"http": proxy, "https": proxy} if proxy else None)
+    r.raise_for_status()
+    data = r.json()
+    feats = data.get("features") or []
+    if not feats:
+        raise RuntimeError("USGS 返回 0 条地震（调整时间/区域参数再试）")
+    bj = timezone(timedelta(hours=8))
+    rows: List[Dict[str, Any]] = []
+    for f in feats:
+        p = f.get("properties") or {}
+        g = f.get("geometry") or {}
+        coords = g.get("coordinates") or [None, None, None]
+        ts = p.get("time")
+        tstr = ""
+        if ts:
+            tstr = datetime.fromtimestamp(ts / 1000, tz=bj).strftime("%Y-%m-%d %H:%M:%S")
+        rows.append({
+            "时间（北京时间）": tstr,
+            "震级": p.get("mag", ""),
+            "地点": p.get("place", ""),
+            "震源深度（km）": coords[2] if len(coords) > 2 else "",
+            "经度": coords[0] if len(coords) > 0 else "",
+            "纬度": coords[1] if len(coords) > 1 else "",
+            "详情链接": p.get("url", ""),
+            "震源类型": p.get("type", ""),
+        })
+    # 绘制震级-经纬度分布图
+    try:
+        _draw_eq_map(rows, proxy=proxy)
+    except Exception as e:
+        pass
+    return rows
+
+
+def _draw_eq_map(rows: List[Dict[str, Any]], proxy: Optional[str] = None) -> None:
+    """中国区域地震分布散点图（震级=点大小，颜色=深度）。"""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+    import os as _os
+    import numpy as np
+    # 中文字体（macOS 系统字体）
+    for _fp in ("/System/Library/Fonts/PingFang.ttc",
+                "/System/Library/Fonts/STHeiti Light.ttc",
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                "/System/Library/Fonts/Songti.ttc"):
+        if _os.path.exists(_fp):
+            try:
+                font_manager.fontManager.addfont(_fp)
+                plt.rcParams["font.family"] = font_manager.FontProperties(fname=_fp).get_name()
+                break
+            except Exception:
+                continue
+    plt.rcParams["axes.unicode_minus"] = False
+    pts = [(r.get("经度"), r.get("纬度"), r.get("震级"), r.get("震源深度（km）"), r.get("时间（北京时间）"), r.get("地点"))
+           for r in rows]
+    pts = [p for p in pts if isinstance(p[0], (int, float)) and isinstance(p[1], (int, float))]
+    if not pts:
+        return
+    lon = np.array([p[0] for p in pts], dtype=float)
+    lat = np.array([p[1] for p in pts], dtype=float)
+    mag = np.array([float(p[2]) if isinstance(p[2], (int, float, str)) and str(p[2]).replace(".", "", 1).isdigit() else 2.0 for p in pts])
+    dep = np.array([float(p[3]) if isinstance(p[3], (int, float, str)) and str(p[3]).replace(".", "", 1).isdigit() else 10.0 for p in pts])
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=130)
+    sc = ax.scatter(lon, lat, s=(mag * 18) ** 1.6, c=dep, cmap="YlOrRd",
+                    alpha=0.75, edgecolors="k", linewidths=0.4)
+    # 中国主要边界简化框（经纬度范围）
+    ax.set_xlim(73, 135)
+    ax.set_ylim(18, 54)
+    ax.set_xlabel("经度"); ax.set_ylabel("纬度")
+    ax.set_title(f"中国及周边地震分布（最近24小时，{len(pts)} 条）", fontsize=14)
+    ax.grid(True, linestyle="--", alpha=0.3)
+    cb = fig.colorbar(sc, ax=ax, label="震源深度 (km)")
+    # 标注 ≥5 级
+    for p, m, t, place in zip(pts, mag, [x[4] for x in pts], [x[5] for x in pts]):
+        if m >= 5:
+            ax.annotate(f"M{m} {str(t)[11:16]}", (p[0], p[1]), fontsize=9,
+                        xytext=(6, 6), textcoords="offset points")
+    from pathlib import Path
+    out_dir = Path("outputs"); out_dir.mkdir(exist_ok=True)
+    fp = out_dir / "earthquake_distribution.png"
+    fig.tight_layout()
+    fig.savefig(fp)
+    plt.close(fig)
+
+
+register("eq", match_eq, lambda html, url: [], run=_eq_run,
+         desc="地震（USGS 中国区域 API）：最近24小时地震（北京时间/震级/地点/深度）+ 分布图")
