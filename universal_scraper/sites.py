@@ -326,7 +326,9 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
     if not res.get("ok"):
         return {"total": 0, "rows": [], "files": {},
                 "error": f"抓取失败 HTTP {res.get('status')}: {res.get('error','')}"}
-    rows = s["parse"](res.get("html", ""), url)[:limit]
+    rows = s["parse"](res.get("html", ""), url)
+    if limit and int(limit) > 0:
+        rows = rows[:int(limit)]
     # 空壳行防线：全字段为空的"成功"行按失败处理（防精配假成功）
     rows = [r for r in rows if any(str(v or "").strip() for k, v in r.items() if k != "_site")]
     if not rows:
@@ -2525,3 +2527,40 @@ def _tax_run(url: str, cookie: str = "", proxy: Optional[str] = None,
 
 register("tax", match_tax, lambda html, url: [], run=_tax_run,
          desc="税务总局政策法规库（搜索接口）：最新增值税等税收政策（标题/文号/效力级别/日期）")
+
+
+# ---------------------------------------------------------------------------
+# 四川省教育考试院（sceea.cn）：首页通知列表（标题/链接/日期）
+# 之前 LLM 抽取只给标题+日期、丢了链接（半成品），改为直接 HTML 解析补全链接
+# ---------------------------------------------------------------------------
+def match_sceea(url: str) -> bool:
+    return "sceea.cn" in (url or "").lower()
+
+
+def parse_sceea(html: str, url: str) -> List[Dict[str, Any]]:
+    from lxml import html as _LH
+    from urllib.parse import urlparse
+    doc = _LH.fromstring(html or "")
+    base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+    rows: List[Dict[str, Any]] = []
+    for li in doc.cssselect("#newsListDynamic li, ul.news-list li"):
+        a = li.cssselect("span.title a")
+        if not a:
+            continue
+        a = a[0]
+        title = (a.get("title") or a.text_content() or "").strip()
+        href = (a.get("href") or "").strip()
+        if not title or not href:
+            continue
+        if href.startswith("/"):
+            href = base + href
+        elif not href.startswith("http"):
+            href = base + "/" + href
+        d = li.cssselect("span.date")
+        rows.append({"标题": title, "链接": href,
+                     "日期": (d[0].text_content().strip() if d else "")})
+    return rows
+
+
+register("sceea", match_sceea, parse_sceea,
+         desc="四川省教育考试院：首页通知列表（标题/链接/日期）")
