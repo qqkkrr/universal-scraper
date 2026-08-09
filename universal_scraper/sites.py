@@ -86,6 +86,7 @@ def register(name: str, matcher: Callable[[str], bool], parser: Callable,
 # 命中即用精配种子 URL 跑，不再让 AI 乱猜入口。
 _DESC_ROUTE = [
     ("zige", ("职业资格", "职业目录", "资格考试目录", "职业技能等级", "国家职业资格"), "https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm"),
+    ("tax", ("税务总局", "税收政策", "增值税", "税收法规", "税务局公告", "税法", "留抵退税", "关税"), "https://www.chinatax.gov.cn/search5/search/s?searchWord=%E5%A2%9E%E5%80%BC%E7%A8%8E&column=%E6%94%BF%E7%AD%96%E6%B3%95%E8%A7%84&strict=1"),
     ("eq", ("地震", "震级", "震源深度", "earthquake"), "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=NOW24H&minlatitude=18&maxlatitude=54&minlongitude=73&maxlongitude=135&minmagnitude=0"),
     ("miit", ("工信部", "app通报", "侵害用户权益", "app（sdk）", "违规收集个人信息"), ""),
     ("std", ("国家标准", "标准平台", "标准号", "国标", "标准搜索"), ""),
@@ -2462,3 +2463,65 @@ def _draw_eq_map(rows: List[Dict[str, Any]], proxy: Optional[str] = None) -> Non
 
 register("eq", match_eq, lambda html, url: [], run=_eq_run,
          desc="地震（USGS 中国区域 API）：最近24小时地震（北京时间/震级/地点/深度）+ 分布图")
+
+
+# ---------------------------------------------------------------------------
+# 税务总局政策法规库（fgk.chinatax.gov.cn / 官网站内搜索接口）
+# 搜索接口: POST https://www.chinatax.gov.cn/search5/search/s
+#   siteCode=bm29000002&searchWord=关键词&column=政策法规&uc=1
+# 返回 searchResultAll.searchTotal：title/pubDate/url/column/pubName/govDoc 等
+# 注意：官方旧列表页(2021)已停更，法规库新平台在 fgk.chinatax.gov.cn
+# ---------------------------------------------------------------------------
+def match_tax(url: str) -> bool:
+    u = (url or "").lower()
+    return ("chinatax.gov.cn/search5/search" in u or "fgk.chinatax.gov.cn" in u)
+
+
+def _tax_run(url: str, cookie: str = "", proxy: Optional[str] = None,
+             limit: int = 0) -> List[Dict[str, Any]]:
+    from urllib.parse import urlparse, parse_qs, urlencode
+    import requests as _req
+    q = parse_qs(urlparse(url).query)
+    word = (q.get("searchWord") or [""])[0].strip() or "增值税"
+    column = (q.get("column") or [""])[0].strip() or "政策法规"
+    page = int((q.get("pageNum") or [""])[0] or 0)
+    strict = (q.get("strict") or ["1"])[0] != "0"  # 默认标题必须含关键词
+    form = {
+        "siteCode": "bm29000002",
+        "searchWord": word,
+        "column": column,
+        "uc": 1,
+        "left_right_index": "",
+    }
+    r = _req.post("https://www.chinatax.gov.cn/search5/search/s", data=form,
+                  timeout=40, verify=False,
+                  headers={"User-Agent": UA,
+                           "Referer": "https://www.chinatax.gov.cn/"},
+                  proxies={"http": proxy, "https": proxy} if proxy else None)
+    r.raise_for_status()
+    data = r.json()
+    st = ((data.get("searchResultAll") or {}).get("searchTotal")) or []
+    rows: List[Dict[str, Any]] = []
+    for it in st:
+        title = re.sub(r"<[^>]+>", "", it.get("title") or "").strip()
+        if strict and word and word not in title:
+            continue
+        doc = it.get("govDoc") or {}
+        rows.append({
+            "标题": title,
+            "链接": it.get("url", ""),
+            "发布日期": (it.get("pubDate") or "")[:10],
+            "栏目": it.get("column", ""),
+            "发布单位": it.get("pubName", ""),
+            "文号": (doc.get("docNo") or doc.get("docNum") or ""),
+            "效力级别": it.get("xxgk_effectLevel", ""),
+            "制定年份": it.get("xxgk_formulatedYear", ""),
+            "内容摘要": re.sub(r"<[^>]+>", "", it.get("abstracts") or it.get("shortContent") or "")[:200],
+        })
+    if not rows:
+        raise RuntimeError(f"税务总局搜索 0 条（关键词「{word}」/栏目「{column}」无结果或接口变更）")
+    return rows
+
+
+register("tax", match_tax, lambda html, url: [], run=_tax_run,
+         desc="税务总局政策法规库（搜索接口）：最新增值税等税收政策（标题/文号/效力级别/日期）")
