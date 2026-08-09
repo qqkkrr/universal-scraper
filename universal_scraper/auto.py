@@ -1561,7 +1561,8 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
         verify = None
         try:
             from .verify import verify_rows
-            verify = verify_rows(sample, cfg, sample_n=0, network=False, declared=total)
+            verify = verify_rows(sample, cfg, sample_n=3, network=True,
+                                 declared=total, timeout=12)
         except Exception:
             pass
         summary = f"✅ 任务结束：精配[{site}] {total} 条，导出 {list(files.values())}"
@@ -1908,12 +1909,13 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         except Exception as _e:
             log(f"⚠️ 精配解析未启用：{_e}")
 
-    # 自动复核（字段完整率/去重/数量，不联网，秒级完成）
+    # 自动复核：字段完整率/去重/数量 + 联网抽查详情（死链/内容一致性）
     verify = None
     try:
         from .verify import verify_rows
-        verify = verify_rows(sample, cfg, sample_n=0, network=False,
-                             declared=total or len(sample))
+        # network=True：抽 3 条重抓详情，验证可访问 + 标题匹配（抓到的和实际对得上）
+        verify = verify_rows(sample, cfg, sample_n=3, network=True,
+                             declared=total or len(sample), timeout=12)
     except Exception:
         verify = None
 
@@ -2172,8 +2174,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     verify = None
     try:
         from .verify import verify_rows
-        verify = verify_rows(sample, config, sample_n=0, network=False,
-                             declared=total or len(sample))
+        verify = verify_rows(sample, config, sample_n=3, network=True,
+                             declared=total or len(sample), timeout=12)
     except Exception:
         verify = None
 

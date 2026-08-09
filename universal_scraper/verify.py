@@ -97,16 +97,30 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
             "value": f"{dups} 条重复" + (f"，{empty} 条主键为空" if empty else ""),
         })
 
-    # 4. 抽样重抓对比（联网）
+    # 4. 抽样重抓对比（联网）：抓到的详情链接要能在网上真正打开且内容匹配
     if network and sample_n > 0:
+        # 相对链接补全：入口 start_urls[0] 的 scheme://host 作为基址
+        base_url = ""
+        try:
+            su = (cfg or {}).get("start_urls") or []
+            if su:
+                from urllib.parse import urlparse
+                _p = urlparse(su[0])
+                base_url = f"{_p.scheme}://{_p.netloc}"
+        except Exception:
+            pass
         ok = total = 0
         checked = []
         for r in rows[:sample_n]:
-            u = _norm(r.get("url") or r.get("link") or r.get("_url"))
+            # 支持中英文键名（url/link/链接/网址/详情链接；title/name/标题/名称）
+            u = _norm(r.get("url") or r.get("link") or r.get("链接")
+                      or r.get("网址") or r.get("详情链接") or "")
+            if u.startswith("/") and base_url:
+                u = base_url + u
             if not u or not u.startswith(("http://", "https://")):
                 continue
             total += 1
-            title = _norm(r.get("title") or r.get("name") or "")
+            title = _norm(r.get("title") or r.get("name") or r.get("标题") or r.get("名称") or "")
             try:
                 from .quick import fetch_url
                 fr = fetch_url(u, timeout=timeout, article=True)
