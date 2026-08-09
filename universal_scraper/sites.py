@@ -87,6 +87,7 @@ def register(name: str, matcher: Callable[[str], bool], parser: Callable,
 _DESC_ROUTE = [
     ("zige", ("职业资格", "职业目录", "资格考试目录", "职业技能等级", "国家职业资格"), "https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm"),
     ("tax", ("税务总局", "税收政策", "增值税", "税收法规", "税务局公告", "税法", "留抵退税", "关税"), "https://www.chinatax.gov.cn/search5/search/s?searchWord=%E5%A2%9E%E5%80%BC%E7%A8%8E&column=%E6%94%BF%E7%AD%96%E6%B3%95%E8%A7%84&strict=1"),
+    ("nhsa", ("医保", "医保局", "药品目录", "医药", "医疗保障", "集中采购"), "http://www.nhsa.gov.cn/col/col104/index.html"),
     ("eq", ("地震", "震级", "震源深度", "earthquake"), "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=NOW24H&minlatitude=18&maxlatitude=54&minlongitude=73&maxlongitude=135&minmagnitude=0"),
     ("miit", ("工信部", "app通报", "侵害用户权益", "app（sdk）", "违规收集个人信息"), ""),
     ("std", ("国家标准", "标准平台", "标准号", "国标", "标准搜索"), ""),
@@ -2564,3 +2565,72 @@ def parse_sceea(html: str, url: str) -> List[Dict[str, Any]]:
 
 register("sceea", match_sceea, parse_sceea,
          desc="四川省教育考试院：首页通知列表（标题/链接/日期）")
+
+
+# ---------------------------------------------------------------------------
+# 国家医保局（nhsa.gov.cn）政策法规栏目 col104：
+# 列表在页面 <datastore> 的 <record> CDATA 里（服务端渲染），解析 li 四个 span
+# （索引/标题+链接/发文字号/发布日期）。之前误抓导航 li 导致 28 行空壳。
+# ---------------------------------------------------------------------------
+def match_nhsa(url: str) -> bool:
+    return "nhsa.gov.cn/col/col104" in (url or "").lower()
+
+
+def _nhsa_fetch(url: str, cookie: str = "", proxy: Optional[str] = None):
+    """nhsa 专用 fetch：requests + smart_decode（页面编码易误判，curl_cffi 会卡）。"""
+    import requests as _req
+    import warnings as _w
+    _w.filterwarnings("ignore")
+    from .core import smart_decode
+    hdrs = {"User-Agent": UA}
+    if cookie:
+        hdrs["Cookie"] = cookie
+    r = _req.get(url, timeout=20, verify=False, headers=hdrs,
+                 proxies={"http": proxy, "https": proxy} if proxy else None)
+    r.raise_for_status()
+    html = smart_decode(r.content, dict(r.headers))
+    return {"ok": True, "status": r.status_code, "html": html,
+            "final_url": r.url, "headers": dict(r.headers)}
+
+
+def parse_nhsa(html: str, url: str) -> List[Dict[str, Any]]:
+    import re as _re
+    from urllib.parse import urlparse
+    base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+    m = _re.search(r"<datastore>(.*?)</datastore>", html or "", _re.S)
+    if not m:
+        return []
+    store = m.group(1)
+    recs = _re.findall(r"<record><!\[CDATA\[(.*?)\]\]></record>", store, _re.S)
+    rows: List[Dict[str, Any]] = []
+    for rec in recs:
+        # 索引
+        im = _re.search(r"<span[^>]*>([^<]{2,40})</span>", rec)
+        # 标题+链接
+        am = _re.search(r'<a href="([^"]+)"[^>]*title="([^"]+)"', rec)
+        if not am:
+            am = _re.search(r'<a href="([^"]+)"[^>]*>([^<]{4,80})</a>', rec)
+        # 文号 + 日期
+        spans = _re.findall(r"<span[^>]*>([^<]{1,60})</span>", rec)
+        title = am.group(2).strip() if am else ""
+        href = am.group(1).strip() if am else ""
+        if href.startswith("/"):
+            href = base + href
+        elif href and not href.startswith("http"):
+            href = base + "/" + href
+        wh = ""
+        dt = ""
+        for sp in spans:
+            s = sp.strip()
+            if _re.search(r"〔|\]号|号$", s):
+                wh = s
+            elif _re.fullmatch(r"20\d{2}-\d{1,2}-\d{1,2}", s):
+                dt = s
+        rows.append({"索引": (im.group(1).strip() if im else ""),
+                     "标题": title, "链接": href,
+                     "发文字号": wh, "发布日期": dt})
+    return [r for r in rows if r["标题"]]
+
+
+register("nhsa", match_nhsa, parse_nhsa, fetch=_nhsa_fetch,
+         desc="国家医保局：政策法规栏目（col104 datastore 45条，标题/文号/日期）")

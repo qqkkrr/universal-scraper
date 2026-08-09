@@ -1534,9 +1534,9 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
 
     返回 {}（未命中/失败，调用方继续 AI 流程）或完整 auto_task 结果。"""
     try:
-        from .sites import match_site_by_description, seed_url_for, SITES, run_site
+        from .sites import match_site_by_description, seed_url_for, run_site
         site = match_site_by_description(description)
-        if not site or not (SITES.get(site) or {}).get("run"):
+        if not site:
             return {}
         seed = seed_url_for(description)
         if not seed:
