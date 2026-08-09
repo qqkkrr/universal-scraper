@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import threading
@@ -87,6 +88,12 @@ def _job_error(job, err: str):
         job["status"] = "error"
         job["error"] = str(err)
         job["messages"].append(f"❌ 失败：{err}")
+    # 自动诊断失败类型并附加解决方案（WebUI 会展示给使用者）
+    try:
+        from .solutions import attach_solution
+        attach_solution(job, str(err))
+    except Exception:
+        pass
 
 
 def run_journal_job(job: dict, site: str, since: int, out: str, workers: int, with_meta: bool):
@@ -132,6 +139,27 @@ def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie=
             _job_error(job, f"{type(e).__name__}: {e}")
 
 
+def run_precise_job(job: dict, desc: str, url: str, config: dict):
+    """一键自动精配：探测站点 -> LLM 生成方案 -> 注册 -> 试跑验证。"""
+    try:
+        _job_log(job, f"🎯 自动精配开始：{url}")
+        from .precise_auto import generate_precise
+        r = generate_precise(desc, url, config or None, limit=8,
+                             log=lambda m: _job_log(job, m))
+        if r.get("ok"):
+            files = r.get("files") or {}
+            summary = (f"✅ 精配生成成功（{r.get('kind')}）：{r.get('detail')}，"
+                       f"导出 {list(files.values())}；现在可直接重跑原任务")
+            _job_done(job, r, summary, verify=r.get("rows") or None)
+        else:
+            _job_error(job, f"精配试跑未成功：{r.get('error')}（配置已保存，可重跑任务或换入口再试）")
+    except BaseException as e:
+        if isinstance(e, KeyboardInterrupt):
+            _job_error(job, "任务已被手动停止（KeyboardInterrupt）")
+        else:
+            _job_error(job, f"{type(e).__name__}: {e}")
+
+
 def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
                   max_pages: int, limit: int, proxy: str = "", cookie: str = ""):
     try:
@@ -157,6 +185,88 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
             except Exception as e:
                 _job_error(job, f"大众点评直抓失败：{type(e).__name__}: {e}")
                 return
+        # 命中高频精配站点 → 直接用精配（如工信部APP通报/ggzy/巨潮等），不再走通用猜测
+        try:
+            from .sites import match_site, run_site
+            _site = match_site(url)
+            if _site:
+                _job_log(job, f"🏆 命中精配[{_site}]，走精配解析（不空转通用引擎）...")
+                r = run_site(url, cookie=cookie or "", proxy=proxy or None,
+                             limit=int(limit or 20))
+                if r.get("error"):
+                    _job_error(job, r["error"])
+                    return
+                rows = r.get("rows") or []
+                _job_log(job, f"✅ 精配[{_site}]完成：{r['total']} 条")
+                summary = f"✅ 任务结束：精配[{_site}] {r['total']} 条，导出 {list(r['files'].values())}"
+                _job_done(job, {"total": r["total"], "fetched": len(rows), "errors": 0,
+                                "files": r["files"]}, summary, _auto_verify(rows, None))
+                return
+        except Exception as e:
+            _job_log(job, f"⚠️ 精配检查失败，改走通用流程：{type(e).__name__}: {e}")
+        # PDF 直链 / 页面含 PDF 附件 → 通用 PDF 解析（未精配站也能直接出表格）
+        if mode in ("auto", "table", "article"):
+            try:
+                from .pdf_table import is_attachment_url, attachment_to_rows, extract_pdf_links
+                import requests as _req
+                _pdfs: list = []
+                if is_attachment_url(url):
+                    _pdfs = [url]
+                else:
+                    _rr = _req.get(url, timeout=25, verify=False,
+                                   headers={"User-Agent": "Mozilla/5.0"})
+                    _pdfs = extract_pdf_links(_rr.text or "", url)
+                if _pdfs:
+                    _job_log(job, f"📄 检测到 {len(_pdfs)} 个 PDF/附件，走通用附件解析…")
+                    rows_all: list = []
+                    _pdf_errors: list = []
+                    for _pu in _pdfs[:5]:
+                        res = attachment_to_rows(_pu)
+                        if res.get("kind") == "table":
+                            rows_all.extend(res.get("rows") or [])
+                        elif res.get("kind") == "text":
+                            _t = (res.get("text") or "").strip()
+                            if _t:
+                                rows_all.append({"_pdf": _pu, "content": _t[:20000]})
+                        elif res.get("error"):
+                            _pdf_errors.append(f"{_pu}: {res['error'][:120]}")
+                    if _pdf_errors and not rows_all:
+                        _job_log(job, "⚠️ " + "；".join(_pdf_errors[:3]))
+                    if rows_all:
+                        import hashlib as _hl
+                        _host = re.sub(r"[^0-9A-Za-z_-]", "_", urllib.parse.urlparse(_pdfs[0]).netloc)
+                        _suffix = _hl.md5("|".join(_pdfs[:5]).encode()).hexdigest()[:8]
+                        base = f"pdf_{_host}_{_suffix}"
+                        # 导出时去掉内部元数据列（_pdf/_page/_table）
+                        _meta = ("_pdf", "_page", "_table")
+                        fp = ROOT / "outputs" / f"{base}.json"
+                        fp.write_text(json.dumps(rows_all, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+                        try:
+                            import csv
+                            keys = [k for k in rows_all[0] if k not in _meta]
+                            with open(ROOT / "outputs" / f"{base}.csv", "w", newline="", encoding="utf-8-sig") as f:
+                                w = csv.DictWriter(f, fieldnames=keys)
+                                w.writeheader()
+                                w.writerows([{k: v for k, v in r.items() if k not in _meta} for r in rows_all])
+                        except Exception:
+                            pass
+                        try:
+                            from openpyxl import Workbook
+                            wb = Workbook(); ws = wb.active
+                            keys = [k for k in rows_all[0] if k not in _meta]
+                            ws.append(keys)
+                            for r in rows_all:
+                                ws.append([r.get(k, "") for k in keys])
+                            wb.save(ROOT / "outputs" / f"{base}.xlsx")
+                        except Exception:
+                            pass
+                        files = {"json": f"outputs/{base}.json", "csv": f"outputs/{base}.csv", "xlsx": f"outputs/{base}.xlsx"}
+                        summary = f"✅ 任务结束：附件解析 {len(rows_all)} 条，导出 {list(files.values())}"
+                        _job_done(job, {"total": len(rows_all), "fetched": len(_pdfs), "errors": 0, "files": files},
+                                  summary, _auto_verify(rows_all, None))
+                        return
+            except Exception as e:
+                _job_log(job, f"⚠️ 通用 PDF 解析失败，改走普通网页：{type(e).__name__}: {e}")
         if mode == "crawl":
             from .quick import crawl_url
             _job_log(job, f"🔄 整站爬取模式：深度 {depth}，最多 {max_pages} 页")
@@ -314,6 +424,24 @@ class Handler(BaseHTTPRequestHandler):
                                  proxy=body.get("proxy", "") or None,
                                  cookie=body.get("cookie", "") or None,
                                  log_cb=lambda m: None)
+                # 推荐精配提示：AI 不确定入口 / 数据形态特殊（榜单/图片/PDF/强反爬）
+                try:
+                    _cfg = plan.get("config") or {}
+                    _hint = None
+                    if (_cfg.get("intent") or {}).get("entry_unknown"):
+                        _hint = "AI 不确定入口；点下方按钮可一键自动精配（自动探测站点并生成专用解析器）"
+                    else:
+                        _kw = re.findall(r"榜单|排行|排行榜|品牌价值|图片|图表|截图|PDF|附件|扫描件", desc)
+                        _hard = any(d in desc for d in
+                                    ("dianping", "taobao", "tmall", "douyin", "kuaishou", "zhihu",
+                                     "weibo", "xiaohongshu", "zhipin", "boss直聘", "大众点评"))
+                        if _kw or _hard:
+                            _hint = "检测到可能需要精配的数据形态（榜单/图片/附件/强反爬），可一键自动精配"
+                    if _hint:
+                        plan["precise_hint"] = {"needed": True, "reason": _hint,
+                                                "url": ((_cfg.get("start_urls") or [""])[0])}
+                except Exception:
+                    pass
                 self._json(plan)
             if u.path == "/api/auto/start":
                 desc = str(body.get("description", "")).strip()
@@ -422,6 +550,20 @@ class Handler(BaseHTTPRequestHandler):
                 job = _new_job("journal", f"期刊下载：{site}（{since} 起）")
                 threading.Thread(target=run_journal_job,
                                  args=(job, site, since, out, workers, with_meta),
+                                 daemon=True).start()
+                self._json({"job": job["id"]})
+            elif u.path == "/api/precise/start":
+                desc = str(body.get("description", "")).strip()
+                url = str(body.get("url", "")).strip()
+                if not url.startswith(("http://", "https://")):
+                    self._json({"error": "请提供 http/https 开头的入口 URL"})
+                    return
+                if not desc:
+                    self._json({"error": "一键精配需要先描述任务（抓什么、要哪些字段），否则 AI 无法判断数据相关性和字段。请回到「一句话任务」输入任务描述后重新点一键精配。"})
+                    return
+                job = _new_job("precise", f"一键精配：{url[:50]}", description=desc)
+                threading.Thread(target=run_precise_job,
+                                 args=(job, desc, url, body.get("config") or {}),
                                  daemon=True).start()
                 self._json({"job": job["id"]})
             elif u.path == "/api/paste/start":

@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import bisect
 import json
 import re
 import urllib.parse
@@ -54,6 +55,10 @@ HIGH_FREQUENCY_SITES = [
     {"name": "全国公共资源交易平台", "domain": "ggzy.gov.cn", "module": "ggzy", "status": "✅ 已精配",
      "desc": "招标/中标公告搜索（真实浏览器过WAF，历史交易dealList）", "difficulty": "中高·WAF+可能验证码",
      "url_tips": "搜索入口: https://www.ggzy.gov.cn/history/dealList.html?keyword=<关键词>&begin=YYYY-MM-DD&end=YYYY-MM-DD&stages=0001,0002（0001=招标公告, 0002=中标公告）；详情页 /deal/html/a/xxx.html 正文在 /deal/html/b/xxx.html"},
+    {"name": "工信部APP通报", "domain": "miit.gov.cn", "module": "miit", "status": "✅ 已精配",
+     "desc": "APP（SDK）侵害用户权益通报：通知公告列表（JS渲染）+ 详情 PDF 附件表格（App名称/版本/所涉问题）",
+     "difficulty": "中·JS渲染+PDF附件",
+     "url_tips": "专用栏目: https://www.miit.gov.cn/jgsj/xgj/APPqhyhqyzxzzxd/tzgg/ （不是 /zwgk/zcwj/wjfb/tz/，那是规划类通知）"},
     {"name": "社科院期刊系（ajcass）", "domain": "*.ajcass.com", "module": "ajcass", "status": "✅ 已精配",
      "desc": "中国社科院各刊官网（中国工业经济/经济研究/金融研究等同一套系统）：期次列表=GetIssueContentList，含[摘要]/作者/全文PDF/浏览人次；期次页有 WAF 滑块",
      "difficulty": "中·期次页有 WAF 滑块（浏览器模式滑一次）",
@@ -1510,3 +1515,787 @@ def match_cninfo(url: str) -> bool:
 
 register("cninfo", match_cninfo, lambda html, url: [], run=_cninfo_run,
          desc="巨潮资讯：上市公司公告查询（POST 接口）")
+
+
+# ===========================================================================
+# 工信部 APP 侵害用户权益通报（miit.gov.cn）
+# ---------------------------------------------------------------------------
+# 列表页是 JS 渲染壳（HTTP 直抓只有 5KB 导航壳）；详情页正文只有「详见附件」，
+# App 名单在详情页内嵌 PDF 阅读器 iframe 的 fileurl（PDF 直链）里。
+# 精配流程：浏览器桥渲染列表 → 详情页取 PDF 直链 → 下载附件 → 按表格网格解析。
+# ---------------------------------------------------------------------------
+def match_miit(url: str) -> bool:
+    u = (url or "").lower()
+    return ("miit.gov.cn" in u) and (
+        "appqhyhqyzxzzxd" in u or "jgsj/xgj" in u or "zwgk/zcwj/wjfb/tz" in u)
+
+
+import sys, re, bisect
+from pdfminer.high_level import extract_pages
+from pdfminer.layout import LTTextContainer, LTTextLine, LTRect, LTLine, LTChar
+
+FIELD_ALIASES = {
+    "seq": ["序号", "序"],
+    "name": ["应用名称", "产品名称"],
+    "developer": ["应用开发者", "生产厂商", "开发者", "企业名称"],
+    "source": ["应用来源", "样品来源", "来源"],
+    "version": ["应用版本", "版本"],
+    "issue": ["所涉问题", "问题项"],
+}
+FIELDS = ("seq", "name", "developer", "source", "version", "issue")
+
+def _map_token(t):
+    t = t.replace(" ", "").replace("\u3000", "")
+    for f, aliases in FIELD_ALIASES.items():
+        for a in aliases:
+            if t == a or t.startswith(a) or a in t:
+                return f
+    return None
+
+def _header_tokens(line):
+    T = line.get_text()
+    chars = [c for c in line if isinstance(c, LTChar) and c.get_text()]
+    toks, cur_txt, cur_xs, ti = [], "", [], 0
+    for c in chars:
+        ct = c.get_text().replace("\u3000", " ")
+        if ct.strip() == "":
+            if cur_txt:
+                toks.append((sum(cur_xs) / len(cur_xs), cur_txt))
+                cur_txt, cur_xs = "", []
+            ti += len(c.get_text())
+            continue
+        while ti < len(T) and T[ti] in (" ", "\u3000"):
+            if cur_txt:
+                toks.append((sum(cur_xs) / len(cur_xs), cur_txt))
+                cur_txt, cur_xs = "", []
+            ti += 1
+        cur_txt += ct.strip()
+        cur_xs.append(c.x0 + (c.width or 0) / 2)
+        ti += len(c.get_text())
+    if cur_txt:
+        toks.append((sum(cur_xs) / len(cur_xs), cur_txt))
+    merged = []
+    for x, t in toks:
+        if merged:
+            px, pt = merged[-1]
+            if x - px < 32 and (_map_token(pt + t) is not None or _map_token(pt) is None):
+                merged[-1] = (px, pt + t)
+                continue
+        merged.append((x, t))
+    return merged
+
+def _grid_lines(page):
+    h_segs, v_segs = {}, {}
+    for el in page:
+        if isinstance(el, (LTLine, LTRect)):
+            x0, x1 = sorted((el.x0, el.x1)); y0, y1 = sorted((el.y0, el.y1))
+        else:
+            continue
+        if abs(x1 - x0) > 0.5 and abs(y1 - y0) < 1.5:
+            ky = round((y0 + y1) / 2)
+            h_segs.setdefault(ky, []).append((x0, x1))
+        elif abs(y1 - y0) > 0.5 and abs(x1 - x0) < 1.5:
+            kx = round((x0 + x1) / 2)
+            v_segs.setdefault(kx, []).append((y0, y1))
+    h_full, v_lines = set(), set()
+    for y, segs in h_segs.items():
+        segs = sorted(segs)
+        cur0, cur1 = segs[0]; cov = 0
+        for a, b in segs[1:]:
+            if a <= cur1 + 1: cur1 = max(cur1, b)
+            else: cov += cur1 - cur0; cur0, cur1 = a, b
+        cov += cur1 - cur0
+        if cov > 300: h_full.add(float(y))
+    for x, segs in v_segs.items():
+        segs = sorted(segs)
+        cur0, cur1 = segs[0]; cov = 0
+        for a, b in segs[1:]:
+            if a <= cur1 + 1: cur1 = max(cur1, b)
+            else: cov += cur1 - cur0; cur0, cur1 = a, b
+        cov += cur1 - cur0
+        if cov > 150: v_lines.add(float(x))
+    return sorted(h_full), sorted(v_lines)
+
+def _header_fields(page, hs):
+    hs_sorted = sorted(hs, reverse=True)
+    if len(hs_sorted) < 2:
+        return None
+    top, second = hs_sorted[0], hs_sorted[1]
+    cols = []
+    for el in page:
+        if not isinstance(el, LTTextContainer):
+            continue
+        for line in el:
+            if not isinstance(line, LTTextLine):
+                continue
+            if line.y0 <= second or line.y0 > top:
+                continue
+            for x, t in _header_tokens(line):
+                f = _map_token(t)
+                if f:
+                    cols.append((x, f))
+    return cols or None
+
+def _col_fields(vxs, header_fields):
+    if not vxs or not header_fields:
+        return None
+    fields = [None] * (len(vxs) - 1)
+    for x, f in header_fields:
+        ci = bisect.bisect(vxs, x) - 1
+        if 0 <= ci < len(fields):
+            fields[ci] = f
+    return fields
+
+def _line_field_text(line, vxs, col_fields):
+    """字符级分列：返回 {field: text}（T 对齐保留词间空格）。"""
+    T = line.get_text()
+    chars = [c for c in line if isinstance(c, LTChar) and c.get_text()]
+    cells = {}
+    ti = 0
+    for c in chars:
+        while ti < len(T) and T[ti] in (" ", "\u3000"):
+            # 空格归到“下一个字符”的列（列间隙空格会在 strip 时去掉）
+            ti += 1
+            # 记录空格给当前列? 简化：先只记字符，最后统一处理
+            pass
+        ci = bisect.bisect(vxs, c.x0) - 1
+        f = col_fields[ci] if 0 <= ci < len(col_fields) else None
+        ct = c.get_text()
+        if f in FIELDS:
+            cells[f] = cells.get(f, "") + ct
+        ti += len(ct)
+    # 用 T 里的空格恢复词间空格：按列边界在字符流位置插入
+    # （上面已按字符拼，这里再对每列做 T 对齐重建）
+    return _restore_spaces(line, vxs, col_fields)
+
+def _restore_spaces(line, vxs, col_fields):
+    """更稳做法：一次遍历，按 T 的空格插入到当前列文本末尾。"""
+    T = line.get_text()
+    chars = [c for c in line if isinstance(c, LTChar) and c.get_text()]
+    cells = {}
+    ti = 0
+    for c in chars:
+        # 处理当前字符前的空格（T 对齐）
+        while ti < len(T) and T[ti] in (" ", "\u3000"):
+            # 空格属于哪个列？它后面的第一个可见字符所在列
+            # 先记 pending，等下一个字符定列后加空格
+            ti += 1
+        ci = bisect.bisect(vxs, c.x0) - 1
+        f = col_fields[ci] if 0 <= ci < len(col_fields) else None
+        if f in FIELDS:
+            cells[f] = cells.get(f, "") + c.get_text().replace("\u3000", " ")
+        ti += len(c.get_text())
+    # 重新用 T 对齐插入空格（简化：T 中空格对应的位置由 char 流定位）
+    cells2 = {}
+    ti = 0
+    pending_space = False
+    for c in chars:
+        while ti < len(T) and T[ti] in (" ", "\u3000"):
+            pending_space = True
+            ti += 1
+        ci = bisect.bisect(vxs, c.x0) - 1
+        f = col_fields[ci] if 0 <= ci < len(col_fields) else None
+        if f in FIELDS:
+            if pending_space and cells2.get(f):
+                if not cells2[f].endswith(" "):
+                    cells2[f] += " "
+            cells2[f] = cells2.get(f, "") + c.get_text().replace("\u3000", " ")
+        pending_space = False
+        ti += len(c.get_text())
+    return {k: re.sub(r"\s+", " ", v).strip() for k, v in cells2.items() if v.strip()}
+
+def _parse_miit_pdf(path):
+    out = []
+    col_fields = None
+    for page in extract_pages(path):
+        hs, vxs = _grid_lines(page)
+        if not hs:
+            continue
+        hf = _header_fields(page, hs)
+        has_header = bool(hf and len(hf) >= 2 and any(f != "seq" for f in hf))
+        if has_header:
+            cf = _col_fields(vxs, hf)
+            if cf and sum(1 for f in cf if f) >= 2:
+                col_fields = cf
+        if not col_fields:
+            continue
+        top, bottom = max(hs), min(hs)
+        hs_sorted = sorted(hs, reverse=True)
+        hdr_min = hs_sorted[1] if (len(hs_sorted) >= 2 and has_header) else None
+        entries = []  # (y0, x0, field, text)
+        for el in page:
+            if not isinstance(el, LTTextContainer):
+                continue
+            for line in el:
+                if not isinstance(line, LTTextLine):
+                    continue
+                t = line.get_text().strip()
+                if not t:
+                    continue
+                if re.match(r"^[-–—]\s*\d+\s*[-–—]$", t):
+                    continue
+                if line.y0 > top or line.y0 < bottom:
+                    continue
+                if hdr_min is not None and line.y0 > hdr_min:
+                    continue
+                cells = _restore_spaces(line, vxs, col_fields)
+                for f, txt in cells.items():
+                    if txt:
+                        entries.append((line.y0, line.x0, f, txt))
+        anchors = [(y0, int(txt)) for y0, x0, f, txt in entries
+                   if f == "seq" and re.fullmatch(r"\d{1,3}", txt)]
+        if not anchors:
+            continue
+        anchors.sort(key=lambda a: a[0], reverse=True)
+        # 每行：按最近序号锚点聚合
+        rows_by_y = {}
+        for y0, x0, f, txt in entries:
+            if f == "seq":
+                continue
+            ay = min(anchors, key=lambda a: abs(a[0] - y0))[0]
+            row = rows_by_y.setdefault(ay, {n: "" for n in FIELDS})
+            if row[f] and txt:
+                prev, nxt = row[f][-1], txt[0]
+                if _is_cjk(prev) and _is_cjk(nxt):
+                    row[f] += txt
+                else:
+                    row[f] += (" " if (prev.isascii() and nxt.isascii()) else "") + txt
+            else:
+                row[f] += txt
+        for ay, a_n in anchors:
+            row = rows_by_y.get(ay)
+            if row is not None:
+                row["seq"] = str(a_n)
+        out.extend(r for r in rows_by_y.values() if r.get("seq"))
+    out.sort(key=lambda r: int(r["seq"]) if r["seq"].isdigit() else 9999)
+    out = [r for r in out if r["seq"].isdigit()
+           and r["name"] not in ("应用名称", "产品名称", "APP（SDK）名单")]
+    return out
+
+def _is_cjk(ch):
+    o = ord(ch)
+    return 0x4E00 <= o <= 0x9FFF or 0x3000 <= o <= 0x303F
+
+def _parse_miit_xlsx(path) -> List[Dict[str, Any]]:
+    """解析工信部 APP 通报附件 Excel（旧通报可能用 XLS/XLSX）。"""
+    from openpyxl import load_workbook
+    wb = load_workbook(path, data_only=True)
+    ws = wb.active
+    header = [str(c.value or "").strip() for c in ws[1]]
+
+    def find(*names):
+        for i, h in enumerate(header):
+            if any(n in h for n in names):
+                return i
+        return -1
+
+    idx = {
+        "seq": find("序号"),
+        "name": find("应用名称", "App名称", "APP名称", "名称"),
+        "developer": find("应用开发者", "开发者", "企业名称", "运营者"),
+        "source": find("应用来源", "来源"),
+        "version": find("版本"),
+        "issue": find("所涉问题", "问题", "涉及问题", "违规问题"),
+    }
+    idx = {k: v for k, v in idx.items() if v >= 0}
+    if "name" not in idx or "issue" not in idx:
+        return []
+    rows = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        item = {}
+        for k, i in idx.items():
+            v = row[i] if 0 <= i < len(row) and row[i] is not None else ""
+            item[k] = str(v).strip()
+        if any(item.values()):
+            rows.append(item)
+    return rows
+
+
+def _miit_run(url: str, cookie: str = "", proxy: Optional[str] = None,
+              limit: int = 20) -> List[Dict[str, Any]]:
+    """工信部 APP 通报：浏览器桥渲染列表/详情 → 取 PDF 直链 → 下载解析表格。
+    limit<=20（默认值）时抓全栏目（约 24 篇），否则抓前 limit 篇。"""
+    from pathlib import Path as _P
+    from .browser import run_bridge, BrowserBridgeError
+    # AI/用户给的入口可能选错栏目（如 /zwgk/zcwj/wjfb/tz/ 规划通知）：
+    # 只要目标是工信部 APP 通报，一律归一化到「APP侵害用户权益专项整治行动-通知公告」专用栏目。
+    if "appqhyhqyzxzzxd" not in (url or "").lower():
+        url = "https://www.miit.gov.cn/jgsj/xgj/APPqhyhqyzxzzxd/tzgg/"
+    bridge = _P(__file__).resolve().parent.parent / "scripts" / "miit_bridge.cjs"
+    # run_site 默认 limit=20：视为「未指定」，抓全栏目（约 24 篇）；显式小值则按指定抓。
+    _lim = int(limit or 20)
+    max_articles = 100 if _lim in (0, 20) else min(_lim, 100)
+    articles: List[Dict[str, Any]] = []
+    try:
+        for obj in run_bridge(bridge, {"list_url": url,
+                                       "max_articles": str(max_articles),
+                                       "settle": "1000", "deadlineMs": "420000"},
+                              timeout=600):
+            if obj.get("type") == "article":
+                articles.append(obj)
+    except BrowserBridgeError as e:
+        raise RuntimeError(f"工信部浏览器桥失败：{e}")
+    if not articles:
+        raise RuntimeError("工信部列表/详情 0 条（可能被 WAF 拦截或栏目结构变化）")
+    # 下载附件并解析
+    import requests as _req
+    out_dir = _P("outputs/miit_attachments")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    headers = {"User-Agent": UA,
+               "Referer": "https://www.miit.gov.cn/"}
+    rows: List[Dict[str, Any]] = []
+    for a in articles:
+        pdf_url = (a.get("pdfUrl") or "").strip()
+        report_url = (a.get("href") or "").strip()
+        title = (a.get("title") or "").strip()
+        pub_date = (a.get("date") or "").strip()
+        if not pdf_url:
+            rows.append({"report_title": title, "publish_date": pub_date,
+                         "app_name": "", "developer": "", "source": "",
+                         "version": "", "issue": "", "report_url": report_url,
+                         "pdf_url": "", "_error": "详情页无附件（可能未挂 PDF）"})
+            continue
+        if pdf_url.startswith("/"):
+            pdf_url = "https://www.miit.gov.cn" + pdf_url
+        fname = re.sub(r"[^0-9A-Za-z._-]+", "_", pdf_url.rsplit("/", 1)[-1]) or "attach.bin"
+        fp = out_dir / fname
+        try:
+            r = _req.get(pdf_url, headers=headers, timeout=40, verify=False,
+                         proxies={"http": proxy, "https": proxy} if proxy else None)
+            r.raise_for_status()
+            fp.write_bytes(r.content)
+            if fp.suffix.lower() in (".xls", ".xlsx"):
+                parsed = _parse_miit_xlsx(fp)
+            else:
+                parsed = _parse_miit_pdf(fp)
+            if not parsed:
+                rows.append({"report_title": title, "publish_date": pub_date,
+                             "app_name": "", "developer": "", "source": "",
+                             "version": "", "issue": "", "report_url": report_url,
+                             "pdf_url": pdf_url, "_error": "附件解析 0 行（格式可能变化）"})
+                continue
+            for item in parsed:
+                rows.append({"report_title": title, "publish_date": pub_date,
+                             "app_name": item.get("name", ""),
+                             "developer": item.get("developer", ""),
+                             "source": item.get("source", ""),
+                             "version": item.get("version", ""),
+                             "issue": item.get("issue", ""),
+                             "report_url": report_url, "pdf_url": pdf_url})
+        except Exception as e:
+            rows.append({"report_title": title, "publish_date": pub_date,
+                         "app_name": "", "developer": "", "source": "",
+                         "version": "", "issue": "", "report_url": report_url,
+                         "pdf_url": pdf_url, "_error": f"附件下载/解析失败: {type(e).__name__}: {e}"})
+    if not rows:
+        raise RuntimeError("工信部附件解析 0 条")
+    return rows
+
+
+match_miit.__doc__ = "工信部：APP 侵害用户权益通报（JS 列表 + 详情 PDF 附件表格）"
+register("miit", match_miit, lambda html, url: [], run=_miit_run,
+         desc="工信部：APP 侵害用户权益通报（JS 列表 + 详情 PDF 附件表格）")
+
+
+# ===========================================================================
+# 配置型精配（一键自动精配生成器产物）
+# 生成器把方案保存为 tasks/auto_precise_<host>/config.json + configs/auto_precise_<host>.json，
+# 这里负责：运行时注册 + 启动扫描持久化注册。match 按主域名命中。
+# ===========================================================================
+_AUTO_PRECISE: Dict[str, Dict[str, Any]] = {}
+
+
+def _match_host(host: str):
+    def _m(url: str) -> bool:
+        u = (url or "").lower()
+        return host in u
+    return _m
+
+
+def _register_image_precise(meta: Dict[str, Any]):
+    """注册图片榜单精配：meta 含 host/entry/extra_pages/img_src_hint。"""
+    host = (meta.get("host") or "").lower().strip()
+    if not host:
+        return
+    name = f"auto_precise_{re.sub(r'[^0-9A-Za-z_.-]', '_', host).strip('_')}"
+
+    def _run(url, cookie="", proxy=None, limit=20):
+        from .precise_auto import _image_ranking_run
+        m = dict(meta)
+        m.setdefault("name", name)
+        return _image_ranking_run(m, url or meta.get("entry", ""), limit=int(limit or 20))
+
+    register(name, _match_host(host), lambda html, url: [], run=_run,
+             desc=f"自动精配·图片榜单[{host}]（下载图片+OCR）")
+    _AUTO_PRECISE[host] = {"name": name, "kind": "image_ranking", "task_dir": str(meta.get("entry", ""))}
+
+
+def _register_tactic_precise(meta: Dict[str, Any]):
+    """注册战术型精配：meta 含 host/tactic/params（entry/seed/item_css/url_template/fields/img_src_hint）。"""
+    host = (meta.get("host") or "").lower().strip()
+    tactic = meta.get("tactic") or "html_engine"
+    if not host:
+        return
+    name = f"auto_precise_{re.sub(r'[^0-9A-Za-z_.-]', '_', host).strip('_')}"
+
+    def _run(url, cookie="", proxy=None, limit=20):
+        from .tactics import (cookie_click_run, pdf_attach_run, image_ocr_run)
+        params = dict(meta.get("params") or {})
+        params.setdefault("host", host)
+        params.setdefault("entry", meta.get("entry") or "")
+        _lim = int(limit or 0)
+        if tactic == "cookie_click":
+            return cookie_click_run(params, url or params.get("entry", ""), limit=_lim)
+        if tactic == "pdf_attach":
+            return pdf_attach_run(params, url or params.get("entry", ""), limit=_lim)
+        if tactic == "image_ocr":
+            return image_ocr_run(params, url or params.get("entry", ""), limit=_lim)
+        raise RuntimeError(f"未支持的战术: {tactic}")
+
+    register(name, _match_host(host), lambda html, url: [], run=_run,
+             desc=f"自动精配·战术[{tactic}][{host}]")
+    _AUTO_PRECISE[host] = {"name": name, "kind": f"tactic:{tactic}", "task_dir": ""}
+
+
+def register_config_precise(host: str, task_dir: Any, kind: str = "engine"):
+    """注册配置型精配（engine=通用引擎任务包；image_ranking=图片榜单OCR运行器）。"""
+    host = (host or "").lower().strip()
+    if not host:
+        return
+    name = f"auto_precise_{re.sub(r'[^0-9A-Za-z_.-]', '_', host).strip('_')}"
+
+    def _run(url, cookie="", proxy=None, limit=20):
+        from pathlib import Path
+        if kind == "image_ranking":
+            from .precise_auto import _image_ranking_run
+            meta = {"host": host, "kind": "image_ranking", "name": name,
+                    "entry": str(task_dir), "img_src_hint": ""}
+            return _image_ranking_run(meta, url, limit=int(limit or 20))
+        from .engine_v3 import run_task
+        td = Path(task_dir)
+        res = run_task(td, limit=int(limit or 20))
+        out_name = (res or {}).get("name") or td.name
+        fp = Path("outputs") / f"{out_name}.json"
+        if fp.exists():
+            try:
+                rows = json.loads(fp.read_text(encoding="utf-8"))
+            except Exception:
+                rows = []
+        else:
+            rows = []
+        return rows if isinstance(rows, list) else []
+
+    register(name, _match_host(host), lambda html, url: [], run=_run,
+             desc=f"自动精配[{host}]（kind={kind}）")
+    _AUTO_PRECISE[host] = {"name": name, "kind": kind, "task_dir": str(task_dir)}
+
+
+def _load_auto_precise():
+    """启动时扫描 configs/auto_precise_*.json 重新注册（重启不丢）。"""
+    try:
+        from pathlib import Path
+        cfg_dir = Path(__file__).resolve().parent.parent / "configs"
+        for meta_file in sorted(cfg_dir.glob("auto_precise_*.json")):
+            try:
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                host = meta.get("host") or ""
+                kind = meta.get("kind") or "engine"
+                if kind == "image_ranking":
+                    _register_image_precise(meta)
+                elif str(kind).startswith("tactic:"):
+                    _register_tactic_precise(meta)
+                else:
+                    task_dir = meta.get("task_dir") or ""
+                    if host and task_dir:
+                        register_config_precise(host, task_dir, kind=kind)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+_load_auto_precise()
+
+
+# ===========================================================================
+# 阳光高考「招生章程」（gaokao.chsi.com.cn）
+# ---------------------------------------------------------------------------
+# 全站阿里云 WAF（HTTP/headless 直连 412），必须先访问首页种 Cookie；
+# 列表是 Vue SPA，学校行 .sch-item 点击 → window.open(listZszc--schId-<orgId>.dhtml)。
+# 桥：种 Cookie → 列表 → 逐个点击捕获 schId → 输出学校（名称/schId/省市/主管部门/标签）。
+# ---------------------------------------------------------------------------
+def match_zszc(url: str) -> bool:
+    # 放宽到整个阳光高考域：AI 常给 /zsjz/、首页等无效入口，_zszc_run 会自动归一化到本科招生章程列表页
+    u = (url or "").lower()
+    return "gaokao.chsi.com.cn" in u
+
+
+def _zszc_clean(text: str) -> str:
+    return re.sub(r"[\ue000-\uf8ff]", "", text or "").replace("\u200b", "").strip()
+
+
+def _zszc_run(url: str, cookie: str = "", proxy: Optional[str] = None,
+              limit: int = 200) -> List[Dict[str, Any]]:
+    """阳光高考招生章程：浏览器桥 → 学校列表（含 schId/双一流标签）→ 生成章程链接。"""
+    from pathlib import Path as _P
+    from .browser import run_bridge, BrowserBridgeError
+    # AI/用户入口可能给 /zsjz/（404）等无效路径：归一化到本科招生章程列表页
+    if "listVerifedZszc" not in (url or "") and "listZszc" not in (url or ""):
+        url = "https://gaokao.chsi.com.cn/zsgs/zhangcheng/listVerifedZszc--method-index,lb-1.dhtml"
+    bridge = _P(__file__).resolve().parent.parent / "scripts" / "zszc_bridge.cjs"
+    max_n = 200 if int(limit or 200) <= 0 else min(int(limit or 200), 500)
+    schools: List[Dict[str, Any]] = []
+    try:
+        for obj in run_bridge(bridge, {"list_url": url, "max": str(max_n), "settle": "800"},
+                              timeout=600):
+            if obj.get("type") == "school":
+                schools.append(obj)
+    except BrowserBridgeError as e:
+        raise RuntimeError(f"阳光高考浏览器桥失败：{e}")
+    if not schools:
+        raise RuntimeError("阳光高考列表 0 条（可能被 WAF 拦截或页面结构变化）")
+    rows = []
+    for s in schools:
+        name = _zszc_clean(s.get("name") or "")
+        if not name:
+            continue
+        sch_id = str(s.get("schId") or "").strip()
+        tags = [_zszc_clean(t) for t in (s.get("tags") or [])]
+        rows.append({
+            "学校名称": name,
+            "省市": _zszc_clean(s.get("province") or ""),
+            "主管部门": _zszc_clean(s.get("dept") or ""),
+            "层次标签": "、".join(tags),
+            "是否双一流": "是" if any("双一流" in t for t in tags) else "否",
+            "schId": sch_id,
+            "章程链接": f"https://gaokao.chsi.com.cn/zsgs/zhangcheng/listZszc--schId-{sch_id}.dhtml" if sch_id else "",
+        })
+    return rows
+
+
+register("zszc", match_zszc, lambda html, url: [], run=_zszc_run,
+         desc="阳光高考：招生章程学校列表（WAF+Vue，点击捕获 schId）")
+
+
+# ===========================================================================
+# 全国标准信息公共服务平台（std.samr.gov.cn）
+# ---------------------------------------------------------------------------
+# 搜索页 /search/std 是 JS 壳，真实接口是 GET /search/stdPage?q=<关键词>&tid=
+# 结果行 .post：标准号(.en-code)/名称(a 文本)/状态(.s-status)/tid+pid 属性；
+# 详情页 /gb/search/gbDetailed?id=<pid>&tid=<tid> 含实施日期。
+# ---------------------------------------------------------------------------
+def match_std(url: str) -> bool:
+    return "std.samr.gov.cn" in (url or "").lower()
+
+
+def _std_run(url: str, cookie: str = "", proxy: Optional[str] = None,
+             limit: int = 20) -> List[Dict[str, Any]]:
+    import requests as _req
+    from urllib.parse import urlparse, parse_qs, quote
+    from lxml import html as _LH
+    q = parse_qs(urlparse(url).query).get("q", [""])[0].strip() or "电动自行车"
+    if "stdPage" not in (url or ""):
+        url = f"https://std.samr.gov.cn/search/stdPage?q={quote(q)}&tid="
+    headers = {"User-Agent": UA, "Referer": f"https://std.samr.gov.cn/search/std?q={quote(q)}"}
+    r = _req.get(url, headers=headers, timeout=20, verify=False,
+                 proxies={"http": proxy, "https": proxy} if proxy else None)
+    r.raise_for_status()
+    doc = _LH.fromstring(r.text)
+    rows: List[Dict[str, Any]] = []
+    for post in doc.cssselect(".post"):
+        a = post.cssselect("a[tid][pid]")
+        if not a:
+            continue
+        a = a[0]
+        text = (a.text_content() or "").replace("\u200b", "").strip()
+        m_no = re.search(r"((?:GB|DB)[/T ]*[\d.]+[-—]?\d*)", text)
+        # 任务要求“国家标准”：只保留 GB 开头的（过滤地方标准 DB）
+        if not (m_no and m_no.group(1).startswith("GB")):
+            continue
+        name = re.sub(r"^(?:GB|DB)[/T ]*[\d.]+[-—]?\d*\s*", "", text).strip()
+        status_el = post.cssselect(".s-status")
+        status = status_el[0].text_content().strip() if status_el else ""
+        tid = a.get("tid") or ""
+        pid = a.get("pid") or ""
+        rows.append({
+            "标准号": m_no.group(1) if m_no else "",
+            "标准名称": name[:120],
+            "标准状态": status,
+            "tid": tid,
+            "pid": pid,
+            "详情链接": f"https://std.samr.gov.cn/gb/search/gbDetailed?id={pid}&tid={tid}" if pid else "",
+        })
+    # 详情补抓实施日期
+    _max = 20 if int(limit or 0) <= 20 else int(limit or 20)
+    for row in rows[:_max]:
+        if not row.get("pid"):
+            continue
+        try:
+            dr = _req.get(row["详情链接"], headers=headers, timeout=20, verify=False)
+            dtxt = re.sub(r"<[^>]+>", " ", dr.text or "")
+            m = re.search(r"实施日期[：:\s]*([0-9]{4}[-/年][0-9]{1,2}[-/月][0-9]{1,2})", dtxt)
+            row["实施日期"] = m.group(1).replace("/", "-").replace("年", "-").replace("月", "-") if m else ""
+            m2 = re.search(r"发布日期[：:\s]*([0-9]{4}[-/年][0-9]{1,2}[-/月][0-9]{1,2})", dtxt)
+            row["发布日期"] = m2.group(1).replace("/", "-").replace("年", "-").replace("月", "-") if m2 else ""
+        except Exception:
+            row["实施日期"] = ""
+    if not rows:
+        raise RuntimeError("标准搜索 0 条（接口可能变更）")
+    return rows
+
+
+register("std", match_std, lambda html, url: [], run=_std_run,
+         desc="全国标准信息公共服务平台：标准搜索（stdPage 接口 + 详情实施日期）")
+
+
+# ---------------------------------------------------------------------------
+# 人社部《国家职业资格目录（2021年版）》：公告页/PDF 附件直链 → 解析表格
+# 公告页: https://www.gov.cn/zhengce/zhengceku/2021-12/03/content_5655553.htm
+# 附件直链: .../5655553/files/86876724c6ee4cdcb3d0be524aee036f.pdf
+# 表格结构: 专业技术人员（59项：序号|职业资格名称[|具体项目]|实施部门|资格类别|设定依据）
+#           技能人员（13项：同上 + 备注列）
+# ---------------------------------------------------------------------------
+def match_zige(url: str) -> bool:
+    u = (url or "").lower()
+    return ("content_5655553" in u or "86876724c6ee4cdcb3d0be524aee036f" in u
+            or ("gov.cn" in u and "职业资格目录" in u))
+
+
+def _parse_zige_pdf(path: str) -> List[Dict[str, Any]]:
+    """pdfplumber 抽取国家职业资格目录 PDF 表格，自动归一化列宽/跨行/子行继承。"""
+    import pdfplumber
+    out: List[Dict[str, Any]] = []
+    section = None          # None / "专业技术人员" / "技能人员"
+    last_seq = ""
+    ctx = {}                # 当前组的名称/部门/类别/依据/备注（供子行继承）
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            for table in page.extract_tables():
+                if not table:
+                    continue
+                for raw in table:
+                    joined = "|".join((c or "") for c in raw)
+                    # 技能人员小节表头（带备注列）
+                    if "技能人员" in joined and "职业资格名称" in joined:
+                        section = "技能人员"
+                        ctx = {}
+                        continue
+                    # 表头行（专业技术人员）
+                    if "职业资格名称" in joined and "实施部门" in joined:
+                        section = "专业技术人员" if "备注" not in joined else "技能人员"
+                        ctx = {}
+                        continue
+                    if section is None:
+                        continue
+                    cells = [(c or "").strip() for c in raw]
+                    if not any(cells):
+                        continue
+                    if section == "专业技术人员":
+                        # 6列=[序号,名称,具体项目,部门,类别,依据]；5列=[序号,名称,部门,类别,依据]
+                        if len(cells) >= 6:
+                            seq, name, sub, dept, cat, basis = (cells[0], cells[1], cells[2],
+                                                                cells[3], cells[4], "".join(cells[5:]))
+                        elif len(cells) == 5:
+                            seq, name, sub, dept, cat, basis = cells[0], cells[1], "", cells[2], cells[3], cells[4]
+                        else:
+                            continue
+                        remark = ""
+                    else:
+                        # 7列=[序号,组名,具体项目,部门,类别,依据,备注]；6列歧义：index4含"类"→无备注，否则→无具体项目
+                        if len(cells) >= 7:
+                            seq, name, sub, dept, cat, basis, remark = (cells[0], cells[1], cells[2],
+                                                                        cells[3], cells[4], cells[5], "".join(cells[6:]))
+                        elif len(cells) == 6:
+                            if "类" in cells[4]:
+                                seq, name, sub, dept, cat, basis = cells[0], cells[1], cells[2], cells[3], cells[4], cells[5]
+                                remark = ""
+                            else:
+                                seq, name, sub, dept, cat, basis, remark = (cells[0], cells[1], "", cells[2],
+                                                                            cells[3], cells[4], cells[5])
+                        elif len(cells) == 5:
+                            seq, name, sub, dept, cat, basis = cells[0], cells[1], "", cells[2], cells[3], cells[4]
+                            remark = ""
+                        else:
+                            continue
+                    # 单元格内换行归一
+                    name = name.replace("\n", "")
+                    sub = sub.replace("\n", "")
+                    cat = re.sub(r"\s+", "", cat)
+                    dept = re.sub(r"\s*\n\s*", "、", dept).strip("、")
+                    # 设定依据：换行后若下一行以《开头视为新法规加"；"，否则是续行直接拼接
+                    _bp = basis.split("\n")
+                    basis = _bp[0] + "".join(
+                        ("；" if p.strip().startswith("《") else "") + p for p in _bp[1:])
+                    basis = re.sub(r"[；]+", "；", basis).strip("；")
+                    remark = remark.replace("\n", "").strip("；")
+                    is_new = bool(re.fullmatch(r"\d{1,3}", seq))
+                    if is_new:
+                        last_seq = seq
+                        ctx = {"name": name, "dept": dept, "cat": cat, "basis": basis, "remark": remark}
+                    elif ctx:
+                        # 子行继承组信息（单元格合并后为空）
+                        if not name:
+                            name = ctx.get("name", "")
+                        if not dept:
+                            dept = ctx.get("dept", "")
+                        if not cat:
+                            cat = ctx.get("cat", "")
+                        if not basis:
+                            basis = ctx.get("basis", "")
+                        if not remark:
+                            remark = ctx.get("remark", "")
+                    if not name and not sub:
+                        continue
+                    # 子行：组名 + 具体项目（避免名称与项目重复）
+                    item_name = name or sub
+                    item_sub = sub if sub and sub != item_name else ""
+                    out.append({
+                        "序号": last_seq,
+                        "职业资格名称": item_name,
+                        "具体职业/工种": item_sub,
+                        "实施部门（单位）": dept or ctx.get("dept", ""),
+                        "资格类别": cat or ctx.get("cat", ""),
+                        "设定依据": basis or ctx.get("basis", ""),
+                        "备注": remark or ctx.get("remark", ""),
+                        "所属部分": section,
+                    })
+    # 去重
+    seen = set()
+    dedup = []
+    for r in out:
+        key = (r["序号"], r["职业资格名称"], r["具体职业/工种"], r["实施部门（单位）"], r["资格类别"])
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(r)
+    return dedup
+
+
+def _zige_run(url: str, cookie: str = "", proxy: Optional[str] = None,
+              limit: int = 0) -> List[Dict[str, Any]]:
+    """公告页/PDF 直链 → 下载附件 → 精细解析表格（复用通用下载/找附件）。"""
+    from .pdf_table import download_pdf, extract_pdf_links, is_pdf_url
+    pdf_url = url if is_pdf_url(url) else None
+    if pdf_url is None:
+        import requests as _req
+        headers = {"User-Agent": UA}
+        r = _req.get(url, headers=headers, timeout=40, verify=False,
+                     proxies={"http": proxy, "https": proxy} if proxy else None)
+        r.raise_for_status()
+        pdfs = extract_pdf_links(r.text or "", url)
+        if not pdfs:
+            raise RuntimeError("公告页未找到 PDF 附件链接（页面结构可能变更）")
+        pdf_url = pdfs[0]
+    tmp = download_pdf(pdf_url, proxy=proxy, timeout=60)
+    try:
+        return _parse_zige_pdf(str(tmp))
+    finally:
+        try:
+            import os
+            os.unlink(str(tmp))
+        except Exception:
+            pass
+
+
+register("zige", match_zige, lambda html, url: [], run=_zige_run,
+         desc="人社部《国家职业资格目录（2021年版）》：公告页/PDF附件 → 72 项职业资格表格")
