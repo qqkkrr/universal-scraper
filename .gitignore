@@ -16,3 +16,9 @@ challenges/learnspider/__pycache__/
 challenges/results.json
 challenges2/results.json
 challenges/learnspider_results.json
+
+# 安全：禁止提交环境变量/密钥
+.env
+*.env
+.env.*
+!.env.example
