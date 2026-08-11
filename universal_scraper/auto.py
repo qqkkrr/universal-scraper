@@ -1351,6 +1351,8 @@ def _force_browser_waf(cfg: dict) -> dict:
         "headless": True,
         "scroll_count": int(old.get("scroll_count", 4)),
         "scroll_wait_ms": int(old.get("scroll_wait_ms", 800)),
+        # 自动捕获页面 XHR/API 响应（强反爬站数据常在接口里，ITTF 实测有效）
+        "record_from": "capture_all", "capture_all": True,
     }
     for k in ("headers", "cdp", "record_from", "capture_all"):
         if old.get(k):
@@ -1613,6 +1615,89 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
         return {}
 
 
+LEARNED_DIR = ROOT / "configs" / "learned"
+
+
+def _save_learned(cfg: dict, description: str, log=None) -> None:
+    """任务成功后自动沉淀为「已学精配」：同站下次任务直接复用，不再让 AI 重新猜。
+    只保存可复用的配置（start_urls/source/rules/parsers/pipelines/detail），跳过 intent 等一次性字段。"""
+    try:
+        su = (cfg.get("start_urls") or [""])[0]
+        if not su or "//" not in su:
+            return
+        host = su.split("//")[-1].split("/")[0].lower().lstrip("www.")
+        if not host:
+            return
+        safe = re.sub(r"[^0-9A-Za-z_.-]", "_", host)
+        _src = cfg.get("source") or {}
+        st = _src.get("type") or "http"
+        if st not in ("http", "browser"):
+            return
+        keep = {
+            "host": host,
+            "learned_at": __import__("time").time(),
+            "from_description": description[:200],
+            "config": {
+                "start_urls": (cfg.get("start_urls") or [])[:5],
+                "source": {k: _src.get(k) for k in ("type", "headless", "scroll_count", "scroll_wait_ms",
+                                                     "headers", "record_from", "capture_all", "wait_selector") if _src.get(k)},
+                "rules": cfg.get("rules") or [],
+                "parsers": cfg.get("parsers") or {},
+                "pipelines": cfg.get("pipelines") or [],
+                "detail": cfg.get("detail") or {},
+                "queue": cfg.get("queue") or {},
+                "anti_bot": {k: v for k, v in (cfg.get("anti_bot") or {}).items() if k in ("min_interval", "max_retries", "proxy")},
+            },
+        }
+        LEARNED_DIR.mkdir(parents=True, exist_ok=True)
+        fp = LEARNED_DIR / f"{safe}.json"
+        fp.write_text(json.dumps(keep, ensure_ascii=False, indent=1), encoding="utf-8")
+        if log:
+            log(f"🧠 已学习本任务（{host}），下次同类任务直接复用配置")
+    except Exception:
+        pass
+
+
+def _try_learned_config(description: str, log=None) -> Optional[Dict[str, Any]]:
+    """任务启动前：从描述里找已知域名 → 命中「已学精配」直接返回配置（跳过 AI 生成）。"""
+    try:
+        # 1) 描述里显式 URL 的域名
+        hosts = set()
+        for m in re.finditer("https?://([^/\\s'\"]+)", description):
+            h = m.group(1).lower().lstrip("www.")
+            if h:
+                hosts.add(h)
+        # 2) 描述关键词匹配已学域名（含 www. 前缀归一）
+        if not hosts and LEARNED_DIR.exists():
+            _d = description.lower()
+            for fp in LEARNED_DIR.glob("*.json"):
+                try:
+                    d = json.loads(fp.read_text(encoding="utf-8"))
+                    host = (d.get("host") or "").lower()
+                    if host and host in _d:
+                        hosts.add(host)
+                except Exception:
+                    continue
+        if not hosts:
+            return None
+        # 匹配已学文件
+        for h in hosts:
+            safe = re.sub(r"[^0-9A-Za-z_.-]", "_", h)
+            fp = LEARNED_DIR / f"{safe}.json"
+            if not fp.exists():
+                continue
+            d = json.loads(fp.read_text(encoding="utf-8"))
+            cfg = d.get("config") or {}
+            if not cfg.get("start_urls"):
+                continue
+            if log:
+                log(f"🧠 命中已学精配[{h}]（跳过 AI 生成，直接复用上次成功配置）")
+            return cfg
+    except Exception:
+        pass
+    return None
+
+
 def _preflight_and_rescue(cfg: dict, description: str = "", log=None) -> dict:
     """入口预检 + 候选救援（治本：AI 选错入口时自动换可用入口，而不是反复改选择器）。"""
     su = cfg.get("start_urls") or []
@@ -1706,7 +1791,20 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         _fast = _try_desc_route_fast(description, limit, log, proxy=proxy, cookie=cookie)
         if _fast.get("done"):
             return _fast
-        cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
+        # 🧠 已学精配：同站上次成功过 → 直接复用配置（跳过 AI，稳且快）
+        _learned = _try_learned_config(description, log=log)
+        if _learned:
+            cfg = _learned
+            name = f"auto_{hashlib.md5(description.encode()).hexdigest()[:10]}"
+            task_dir = ROOT / "tasks" / name
+            (task_dir / "modules").mkdir(parents=True, exist_ok=True)
+            try:
+                cfg = _validate_and_fix(cfg, description, log)
+            except Exception as _e:
+                log(f"⚠️ 已学配置校验失败，退回 AI 生成：{_e}")
+                cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
+        else:
+            cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
         # 🩺 入口预检：AI 生成入口后先探测可用性，失效则候选救援（治本：防 404/停更页空转）
         try:
             cfg = _preflight_and_rescue(cfg, description, log=log)
@@ -2023,6 +2121,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         verify = None
 
     if total > 0 and real:
+        # 🧠 自动学习：成功后沉淀为「已学精配」，下次同站直接复用
+        try:
+            _save_learned(cfg, description, log=log)
+        except Exception:
+            pass
         vtxt = ""
         if verify and verify.get("checks"):
             bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]
@@ -2295,6 +2398,11 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         verify = None
 
     if total > 0 and real:
+        # 🧠 自动学习：成功后沉淀为「已学精配」，下次同站直接复用
+        try:
+            _save_learned(cfg, description, log=log)
+        except Exception:
+            pass
         vtxt = ""
         if verify and verify.get("checks"):
             bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]
