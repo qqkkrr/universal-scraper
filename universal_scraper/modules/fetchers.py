@@ -310,6 +310,17 @@ class BrowserFetcher(BaseFetcher):
         self.scripts_dir = Path(__file__).resolve().parent.parent.parent / "scripts"
         self.session_dir = Path(anti.get("session_dir") or "/tmp/us_session")
         self.session_dir.mkdir(parents=True, exist_ok=True)
+        # 🍪 自动会话：按任务域名加载已存档 cookie → 注入 storageState（浏览器复用登录态/过盾）
+        self.cookie_domain = anti.get("cookie_domain") or ""
+        if self.cookie_domain:
+            try:
+                from .cookies import load_storage_state
+                _ss = load_storage_state(self.cookie_domain)
+                if _ss:
+                    (self.session_dir / "session.json").write_text(
+                        json.dumps(_ss, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
         self._pool = None
         self._pool_enabled = config.get("pool", True)
         self._req_id = 0
@@ -577,6 +588,15 @@ class BrowserFetcher(BaseFetcher):
         if "error" in obj and obj["error"]:
             raise RuntimeError(obj["error"])
         html = obj.get("html", "")
+        # 🍪 自动存档会话 cookie（含 cf_clearance/登录态），下次同域名任务自动复用
+        _cks = obj.get("cookies")
+        if _cks and (self.cookie_domain or req.url):
+            try:
+                from .cookies import save_cookies
+                _d = self.cookie_domain or (req.url or "").split("//")[-1].split("/")[0].lower().lstrip("www.")
+                save_cookies(_d, _cks)
+            except Exception:
+                pass
         return Response(request=req, status=200, body=html.encode("utf-8"),
                         text=html, json=None, url=obj.get("url") or req.url)
 

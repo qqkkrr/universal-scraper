@@ -39,7 +39,10 @@ async function renderPage(context, req, stealthApplied) {
       await sleep(1500);
     }
     const html = await page.evaluate(() => document.documentElement.outerHTML);
-    return { html, url: page.url(), bytes: html.length };
+    // 渲染成功后把会话 cookie 回传（Python 侧按域名自动存档，下次任务自动复用）
+    let cookies = [];
+    try { cookies = await context.cookies().catch(() => []); } catch (e) {}
+    return { html, url: page.url(), bytes: html.length, cookies };
   } finally {
     await page.close().catch(() => {});
   }
@@ -89,7 +92,7 @@ async function main() {
       active++;
       try {
         const r = await renderPage(context, req, stealthApplied);
-        out({ id: req.id, html: r.html, url: r.url, bytes: r.bytes });
+        out({ id: req.id, html: r.html, url: r.url, bytes: r.bytes, cookies: r.cookies || [] });
       } catch (e) {
         out({ id: req.id, html: "", url: req.url, error: String((e && e.message) || e) });
       } finally {

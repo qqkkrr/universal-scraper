@@ -113,6 +113,23 @@ class EngineV3:
         self.logger = Logger(log_file=log_file or (out_dir / f".run_{task.name}.log"))
         self._log_cb = log_cb
         anti["_log_cb"] = log_cb  # 供 fetcher（浏览器交互提示）回传 WebUI 进度
+        # 🍪 自动会话：按任务入口域名注入（浏览器复用登录态/过盾；http 直抓自动带已存 Cookie）
+        try:
+            _su0 = (self.config.get("start_urls") or [""])[0]
+            _domain = ""
+            if "//" in str(_su0):
+                _domain = str(_su0).split("//")[-1].split("/")[0].lower().lstrip("www.")
+            if _domain:
+                anti["cookie_domain"] = _domain
+                from .cookies import has_cookies, cookie_header
+                if has_cookies(_domain):
+                    _src = self.config.get("source") or {}
+                    if (_src.get("type") or "http") == "http":
+                        _hdrs = _src.setdefault("headers", {})
+                        if not _hdrs.get("Cookie"):
+                            _hdrs["Cookie"] = cookie_header(_domain)
+        except Exception:
+            pass
         self.anti = anti
 
         # 插件装配

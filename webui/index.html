@@ -167,6 +167,7 @@
     <span class="pill" id="server"><span class="dot"></span>服务已启动</span>
     <span class="pill ip" id="ipinfo">出口 IP…</span>
     <span class="pill upd" id="updatePill" style="display:none;cursor:pointer;background:#fff3cd;color:#8a6d3b;border-color:#f0d88a" onclick="restartServer()">🔄 代码已更新 · 点此重启</span>
+    <span class="pill" style="cursor:pointer;background:#e8f5e9;color:#2e7d32;border-color:#c8e6c9" onclick="importCookies()" title="从调试 Chrome 自动导入已登录网站的 Cookie（登录态/过盾复用，无需手动复制）">🍪 导入会话</span>
   </div>
 </header>
 
@@ -572,6 +573,20 @@ async function loadRecent(){
   }catch(e){}
 }
 loadRecent();
+// 🍪 一键从调试 Chrome 导入已登录网站的 Cookie（自动按域名存档，之后任务自动复用）
+async function importCookies(){
+  const el = event && event.currentTarget;
+  if(el){ el.textContent='⏳ 导入中…'; }
+  try{
+    const d = await api('/api/cookies/import',{method:'POST',body:'{}'});
+    if(d && d.ok){
+      alert('✅ 已从调试 Chrome 导入 '+d.imported+' 条 cookie，覆盖 '+d.domains+' 个域名（'+ (d.domain_list||[]).slice(0,6).join(', ')+'…）\n以后跑这些网站的任务会自动复用，无需手动粘贴。');
+    } else {
+      alert('❌ 导入失败：' + ((d&&d.error)||'未知') + '\n提示：请先双击工具目录「启动调试Chrome.command」并登录目标网站。');
+    }
+  }catch(e){ alert('❌ 导入失败：'+e.message); }
+  if(el){ el.textContent='🍪 导入会话'; }
+}
 // 代码变更检测：每 20s 对比服务端代码指纹，变了提示一键重启（避免"你跑过但我这边是旧代码"）
 async function checkCodeChanged(){
   try{

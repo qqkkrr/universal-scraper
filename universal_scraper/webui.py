@@ -451,6 +451,12 @@ class Handler(BaseHTTPRequestHandler):
                             "status": j["status"], "summary": j["summary"],
                             "created": j["created"]} for j in reversed(list(JOBS.values()))][:20]
                 self._json(lst)
+            elif u.path == "/api/cookies":
+                try:
+                    from .cookies import list_saved
+                    self._json({"ok": True, "sessions": list_saved()})
+                except Exception as e:
+                    self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
             elif u.path == "/api/code_changed":
                 self._json({"changed": _code_fingerprint() != _CODE_FP_START,
                             "current": _code_fingerprint(), "start": _CODE_FP_START})
@@ -550,6 +556,21 @@ class Handler(BaseHTTPRequestHandler):
                                        config, name, task_dir),
                                  daemon=True).start()
                 self._json({"job": job["id"]})
+            elif u.path == "/api/cookies/import":
+                port = int(body.get("port") or 9222)
+                try:
+                    from .cookies import import_from_cdp
+                    r = import_from_cdp(port=port, log=lambda m: _job_log(_new_job("cookies", "导入会话"), m) if False else None)
+                    self._json(r)
+                except Exception as e:
+                    self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+            elif u.path == "/api/cookies/delete":
+                domain = str(body.get("domain", "")).strip()
+                try:
+                    from .cookies import delete
+                    self._json({"ok": delete(domain), "domain": domain})
+                except Exception as e:
+                    self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
             elif u.path == "/api/restart":
                 # 代码已更新时一键重启服务（同参数拉起新进程后退出当前进程）
                 try:
