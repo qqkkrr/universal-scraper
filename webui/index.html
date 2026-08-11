@@ -430,6 +430,8 @@ function renderResult(box,d){
     if(d.messages&&d.messages.length) html+='<h4>执行过程（已结束）</h4><div class="terminal"><div class="term-head"><span class="tdot"></span><span>输出</span></div><pre>'+esc(d.messages.join('\n'))+'</pre></div>';
     if(d.result&&d.result.files&&Object.keys(d.result.files).length) html+='<h4>导出文件</h4><pre>'+esc(JSON.stringify(d.result.files,null,2))+'</pre>';
   }
+    const rerunLabel = d.kind==='auto' ? '↻ 重跑此任务（复用已学配置）' : '↻ 重新抓取此网址';
+  html+='<div style="margin-top:12px"><button class="btn" onclick="rerunJob(this,\''+d.id+'\')">'+rerunLabel+'</button></div>';
   box.innerHTML=html; box.style.display='block';
 }
 function startJob(path,payload,btn,box){
@@ -591,6 +593,21 @@ async function loadRecent(){
       ul.appendChild(li);
     });
   }catch(e){}
+}
+
+async function rerunJob(btn, jobId){
+  try{
+    const d=await api('/api/job?job='+jobId);
+    let path, payload;
+    if(d.kind==='auto'){ path='/api/auto/start'; payload={description:(d.description||''), limit:null, rounds:2}; }
+    else if(d.kind==='paste'){ path='/api/paste/start'; payload={url:(d.title||''), mode:'auto'}; }
+    else if(d.kind==='precise'){ path='/api/precise/start'; payload={description:(d.description||''), url:(d.title||'').replace(/^一键精配：/,'')}; }
+    else { alert('该类型暂不支持重跑'); return; }
+    const r=await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(r.error){ alert('重跑失败：'+r.error); return; }
+    const box=btn.closest('.card')||document.body;
+    pollJob(r.job, box);
+  }catch(e){ alert('重跑失败：'+e.message); }
 }
 loadRecent();
 async function refreshCookies(){

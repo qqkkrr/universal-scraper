@@ -1633,6 +1633,10 @@ def _save_learned(cfg: dict, description: str, log=None) -> None:
         st = _src.get("type") or "http"
         if st not in ("http", "browser"):
             return
+        # 防复用后重复：确保已学配置含去重管道（无则补 url/link 去重）
+        _pipes = list(cfg.get("pipelines") or [])
+        if not any(isinstance(x, dict) and x.get("type") == "dedup" for x in _pipes):
+            _pipes.append({"type": "dedup", "key": "link"})
         keep = {
             "host": host,
             "learned_at": __import__("time").time(),
@@ -1643,7 +1647,7 @@ def _save_learned(cfg: dict, description: str, log=None) -> None:
                                                      "headers", "record_from", "capture_all", "wait_selector") if _src.get(k)},
                 "rules": cfg.get("rules") or [],
                 "parsers": cfg.get("parsers") or {},
-                "pipelines": cfg.get("pipelines") or [],
+                "pipelines": _pipes,
                 "detail": cfg.get("detail") or {},
                 "queue": cfg.get("queue") or {},
                 "anti_bot": {k: v for k, v in (cfg.get("anti_bot") or {}).items() if k in ("min_interval", "max_retries", "proxy")},
@@ -1755,6 +1759,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     """执行一次自动任务。返回 {config, result, log, sample, files}。
     agent_fallback: 常规解析/LLM 抽取都没结果时，是否启用 LLM 浏览器代理兜底
     （None=自动：无人工验证/登录的任务默认启用，有 verify/login 的不启用避免重复弹窗）。"""
+    _learned = None  # 标记配置是否来自「已学精配」（失败时降级删除）
     if limit is not None:
         limit = int(limit) or None
 
@@ -1962,6 +1967,19 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         if round_i < rounds:
             # 🩺 首轮失败先换候选入口（不急着让 LLM 改选择器——入口错改选择器无用）
             if round_i == 1 and not _llm_ev_tried:
+                # 已学配置首轮失败 → 网站可能改版：删除 learned，下轮 AI 重新生成（防一直用坏配置）
+                if _learned:
+                    try:
+                        from pathlib import Path as _P2
+                        for _lf in (_P2(ROOT / "configs" / "learned")).glob("*.json"):
+                            _d = json.loads(_lf.read_text(encoding="utf-8"))
+                            _su = (_d.get("config") or {}).get("start_urls") or []
+                            if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
+                                _lf.unlink(missing_ok=True)
+                                log(f"🧠 已学配置失效（网站可能改版），已删除，将重新 AI 生成")
+                                break
+                    except Exception:
+                        pass
                 try:
                     _old_su = list(cfg.get("start_urls") or [])
                     cfg = _preflight_and_rescue(cfg, description, log=log)
@@ -2292,6 +2310,19 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         if round_i < rounds:
             # 🩺 首轮失败先换候选入口（不急着让 LLM 改选择器——入口错改选择器无用）
             if round_i == 1 and not _llm_ev_tried:
+                # 已学配置首轮失败 → 网站可能改版：删除 learned，下轮 AI 重新生成（防一直用坏配置）
+                if _learned:
+                    try:
+                        from pathlib import Path as _P2
+                        for _lf in (_P2(ROOT / "configs" / "learned")).glob("*.json"):
+                            _d = json.loads(_lf.read_text(encoding="utf-8"))
+                            _su = (_d.get("config") or {}).get("start_urls") or []
+                            if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
+                                _lf.unlink(missing_ok=True)
+                                log(f"🧠 已学配置失效（网站可能改版），已删除，将重新 AI 生成")
+                                break
+                    except Exception:
+                        pass
                 try:
                     _old_su = list(cfg.get("start_urls") or [])
                     cfg = _preflight_and_rescue(cfg, description, log=log)
