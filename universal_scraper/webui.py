@@ -59,6 +59,51 @@ def _code_fingerprint() -> str:
     return h.hexdigest()[:16]
 
 
+SCHEDULES_FILE = ROOT / "configs" / "schedules.json"
+SCHED_LOCK = threading.Lock()
+
+
+def _load_schedules() -> list:
+    try:
+        if SCHEDULES_FILE.exists():
+            return json.loads(SCHEDULES_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return []
+
+
+def _save_schedules(scheds: list) -> None:
+    try:
+        SCHEDULES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SCHEDULES_FILE.write_text(json.dumps(scheds, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _scheduler_loop() -> None:
+    """后台调度线程：每分钟检查定时任务，到点自动跑（复用已学配置，全自动）。"""
+    while True:
+        time.sleep(60)
+        try:
+            now = time.time()
+            scheds = _load_schedules()
+            for sc in scheds:
+                if not sc.get("enabled", True):
+                    continue
+                if float(sc.get("next_run") or 0) <= now:
+                    sc["next_run"] = now + float(sc.get("interval_hours") or 24) * 3600
+                    sc["last_run"] = now
+                    _save_schedules(scheds)
+                    desc = sc.get("description", "")
+                    if desc:
+                        job = _new_job("auto", "⏰ 定时任务：" + desc[:40], description=desc)
+                        threading.Thread(target=run_auto_job,
+                                         args=(job, desc, None, 2, None, "", ""),
+                                         daemon=True).start()
+        except Exception:
+            pass
+
+
 def _persist_jobs():
     try:
         slim = {jid: {"id": j.get("id"), "kind": j.get("kind"), "title": j.get("title"),
@@ -392,34 +437,46 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
 def run_batch_job(job: dict, urls: list, mode: str = "auto", browser: bool = False):
     """批量网址抓取：逐个 URL 抓取（精配优先，普通网页兜底），合并导出。"""
     try:
-        _job_log(job, f"📚 批量抓取开始：{len(urls)} 个网址")
+        _job_log(job, f"📚 批量抓取开始：{len(urls)} 个网址（并发 4）")
         rows_all = []
         errs = 0
-        for i, u in enumerate(urls, 1):
+
+        def _grab(u):
+            nonlocal errs
             try:
                 from .sites import match_site, run_site
                 _site = match_site(u)
                 if _site:
                     r = run_site(u, limit=0)
                     if r.get("rows"):
-                        rows_all.extend(r["rows"])
-                        _job_log(job, f"[{i}/{len(urls)}] ✅ {_site}：{len(r['rows'])} 条")
-                    else:
-                        errs += 1
-                        _job_log(job, f"[{i}/{len(urls)}] ⚠️ {_site} 0 条（{r.get('error','')[:80]}）")
-                else:
-                    from .quick import fetch_url
-                    fr = fetch_url(u, browser=browser, timeout=60, article=True)
-                    text = fr.get("article") or fr.get("markdown") or fr.get("text") or ""
-                    if text.strip():
-                        rows_all.append({"_url": u, "content": text[:20000]})
-                        _job_log(job, f"[{i}/{len(urls)}] ✅ 网页 {len(text)} 字符")
-                    else:
-                        errs += 1
-                        _job_log(job, f"[{i}/{len(urls)}] ⚠️ 无内容（{fr.get('error','')[:80]}）")
+                        return {"ok": True, "rows": r["rows"], "site": _site, "note": f"{len(r['rows'])} 条"}
+                    return {"ok": False, "error": (r.get('error') or '0 条')[:100], "site": _site}
+                from .quick import fetch_url
+                fr = fetch_url(u, browser=browser, timeout=60, article=True)
+                text = fr.get("article") or fr.get("markdown") or fr.get("text") or ""
+                if text.strip():
+                    return {"ok": True, "rows": [{"_url": u, "content": text[:20000]}],
+                            "note": f"{len(text)} 字符"}
+                return {"ok": False, "error": (fr.get('error') or '无内容')[:100]}
             except Exception as e:
-                errs += 1
-                _job_log(job, f"[{i}/{len(urls)}] ❌ {type(e).__name__}: {str(e)[:100]}")
+                return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:90]}"}
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futs = {ex.submit(_grab, u): u for u in urls}
+            for fut in as_completed(futs):
+                u = futs[fut]
+                try:
+                    r = fut.result()
+                except Exception as e:
+                    r = {"ok": False, "error": str(e)[:100]}
+                if r.get("ok"):
+                    rows_all.extend(r["rows"])
+                    _job_log(job, f"✅ {u[:60]}：{r.get('note','')}")
+                else:
+                    errs += 1
+                    _job_log(job, f"⚠️ {u[:60]}：{r.get('error','')[:80]}")
+        _job_log(job, f"📚 批量完成：成功 {len(urls)-errs}/{len(urls)}，共 {len(rows_all)} 条")
         # 导出
         import time as _t
         base = f"batch_{int(_t.time())}"
@@ -529,6 +586,8 @@ class Handler(BaseHTTPRequestHandler):
                             "status": j["status"], "summary": j["summary"],
                             "created": j["created"]} for j in reversed(list(JOBS.values()))][:20]
                 self._json(lst)
+            elif u.path == "/api/schedule/list":
+                self._json({"ok": True, "schedules": _load_schedules()})
             elif u.path == "/api/cookies":
                 try:
                     from .cookies import list_saved
@@ -649,6 +708,25 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": delete(domain), "domain": domain})
                 except Exception as e:
                     self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+            elif u.path == "/api/schedule/add":
+                desc = str(body.get("description", "")).strip()
+                interval = float(body.get("interval_hours") or 0)
+                if not desc:
+                    self._json({"error": "请提供任务描述"})
+                    return
+                if interval <= 0:
+                    interval = 24
+                scheds = _load_schedules()
+                scheds.append({"id": uuid.uuid4().hex[:8], "description": desc,
+                               "interval_hours": interval, "next_run": time.time() + interval * 3600,
+                               "last_run": None, "enabled": True, "created": time.time()})
+                _save_schedules(scheds)
+                self._json({"ok": True, "message": f"已设为每 {interval:.0f} 小时自动跑一次"})
+            elif u.path == "/api/schedule/delete":
+                sid = str(body.get("id", "")).strip()
+                scheds = [x for x in _load_schedules() if x.get("id") != sid]
+                _save_schedules(scheds)
+                self._json({"ok": True})
             elif u.path == "/api/chrome/start":
                 # 启动调试 Chrome 并打开目标 URL（一键登录/过盾入口）
                 url = str(body.get("url", "")).strip()
@@ -849,6 +927,7 @@ def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
     import sys, secrets
     global _CODE_FP_START
     _load_jobs()
+    threading.Thread(target=_scheduler_loop, daemon=True).start()  # ⏰ 定时任务调度
     _CODE_FP_START = _code_fingerprint()
     PY = sys.executable
     AUTH_TOKEN = token or os.environ.get("US_WEBUI_TOKEN", "")

@@ -196,6 +196,13 @@
     <label class="ck"><input id="a_browser" type="checkbox"><span>需要登录 / JS 渲染的网站：勾选后优先用浏览器（会弹出窗口，登录一次自动保存复用）</span></label>
     <label>代理 <span class="l-hint">可选 — 没有真实代理就留空（示例不能直接用）</span></label>
     <input id="a_proxy" placeholder="留空=不用代理；有代理填 http://user:pass@真实IP:真实端口">
+    <div class="row mt" id="schedRow">
+      <div><label>⏰ 设为定时任务 <span class="l-hint">自动重跑（复用已学配置）</span></label>
+        <select id="a_sched"><option value="0">不设定时</option><option value="24">每 24 小时（每天）</option><option value="168">每 168 小时（每周）</option><option value="1">每小时（测试）</option></select>
+      </div>
+      <div style="padding-top:22px"><button class="btn btn-ghost btn-sm" onclick="addSchedule()">设为定时</button></div>
+    </div>
+    <div id="schedList" class="muted" style="font-size:12px;margin:6px 0"></div>
     <label>登录 Cookie <span class="l-hint">可选 — 填了跳过验证/登录直接抓</span></label>
     <div class="field-with-btn">
       <div><input id="a_cookie" placeholder="粘贴 Cookie 整串（形如 dper=...; ua=...）"></div>
@@ -631,6 +638,34 @@ async function startBatch(btn){
   }catch(e){ box.innerHTML='<pre class="err">'+esc(e.message)+'</pre>'; }
   btn.disabled=false; btn.textContent='📚 批量抓取';
 }
+async function addSchedule(){
+  const desc=document.getElementById('a_desc').value.trim();
+  const iv=document.getElementById('a_sched').value;
+  if(!desc){ alert('请先输入任务描述'); return; }
+  if(iv==='0'){ alert('请选择定时间隔'); return; }
+  try{
+    const d=await api('/api/schedule/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:desc, interval_hours:iv})});
+    alert(d&&d.ok?(d.message||'已设定时'):('失败：'+((d&&d.error)||'未知')));
+    loadSchedules();
+  }catch(e){ alert('失败：'+e.message); }
+}
+async function loadSchedules(){
+  try{
+    const d=await api('/api/schedule/list');
+    const el=document.getElementById('schedList'); if(!el) return;
+    if(!d||!d.schedules||!d.schedules.length){ el.textContent=''; return; }
+    el.innerHTML='⏰ 定时任务：'+d.schedules.map(x=>{
+      const h=x.interval_hours>=24?(x.interval_hours/24)+'天':x.interval_hours+'小时';
+      const next=new Date((x.next_run||0)*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      return '<span style="background:#f5f5f5;border:1px solid #ddd;border-radius:6px;padding:2px 8px;margin:0 4px">'+esc((x.description||'').slice(0,18))+' · 每'+h+' · 下次'+next+' <a href="javascript:void(0)" onclick="delSchedule(\''+x.id+'\')" style="color:#c0392b">删</a></span>';
+    }).join(' ');
+  }catch(e){}
+}
+async function delSchedule(id){
+  if(!confirm('删除该定时任务？')) return;
+  try{ await api('/api/schedule/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}); loadSchedules(); }catch(e){}
+}
+loadSchedules();
 loadRecent();
 async function refreshCookies(){
   try{
