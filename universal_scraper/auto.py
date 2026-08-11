@@ -511,7 +511,7 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         if _dom in _host and _src.get("type") == "browser" \
                 and not (_src.get("verify") or {}).get("enabled"):
             cfg["source"].setdefault("verify", {
-                "enabled": True, "markers": _mk, "max_wait_ms": 600000,
+                "enabled": True, "markers": _mk, "max_wait_ms": 300000,
                 "success_selector": "body",
             })
             break
@@ -525,7 +525,7 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             "type": "browser", "headless": False,
             "login": {"enabled": True, "url": _su0,
                       "wait_selector": ".user-info, .avatar, .nickname, a[href*='/member/'], .nav-user"},
-            "verify": {"enabled": True, "max_wait_ms": 600000,
+            "verify": {"enabled": True, "max_wait_ms": 300000,
                        "markers": ["验证", "安全", "滑块", "登录", "captcha"],
                        "success_selector": "body"},
         }
@@ -1475,6 +1475,24 @@ def _build_config(description: str, proxy: Optional[str] = None,
         log(f"⚠️ 网站需要人工验证/登录：即将弹出真实浏览器，请在弹出的窗口中完成滑块/点选/登录"
             f"（最长等待 {wait_s} 秒），完成后自动继续并保存会话")
     log(f"✅ 配置已生成（source={cfg.get('source', {}).get('type')}）")
+    # 🚀 已知强登录/反爬域且无可用 cookie → 提前引导（不傻等 10 分钟）
+    try:
+        _LOGIN_HINT = ("zhihu.com", "weibo.com", "douban.com", "xiaohongshu.com", "taobao.com",
+                       "jd.com", "zhipin.com", "liepin.com", "lagou.com", "zhaopin.com",
+                       "dianping.com", "meituan.com", "lianjia.com", "ke.com", "anjuke.com",
+                       "58.com", "5i5j.com", "tujia.com", "guazi.com", "wuba.com")
+        _su0 = (cfg.get("start_urls") or [""])[0]
+        _h = _su0.split("//")[-1].split("/")[0].lower().lstrip("www.") if "//" in _su0 else ""
+        if _h and any(_h.endswith(d) for d in _LOGIN_HINT):
+            try:
+                from .cookies import has_cookies
+                if not has_cookies(_h):
+                    log(f"🚀 目标站 {_h} 通常需要登录/过验证，且当前无可用会话——"
+                        f"任务可能 0 条。失败后点卡片「打开调试Chrome」登录一次再重跑（自动复用会话）")
+            except Exception:
+                pass
+    except Exception:
+        pass
     return cfg, name, task_dir
 
 
@@ -1896,7 +1914,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         _src0 = cfg.get("source", {}) or {}
         if os.environ.get("US_BATCH") != "1":
             if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
-                round_timeout = max(round_timeout, 600)  # 人工验证要等人，放宽到 10 分钟
+                round_timeout = max(round_timeout, 360)  # 人工验证要等人，放宽到 10 分钟
             if (cfg.get("detail") or {}).get("enabled"):
                 round_timeout = max(round_timeout, 1200)  # 详情补抓(几十页)要时间，放宽到 20 分钟
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
@@ -2257,13 +2275,13 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     _src0 = config.get("source", {}) or {}
     if os.environ.get("US_BATCH") != "1":
         if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
-            round_timeout = max(round_timeout, 600)
+            round_timeout = max(round_timeout, 360)
     for round_i in range(1, _loop_rounds + 1):
         # 每轮按当前配置重算超时（WAF 自动升级浏览器后要等人工滑块，需放宽到 10 分钟）
         _src0 = config.get("source", {}) or {}
         if os.environ.get("US_BATCH") != "1":
             if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
-                round_timeout = max(round_timeout, 600)
+                round_timeout = max(round_timeout, 360)
             if (config.get("detail") or {}).get("enabled"):
                 round_timeout = max(round_timeout, 1200)
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")

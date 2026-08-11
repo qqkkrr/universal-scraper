@@ -75,6 +75,9 @@ def main():
                 continue
             st = d.get("status")
             if st in ("done", "error"):
+                time.sleep(2)  # 确保读到最终 summary（防中途状态）
+                try: d = api(f"/api/job?job={jid}")
+                except Exception: pass
                 st2 = judge(t, d)
                 results[str(t["id"])] = {"id": t["id"], "status": st2,
                     "summary": (d.get("summary") or "")[:200],
