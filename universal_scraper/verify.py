@@ -56,7 +56,12 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
             except Exception:
                 pass
 
-    # 2. 字段完整率（字段取前 200 行的并集，避免只看第一行漏掉后续新字段）
+    # 2. 字段完整率（字段取前 200 行的并集；关键字段判 fail，稀疏字段仅提示）
+    #    关键字段：标题/名称/链接/网址/日期/编号/文号/价格等——这些缺失=数据不可用
+    #    稀疏字段：备注/说明/摘要/标签/工种等——天然允许部分为空，不误报"复核失败"
+    _KEY_FIELDS = ("title", "name", "link", "url", "date", "time", "编号", "文号",
+                   "标题", "名称", "链接", "网址", "日期", "时间", "价格", "金额",
+                   "id", "code", "代码")
     if rows:
         fields = []
         for r in rows[:200]:
@@ -67,10 +72,12 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
         for f in fields:
             n_ok = sum(1 for r in rows if _norm(r.get(f)))
             rate = n_ok / len(rows)
+            is_key = any(k in f for k in _KEY_FIELDS)
             report["checks"].append({
                 "name": f"字段完整率 · {f}",
-                "pass": rate >= 0.9,
-                "value": f"{rate:.0%}（{n_ok}/{len(rows)}）",
+                "pass": rate >= 0.9 if is_key else True,
+                "value": f"{rate:.0%}（{n_ok}/{len(rows)}）"
+                         + ("" if is_key else "（非关键字段，仅提示）"),
             })
 
     # 3. 去重率（主键：url > link > id > shopId > 第一个字段）
@@ -131,11 +138,13 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
                     match = None  # 无法判断
                 else:
                     match = title[:12] in body
-                good = reachable and match is not False
-                if good:
+                # 判定分级：不可达(404/5xx/超时)=失败；可达但标题不匹配=警告（JS渲染/PDF/动态标题常见，不误判失败）
+                good = reachable
+                warn = reachable and match is False
+                if good and not warn:
                     ok += 1
                 checked.append({"url": u[:80], "reachable": reachable,
-                                "match": match, "pass": good})
+                                "match": match, "pass": good, "warn": warn})
             except Exception as e:
                 checked.append({"url": u[:80], "reachable": False,
                                 "match": None, "pass": False, "err": str(e)[:60]})
@@ -143,7 +152,7 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
             report["checks"].append({
                 "name": "抽样重抓对比",
                 "pass": ok == total,
-                "value": f"{ok}/{total} 一致",
+                "value": f"{ok}/{total} 可达" + ("（部分内容未匹配=警告）" if any(c.get("warn") for c in checked) else ""),
                 "detail": checked,
             })
 

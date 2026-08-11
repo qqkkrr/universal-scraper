@@ -1352,11 +1352,20 @@ def _build_config(description: str, proxy: Optional[str] = None,
     urls = extract_urls(description)
     if urls:
         log(f"🔍 正在探测入口页结构: {urls[0]}")
-        summary = build_structure_summary(urls[0])
+        # 探测失败不阻塞配置生成（可恢复异常降级：无摘要继续让 LLM 生成）
+        try:
+            summary = build_structure_summary(urls[0])
+        except Exception as _e:
+            log(f"⚠️ 结构探测失败（{_e}），跳过摘要")
+            summary = None
         if summary:
             log("✅ 结构摘要已生成（省 token、选择器更准）")
         else:
-            summary = _page_context(urls[0])
+            try:
+                summary = _page_context(urls[0])
+            except Exception as _e:
+                log(f"⚠️ 入口页摘要失败（{_e}），直接让 AI 生成")
+                summary = None
             if summary:
                 log("✅ 已抓取入口页 Markdown 摘要（省 token、选择器更准）")
     # 注入当前真实日期（北京时间）：让 AI 按“今天/昨天”正确换算，杜绝抄示例旧日期
