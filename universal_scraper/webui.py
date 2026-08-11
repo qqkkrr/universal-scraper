@@ -201,6 +201,14 @@ def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie=
             out = auto_task(desc, limit=limit, rounds=rounds,
                             round_timeout=timeout, log_cb=lambda m: _job_log(job, m),
                             proxy=proxy or None, cookie=cookie or None)
+        # ⚠️ 0 条失败也要给引导卡片（之前只有异常才显示）——"跑不出数据"同样需要方案
+        _sum = str(out.get("summary") or "")
+        if "0 条" in _sum or "0 条" in _sum.replace("任务结束：", ""):
+            try:
+                from .solutions import attach_solution
+                attach_solution(job, _sum + " " + " ".join((job.get("messages") or [])[-5:]))
+            except Exception:
+                pass
         _job_done(job, out.get("result"), out.get("summary"), out.get("verify"))
     except BaseException as e:
         if isinstance(e, KeyboardInterrupt):

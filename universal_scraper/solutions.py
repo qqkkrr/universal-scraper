@@ -188,7 +188,7 @@ def attach_solution(job: Dict[str, Any], error_text: str = "") -> None:
             if not _url:
                 # paste 任务无 task_dir：title 就是 URL
                 import re as _re
-                _m = _re.search(r"https?://[^\s'"]+", str(job.get("title") or ""))
+                _m = _re.search("https?://[^\\s'\"]+", str(job.get("title") or ""))
                 if _m:
                     _url = _m.group(0)
             sol["action"] = {"label": "🚀 打开调试 Chrome 并登录/过验证",
