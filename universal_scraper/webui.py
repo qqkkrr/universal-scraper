@@ -571,6 +571,35 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": delete(domain), "domain": domain})
                 except Exception as e:
                     self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+            elif u.path == "/api/chrome/start":
+                # 启动调试 Chrome 并打开目标 URL（一键登录/过盾入口）
+                url = str(body.get("url", "")).strip()
+                port = int(body.get("port") or 9222)
+                try:
+                    import subprocess as _sp
+                    _chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+                    _profile = os.path.expanduser(f"~/.codex/cdp_profile_{port}")
+                    os.makedirs(_profile, exist_ok=True)
+                    # 端口被占 → 直接打开新标签
+                    _occupied = False
+                    try:
+                        import urllib.request as _ur
+                        with _ur.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2) as _r:
+                            _occupied = True
+                    except Exception:
+                        _occupied = False
+                    if _occupied:
+                        _sp.Popen(["open", "-a", "Google Chrome", url or "https://www.baidu.com"])
+                    else:
+                        _cmd = [_chrome, f"--remote-debugging-port={port}",
+                                f"--user-data-dir={_profile}", "--no-first-run",
+                                "--no-default-browser-check", url or "about:blank"]
+                        _sp.Popen(_cmd, start_new_session=True,
+                                  stdout=open(os.devnull, "w"), stderr=_sp.STDOUT)
+                    self._json({"ok": True, "message": f"调试 Chrome 已启动（端口 {port}）并打开目标站，请登录/过验证后回到工具重跑任务",
+                                "port": port, "url": url})
+                except Exception as e:
+                    self._json({"ok": False, "error": f"启动失败：{type(e).__name__}: {e}"})
             elif u.path == "/api/restart":
                 # 代码已更新时一键重启服务（同参数拉起新进程后退出当前进程）
                 try:

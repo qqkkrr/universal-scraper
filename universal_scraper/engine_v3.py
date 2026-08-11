@@ -131,6 +131,12 @@ class EngineV3:
                                         mode=_cm, log=log_cb)
                 self._cookie_acquired = _acq
                 if _acq.get("source") in ("reused", "imported"):
+                    if log_cb:
+                        _n = _acq.get("count", 0)
+                        if _acq.get("source") == "reused":
+                            log_cb(f"🍪 已复用 {_domain} 的会话（{_n} 条 cookie，自动注入）")
+                        else:
+                            log_cb(f"🍪 已从调试 Chrome 自动获取 {_domain} 会话（{_n} 条，任务结束自动删除）")
                     _src = self.config.get("source") or {}
                     if (_src.get("type") or "http") == "http":
                         _hdrs = _src.setdefault("headers", {})

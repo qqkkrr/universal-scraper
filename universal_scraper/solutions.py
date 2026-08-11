@@ -168,9 +168,32 @@ def get_solution(failure_type: str = "unknown", error_text: str = "",
 
 
 def attach_solution(job: Dict[str, Any], error_text: str = "") -> None:
-    """给 job 附加 solution（_job_error 调用）。"""
+    """给 job 附加 solution（_job_error 调用），登录/反爬类失败带"一键打开调试Chrome"动作。"""
     try:
         msgs = job.get("messages") or []
-        job["solution"] = get_solution("", error_text, msgs, job.get("description") or "")
+        sol = dict(get_solution("", error_text, msgs, job.get("description") or ""))
+        # 一键动作：需要人工参与的场景 → 打开调试 Chrome 登录目标站（体验优化）
+        _ft = classify_failure(error_text, msgs, job.get("task_dir") or "")
+        if _ft in ("login_required", "captcha_or_login", "ip_blocked", "captcha"):
+            _url = ""
+            try:
+                _td = job.get("task_dir") or ""
+                if _td:
+                    import json as _json
+                    from pathlib import Path as _P
+                    _cfg = _json.loads((_P(_td) / "config.json").read_text(encoding="utf-8"))
+                    _url = (_cfg.get("start_urls") or [""])[0]
+            except Exception:
+                pass
+            if not _url:
+                # paste 任务无 task_dir：title 就是 URL
+                import re as _re
+                _m = _re.search(r"https?://[^\s'"]+", str(job.get("title") or ""))
+                if _m:
+                    _url = _m.group(0)
+            sol["action"] = {"label": "🚀 打开调试 Chrome 并登录/过验证",
+                             "api": "/api/chrome/start", "url": _url,
+                             "tip": "点击后 Chrome 会打开目标网站，完成登录/滑块/过盾后回到这里重跑任务（工具会自动复用会话）"}
+        job["solution"] = sol
     except Exception:
         pass

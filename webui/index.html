@@ -233,6 +233,16 @@
 
 <!-- ============ 贴网页爬虫 ============ -->
 <div class="tab" id="tab-paste">
+  <div class="card" id="cookieCard" style="margin-top:14px">
+    <div class="card-title"><span class="idx">🍪</span><h2>会话管理（自动 Cookie）</h2></div>
+    <div class="desc">任务会自动使用这些网站的登录态/过盾 cookie（用完即删，长期存档不删）。也可在调试 Chrome 登录后点「导入全部」。</div>
+    <div id="cookieList" class="muted" style="font-size:12.5px;margin:8px 0">加载中…</div>
+    <div class="row mt">
+      <button class="btn" onclick="refreshCookies()">刷新</button>
+      <button class="btn" onclick="importCookies()">🍪 导入全部（从调试Chrome）</button>
+      <button class="btn btn-ghost" onclick="openChrome()">🚀 打开调试 Chrome</button>
+    </div>
+  </div>
   <div class="card">
     <div class="card-title"><span class="idx">02 / DIRECT</span><h2>贴网页爬虫</h2></div>
     <div class="desc">粘贴一个网址，按模式直接抓取；适合已知目标页、不需要 AI 生成配置的场景。</div>
@@ -386,10 +396,20 @@ function renderSolution(d){
     +'<ol style="margin:0 0 8px 20px;font-size:13px;line-height:1.9">';
   (sol.steps||[]).forEach(st=>{ h+='<li>'+esc(st)+'</li>'; });
   h+='</ol>';
+  if(sol.action && sol.action.api){
+    h+='<div style="margin:10px 0"><button class="btn" onclick="runSolutionAction(\''+sol.action.api+'\',\''+String(sol.action.url||'').replace(/\\/g,'\\\\').replace(/\'/g,'\\\'')+'\')">'+esc(sol.action.label||'执行')+'</button>'
+      +'<div class="muted" style="font-size:12px;margin-top:6px">'+esc(sol.action.tip||'')+'</div></div>';
+  }
   if(sol.resources) h+='<div class="muted" style="font-size:12px">资源：'+esc(sol.resources)+'</div>';
   h+='<div class="muted" style="font-size:11.5px;margin-top:6px">完整手册：《使用者解决方案手册.md》｜ 仍无法解决就把红色错误发我</div>';
   h+='</div>';
   return h;
+}
+async function runSolutionAction(api,url){
+  try{
+    const d=await api(api,{method:'POST',body:JSON.stringify({url:url})});
+    alert(d && d.ok ? (d.message||'已启动调试 Chrome') : ('失败：'+((d&&d.error)||'未知')));
+  }catch(e){ alert('失败：'+e.message); }
 }
 function renderResult(box,d){
   let html='';
@@ -573,6 +593,35 @@ async function loadRecent(){
   }catch(e){}
 }
 loadRecent();
+async function refreshCookies(){
+  try{
+    const d=await api('/api/cookies');
+    const el=document.getElementById('cookieList'); if(!el) return;
+    if(!d || !d.sessions || !d.sessions.length){ el.innerHTML='<span class="muted">暂无已保存会话。用「导入全部」从调试 Chrome 导入，或跑一次浏览器任务自动存档。</span>'; return; }
+    let h='<table style="width:100%;font-size:12.5px;border-collapse:collapse"><tr style="text-align:left"><th>网站</th><th>Cookie数</th><th>类型</th><th></th></tr>';
+    d.sessions.forEach(x=>{
+      const tags=[];
+      if(x.has_clearance) tags.push('✅过盾');
+      if(x.has_login) tags.push('🔐登录');
+      h+='<tr style="border-top:1px solid #ddd"><td>'+esc(x.domain)+'</td><td>'+x.count+'</td><td>'+tags.join(' ')+'</td>'
+        +'<td><a href="javascript:void(0)" onclick="deleteCookie(\''+esc(x.domain)+'\')" style="color:#c0392b">删除</a></td></tr>';
+    });
+    h+='</table>';
+    el.innerHTML=h;
+  }catch(e){ const el=document.getElementById('cookieList'); if(el) el.textContent='加载失败：'+e.message; }
+}
+async function deleteCookie(domain){
+  if(!confirm('删除 '+domain+' 的已存会话？')) return;
+  try{ const d=await api('/api/cookies/delete',{method:'POST',body:JSON.stringify({domain:domain})}); if(d&&d.ok) refreshCookies(); else alert('删除失败：'+((d&&d.error)||'未知')); }
+  catch(e){ alert('删除失败：'+e.message); }
+}
+async function openChrome(){
+  try{
+    const d=await api('/api/chrome/start',{method:'POST',body:'{}'});
+    alert(d && d.ok ? (d.message||'已启动') : ('失败：'+((d&&d.error)||'未知')));
+  }catch(e){ alert('失败：'+e.message); }
+}
+refreshCookies();
 // 🍪 一键从调试 Chrome 导入已登录网站的 Cookie（自动按域名存档，之后任务自动复用）
 async function importCookies(){
   const el = event && event.currentTarget;
