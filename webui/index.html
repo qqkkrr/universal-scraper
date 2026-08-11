@@ -243,6 +243,16 @@
       <button class="btn btn-ghost" onclick="openChrome()">🚀 打开调试 Chrome</button>
     </div>
   </div>
+  <div class="card" id="batchCard" style="margin-top:14px">
+    <div class="card-title"><span class="idx">📚</span><h2>批量抓取（多网址一次跑）</h2></div>
+    <div class="desc">每行一个网址（支持精配站/普通网页/PDF附件），结果合并导出。任务描述也可引用本地文件：写 <code>@/Users/你/文件.csv</code> 自动读取。</div>
+    <textarea id="b_urls" rows="4" placeholder="https://a.com/list1&#10;https://b.com/page2&#10;https://c.com/file.pdf" style="width:100%;font-family:monospace;font-size:12.5px"></textarea>
+    <div class="row mt">
+      <button class="btn" onclick="startBatch(this)">📚 批量抓取</button>
+      <label class="ck" style="margin-left:12px"><input id="b_browser" type="checkbox"><span>需要浏览器渲染</span></label>
+    </div>
+    <div id="b_res" style="margin-top:10px"></div>
+  </div>
   <div class="card">
     <div class="card-title"><span class="idx">02 / DIRECT</span><h2>贴网页爬虫</h2></div>
     <div class="desc">粘贴一个网址，按模式直接抓取；适合已知目标页、不需要 AI 生成配置的场景。</div>
@@ -608,6 +618,18 @@ async function rerunJob(btn, jobId){
     const box=btn.closest('.card')||document.body;
     pollJob(r.job, box);
   }catch(e){ alert('重跑失败：'+e.message); }
+}
+async function startBatch(btn){
+  const urls=document.getElementById('b_urls').value.split('\n').map(x=>x.trim()).filter(x=>x.startsWith('http'));
+  if(!urls.length){ alert('请至少输入一个网址'); return; }
+  const box=document.getElementById('b_res');
+  btn.disabled=true; btn.textContent='批量运行中…';
+  try{
+    const d=await api('/api/paste/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls:urls, browser:document.getElementById('b_browser').checked})});
+    if(d.error){ box.innerHTML='<pre class="err">'+esc(d.error)+'</pre>'; }
+    else { box.innerHTML=''; pollJob(d.job, box); }
+  }catch(e){ box.innerHTML='<pre class="err">'+esc(e.message)+'</pre>'; }
+  btn.disabled=false; btn.textContent='📚 批量抓取';
 }
 loadRecent();
 async function refreshCookies(){

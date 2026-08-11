@@ -1366,11 +1366,39 @@ def _force_browser_waf(cfg: dict) -> dict:
     return cfg
 
 
+def _resolve_file_refs(description: str, log=None) -> str:
+    """把描述里的 @文件路径 替换为文件内容（本地输入支持：清单/关键词/企业名等）。"""
+    import os as _os
+    def _read(m):
+        raw = m.group(1).strip()
+        if not raw:
+            return m.group(0)
+        p = _os.path.expanduser(raw)
+        if not _os.path.exists(p):
+            if log:
+                log("⚠️ 引用文件不存在：" + raw)
+            return m.group(0)
+        try:
+            txt = Path(p).read_text(encoding="utf-8", errors="replace").strip()
+            if len(txt) > 4000:
+                txt = txt[:4000] + "\n…（文件过长已截断）"
+            if log:
+                log("📄 已读取输入文件：" + p + "（" + str(len(txt)) + " 字符）")
+            return "\n【输入文件内容（来自 " + p + "）】\n" + txt
+        except Exception as e:
+            if log:
+                log("⚠️ 读取文件失败：" + str(e))
+            return m.group(0)
+    return re.sub(r"@([^\s，,;；]+)", _read, description)
+
+
 def _build_config(description: str, proxy: Optional[str] = None,
                     cookie: Optional[str] = None, log=None) -> tuple:
     """生成任务配置（探测 + LLM + 校验 + 注入），返回 (cfg, name, task_dir)。不运行。"""
     if log is None:
         log = lambda m: None
+    # 📄 本地文件输入：@/路径 或 @~/路径 → 自动读取文件内容注入
+    description = _resolve_file_refs(description, log)
     h = hashlib.md5(description.encode()).hexdigest()[:10]
     name = f"auto_{h}"
     task_dir = ROOT / "tasks" / name
@@ -2140,6 +2168,20 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
 
     if total > 0 and real:
         # 🧠 自动学习：成功后沉淀为「已学精配」，下次同站直接复用
+        # 🧠 质量下降检测：本次用了已学配置但字段完整率显著偏低（网站半改版）→ 删除 learned 重建
+        if _learned and verify and verify.get("checks"):
+            _low = [c for c in verify["checks"] if c.get("name", "").startswith("字段完整率")
+                    and not c.get("pass", True)]
+            if len(_low) >= 2:
+                try:
+                    for _lf in (Path(ROOT / "configs" / "learned")).glob("*.json"):
+                        _su = ((json.loads(_lf.read_text(encoding="utf-8")) or {}).get("config") or {}).get("start_urls") or []
+                        if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
+                            _lf.unlink(missing_ok=True)
+                            log("🧠 已学配置质量下降（字段完整率偏低），已删除，下次将重新学习")
+                            break
+                except Exception:
+                    pass
         try:
             _save_learned(cfg, description, log=log)
         except Exception:
@@ -2430,6 +2472,20 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
 
     if total > 0 and real:
         # 🧠 自动学习：成功后沉淀为「已学精配」，下次同站直接复用
+        # 🧠 质量下降检测：本次用了已学配置但字段完整率显著偏低（网站半改版）→ 删除 learned 重建
+        if _learned and verify and verify.get("checks"):
+            _low = [c for c in verify["checks"] if c.get("name", "").startswith("字段完整率")
+                    and not c.get("pass", True)]
+            if len(_low) >= 2:
+                try:
+                    for _lf in (Path(ROOT / "configs" / "learned")).glob("*.json"):
+                        _su = ((json.loads(_lf.read_text(encoding="utf-8")) or {}).get("config") or {}).get("start_urls") or []
+                        if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
+                            _lf.unlink(missing_ok=True)
+                            log("🧠 已学配置质量下降（字段完整率偏低），已删除，下次将重新学习")
+                            break
+                except Exception:
+                    pass
         try:
             _save_learned(cfg, description, log=log)
         except Exception:

@@ -389,6 +389,76 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
             _job_error(job, f"{type(e).__name__}: {e}")
 
 
+def run_batch_job(job: dict, urls: list, mode: str = "auto", browser: bool = False):
+    """批量网址抓取：逐个 URL 抓取（精配优先，普通网页兜底），合并导出。"""
+    try:
+        _job_log(job, f"📚 批量抓取开始：{len(urls)} 个网址")
+        rows_all = []
+        errs = 0
+        for i, u in enumerate(urls, 1):
+            try:
+                from .sites import match_site, run_site
+                _site = match_site(u)
+                if _site:
+                    r = run_site(u, limit=0)
+                    if r.get("rows"):
+                        rows_all.extend(r["rows"])
+                        _job_log(job, f"[{i}/{len(urls)}] ✅ {_site}：{len(r['rows'])} 条")
+                    else:
+                        errs += 1
+                        _job_log(job, f"[{i}/{len(urls)}] ⚠️ {_site} 0 条（{r.get('error','')[:80]}）")
+                else:
+                    from .quick import fetch_url
+                    fr = fetch_url(u, browser=browser, timeout=60, article=True)
+                    text = fr.get("article") or fr.get("markdown") or fr.get("text") or ""
+                    if text.strip():
+                        rows_all.append({"_url": u, "content": text[:20000]})
+                        _job_log(job, f"[{i}/{len(urls)}] ✅ 网页 {len(text)} 字符")
+                    else:
+                        errs += 1
+                        _job_log(job, f"[{i}/{len(urls)}] ⚠️ 无内容（{fr.get('error','')[:80]}）")
+            except Exception as e:
+                errs += 1
+                _job_log(job, f"[{i}/{len(urls)}] ❌ {type(e).__name__}: {str(e)[:100]}")
+        # 导出
+        import time as _t
+        base = f"batch_{int(_t.time())}"
+        fp = ROOT / "outputs" / f"{base}.json"
+        fp.write_text(json.dumps(rows_all, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        try:
+            import csv as _csv
+            keys = []
+            for r in rows_all:
+                for k in r:
+                    if k not in keys:
+                        keys.append(k)
+            with open(ROOT / "outputs" / f"{base}.csv", "w", newline="", encoding="utf-8-sig") as f:
+                w = _csv.DictWriter(f, fieldnames=keys)
+                w.writeheader()
+                w.writerows([{k: r.get(k, "") for k in keys} for r in rows_all])
+        except Exception:
+            pass
+        try:
+            from openpyxl import Workbook
+            wb = Workbook(); ws = wb.active
+            keys = list(rows_all[0].keys()) if rows_all else ["_url"]
+            ws.append(keys)
+            for r in rows_all:
+                ws.append([r.get(k, "") for k in keys])
+            wb.save(ROOT / "outputs" / f"{base}.xlsx")
+        except Exception:
+            pass
+        files = {"json": f"outputs/{base}.json", "csv": f"outputs/{base}.csv", "xlsx": f"outputs/{base}.xlsx"}
+        summary = f"✅ 批量完成：{len(urls)} 个网址，成功 {len(urls)-errs}，共 {len(rows_all)} 条，导出 {list(files.values())}"
+        _job_done(job, {"total": len(rows_all), "fetched": len(urls), "errors": errs, "files": files}, summary,
+                  _auto_verify(rows_all, None))
+    except BaseException as e:
+        if isinstance(e, KeyboardInterrupt):
+            _job_error(job, "任务已被手动停止（KeyboardInterrupt）")
+        else:
+            _job_error(job, f"{type(e).__name__}: {e}")
+
+
 def _auto_verify(rows, cfg):
     """轻量复核：字段完整率 + 去重 + 数量。返回报告 dict 或 None。"""
     if not rows:
@@ -698,6 +768,19 @@ class Handler(BaseHTTPRequestHandler):
                 job = _new_job("journal", f"期刊下载：{site}（{since} 起）")
                 threading.Thread(target=run_journal_job,
                                  args=(job, site, since, out, workers, with_meta),
+                                 daemon=True).start()
+                self._json({"job": job["id"]})
+            elif u.path == "/api/paste/batch":
+                urls = body.get("urls") or []
+                if isinstance(urls, str):
+                    urls = [x.strip() for x in urls.replace("\n", "\n").splitlines() if x.strip()]
+                urls = [u.strip() for u in urls if str(u).strip().startswith("http")]
+                if not urls:
+                    self._json({"error": "请提供至少一个 http/https 网址"})
+                    return
+                job = _new_job("batch", f"批量抓取 {len(urls)} 个网址")
+                threading.Thread(target=run_batch_job,
+                                 args=(job, urls, str(body.get("mode", "auto")), bool(body.get("browser"))),
                                  daemon=True).start()
                 self._json({"job": job["id"]})
             elif u.path == "/api/precise/start":
