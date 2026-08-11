@@ -32,6 +32,8 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
     """对 rows 复核，返回 {ok, total, checks:[...], ts}。
     declared: 运行器声明的总条数（auto 传 result.total），用于与导出文件对比。"""
     t0 = time.time()
+    # 脏数据防线：跳过非 dict 行（jsonl 可能混入字符串/None），不因一行脏数据让复核崩溃
+    rows = [r for r in (rows or []) if isinstance(r, dict)]
     report: Dict[str, Any] = {"ok": False, "total": len(rows), "checks": [], "ts": time.time()}
     if not rows:
         report["message"] = "0 条数据，无需复核"
@@ -80,18 +82,28 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
                          + ("" if is_key else "（非关键字段，仅提示）"),
             })
 
-    # 3. 去重率（主键：url > link > id > shopId > 第一个字段）
+    # 3. 去重率（主键优先级：url/link/id/shopId > 标题+链接复合 > 标题）
+    #    修复：仅用 title 做主键会把"同标题不同内容"误判重复，必须复合链接/URL
     key = None
-    for cand in ("url", "link", "id", "shopId", "name", "title"):
+    for cand in ("url", "link", "id", "shopId", "链接", "网址"):
         if rows and _norm(rows[0].get(cand)):
             key = cand
             break
+    if not key and rows and (_norm(rows[0].get("title")) or _norm(rows[0].get("标题"))):
+        key = "title+link"  # 复合主键（兼容中英文）
+    if not key and rows and (_norm(rows[0].get("name")) or _norm(rows[0].get("名称"))):
+        key = "name+link"
     if key:
         seen = set()
         dups = 0
         empty = 0
         for r in rows:
-            v = _norm(r.get(key))
+            if key == "title+link":
+                v = _norm(r.get("title") or r.get("标题")) + "|" + _norm(r.get("link") or r.get("url") or r.get("链接") or r.get("网址"))
+            elif key == "name+link":
+                v = _norm(r.get("name") or r.get("名称")) + "|" + _norm(r.get("link") or r.get("url") or r.get("链接") or r.get("网址"))
+            else:
+                v = _norm(r.get(key))
             if not v:
                 empty += 1
             elif v in seen:

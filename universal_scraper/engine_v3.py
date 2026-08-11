@@ -171,6 +171,7 @@ class EngineV3:
         self._spool_threshold = int(out_cfg.get("spool_threshold", 50000))
         self._spooling = False
         self._last_page_saved = False
+        self._last_page_2_saved = False
         self._spool_start = 0
         self._spool_path: Optional[Path] = None
         try:
@@ -273,10 +274,23 @@ class EngineV3:
                 except Exception:
                     pass
             # 真实内容页：保存渲染后的页面（供 LLM 兜底/自修复选择器，登录/JS 页必须用渲染结果）
-            if len(resp.text or "") > 2000 and not self._last_page_saved:
+            # 修复：不只存第一页——首页存 last_page.html，最近一个详情页存 last_page_2.html（轮换），
+            # 自修复能看到"列表+详情"两种页面证据，避免只有首页结构
+            if len(resp.text or "") > 2000:
                 try:
-                    (Path(self.task.root) / "last_page.html").write_text(resp.text, encoding="utf-8")
-                    self._last_page_saved = True
+                    _root = Path(self.task.root)
+                    _is_list = len((resp.text or "")) > 0 and "/page/" not in (resp.url or "") and not self._last_page_saved
+                    if not self._last_page_saved:
+                        (_root / "last_page.html").write_text(resp.text, encoding="utf-8")
+                        self._last_page_saved = True
+                    elif self._last_page_2_saved:
+                        # 已有一个详情页：轮换（保留较新的）
+                        _other = _root / "last_page_2.html"
+                        if _other.exists() and len(_other.read_text(encoding="utf-8", errors="replace")) < len(resp.text or ""):
+                            _other.write_text(resp.text, encoding="utf-8")
+                    else:
+                        (_root / "last_page_2.html").write_text(resp.text, encoding="utf-8")
+                        self._last_page_2_saved = True
                 except Exception:
                     pass
             # 入队新请求（递归）：follow=false 规则 + robots.txt 过滤

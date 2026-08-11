@@ -684,12 +684,27 @@ def _font_obfuscation_hint(sample) -> str:
     return ""
 
 
+def _page_evidence_text(task_dir) -> str:
+    """合并引擎保存的页面证据（首页 last_page.html + 最近详情 last_page_2.html），
+    让自修复/LLM 兜底能看到"列表+详情"两种结构，而非只有第一页。"""
+    parts = []
+    for fn in ("last_page.html", "last_page_2.html"):
+        try:
+            p = Path(task_dir) / fn
+            if p.exists() and p.stat().st_size > 300:
+                txt = p.read_text(encoding="utf-8", errors="replace")
+                parts.append("<!-- " + fn + " -->\n" + txt)
+        except Exception:
+            pass
+    return "\n".join(parts)
+
+
 def _rendered_class_hint(task_dir) -> str:
     """自修复时把引擎保存的渲染页高频 class 喂给 LLM（登录/JS 页裸抓拿不到真实 DOM）。"""
     try:
-        lp = Path(task_dir) / "last_page.html"
-        if lp.exists() and lp.stat().st_size > 2000:
-            return _class_stats_text(lp.read_text(encoding="utf-8", errors="replace"))
+        txt = _page_evidence_text(task_dir)
+        if len(txt) > 2000:
+            return _class_stats_text(txt)
     except Exception:
         pass
     return ""
@@ -699,10 +714,10 @@ def _annotated_dom_hint(task_dir, url: str = "") -> str:
     """自修复时把引擎保存的渲染页转成「带 CSS 选择器标注」的 DOM 摘要（scrapedown 思路）。
     比裸 class 统计强：每行给出完整 CSS 路径 + 字段相对选择器 + 真实内容，LLM 一次修对。"""
     try:
-        lp = Path(task_dir) / "last_page.html"
-        if lp.exists() and lp.stat().st_size > 300:
+        txt = _page_evidence_text(task_dir)
+        if len(txt) > 300:
             from .structure import annotate_dom
-            return annotate_dom(lp.read_text(encoding="utf-8", errors="replace"), url or "")
+            return annotate_dom(txt, url or "")
     except Exception:
         pass
     return ""
@@ -712,9 +727,7 @@ def _task_evidence_summary(task_dir, log=None) -> Dict[str, Any]:
     """收集任务目录里已有的「真实证据」：渲染页 / 捕获接口 / 页面文件，供 LLM 抽取用。"""
     ev: Dict[str, Any] = {"html": "", "capture": [], "url": ""}
     try:
-        lp = Path(task_dir) / "last_page.html"
-        if lp.exists() and lp.stat().st_size > 300:
-            ev["html"] = lp.read_text(encoding="utf-8", errors="replace")
+        ev["html"] = _page_evidence_text(task_dir)
     except Exception:
         pass
     try:

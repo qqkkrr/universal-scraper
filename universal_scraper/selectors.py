@@ -160,7 +160,10 @@ def css_html(html: str, selector: str, limit: int = 0) -> str:
 def regex_extract(text: str, pattern: str, group: int = 0, flags: int = re.S | re.I) -> str:
     if not pattern:
         return ""
-    m = re.search(pattern, text, flags)
+    try:
+        m = re.search(pattern, text or "", flags)
+    except re.error:
+        return ""  # 非法正则（AI 常生成）：不崩溃，按无匹配处理
     if not m:
         return ""
     try:
@@ -172,7 +175,10 @@ def regex_extract(text: str, pattern: str, group: int = 0, flags: int = re.S | r
 def regex_extract_all(text: str, pattern: str, group: int = 0) -> List[str]:
     if not pattern:
         return []
-    return [m.group(group) or "" for m in re.finditer(pattern, text, re.S | re.I)]
+    try:
+        return [m.group(group) or "" for m in re.finditer(pattern, text or "", re.S | re.I)]
+    except re.error:
+        return []
 
 
 # ---------------------------------------------------------------- 统一提取入口

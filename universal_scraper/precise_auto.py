@@ -612,7 +612,14 @@ def _entry_candidates(description: str, url: str, log=None) -> Dict[str, Any]:
             )},
         ])
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
-        cands = json.loads(raw)
+        try:
+            cands = json.loads(raw)
+        except Exception:
+            # LLM 常夹带解释文字：提取第一个 JSON 数组再解析（二次兜底）
+            _m = re.search(r"\[[\s\S]*?\]", raw)
+            if not _m:
+                raise
+            cands = json.loads(_m.group(0))
         if isinstance(cands, dict):
             cands = cands.get("urls") or cands.get("candidates") or []
     except Exception as e:
