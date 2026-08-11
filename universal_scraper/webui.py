@@ -224,7 +224,11 @@ def _job_heartbeat(job: dict, key: str = "配置生成中"):
                 return
             n = len(job.get("messages") or [])
         if n == last_n:
-            _job_log(job, f"⏳ 仍在{key}（已等待 {int(time.time() - t0)} 秒）…")
+            _wait = int(time.time() - t0)
+            _hint = ""
+            if _wait > 180:
+                _hint = "｜⚠️ 长时间无进展，疑似反爬/验证/登录拦截——可点停止，按失败卡片或「🚀 打开调试Chrome」操作后重跑"
+            _job_log(job, f"⏳ 仍在{key}（已等待 {_wait} 秒）{_hint}")
             last_n = n + 1
         else:
             last_n = n

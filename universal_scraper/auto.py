@@ -208,7 +208,7 @@ def _extract_json(raw: str) -> dict:
     raise ValueError("AI 未返回 JSON: " + raw[:200])
 
 
-def _llm_chat(messages: List[Dict[str, str]], timeout: int = 200) -> str:
+def _llm_chat(messages: List[Dict[str, str]], timeout: int = 120) -> str:
     """LLM 调用带硬超时 + 空响应重试（模型偶尔返回空/纯空白，提高温度再补一次）。"""
     from .llm import LLMClient
     import time as _t
