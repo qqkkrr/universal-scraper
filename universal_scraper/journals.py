@@ -78,6 +78,9 @@ def _http_post(url: str, data: Dict[str, Any], referer: str = "", timeout: int =
 # ---------------------------------------------------------------------------
 def list_issues(site: Dict[str, str], since_year: int = 2024) -> List[Dict[str, str]]:
     """抓期刊"过刊列表"，返回 since_year 及以后的期次。"""
+    for _k in ("base", "ctx"):
+        if not site.get(_k):
+            raise ValueError(f"站点配置缺少字段 '{_k}'（需要 base/ctx）: {site}")
     url = f"{site['base']}{site['ctx']}/article/showOldVolumnList.do"
     status, raw = _http_get(url)
     text = raw.decode("utf-8", "ignore")

@@ -71,6 +71,8 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
     选"替换字符最少"的解码（修复 GBK 中文站乱码 / 错标 charset 的站）。"""
     if not raw:
         return ""
+    if isinstance(raw, str):
+        return raw  # 已解码的字符串直接返回（防调用方误传 str 崩溃）
     enc = "utf-8"
     explicit = False
     ct = (headers or {}).get("content-type", "") or (headers or {}).get("Content-Type", "")

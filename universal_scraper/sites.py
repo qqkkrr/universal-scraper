@@ -389,6 +389,8 @@ def _css_attr(el, sel, attr, idx=0):
 
 # ---------- 豆瓣（电影榜单 / 搜索） ----------
 def parse_douban(html: str, url: str) -> List[Dict[str, Any]]:
+    if not html or not html.strip():
+        return []
     from lxml import html as lh
     doc = lh.fromstring(html)
     out = []
@@ -478,6 +480,8 @@ register("weather", match_weather, parse_weather, desc="天气：wttr.in 公开 
 
 # ---------- 百度搜索 ----------
 def parse_baidu(html: str, url: str) -> List[Dict[str, Any]]:
+    if not html or not html.strip():
+        return []
     from lxml import html as lh
     doc = lh.fromstring(html)
     out = []
@@ -510,6 +514,8 @@ register("baidu", match_baidu, parse_baidu, desc="百度搜索：结果标题/�
 
 # ---------- B站搜索（SSR 卡片） ----------
 def parse_bilibili(html: str, url: str) -> List[Dict[str, Any]]:
+    if not html or not html.strip():
+        return []
     from lxml import html as lh
     doc = lh.fromstring(html)
     out = []
@@ -2539,6 +2545,8 @@ def match_sceea(url: str) -> bool:
 
 
 def parse_sceea(html: str, url: str) -> List[Dict[str, Any]]:
+    if not html or not html.strip():
+        return []
     from lxml import html as _LH
     from urllib.parse import urlparse
     doc = _LH.fromstring(html or "")

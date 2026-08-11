@@ -131,8 +131,14 @@ class Pipeline(BasePipeline):
                 if op == "regex":
                     # 兼容 AI 生成写法：value 或 pattern 都认（历史上 AI 常写 value）
                     _pat = step.get("pattern", "") or step.get("value", "")
-                    if _pat and not re.search(_pat, val):
-                        return None
+                    if _pat:
+                        try:
+                            if not re.search(_pat, val):
+                                return None
+                        except re.error:
+                            # 非法正则（AI 常生成）：跳过该过滤并保留行，不崩溃也不误丢数据
+                            self.skipped[f"filter:{field}:非法正则"] = self.skipped.get(f"filter:{field}:非法正则", 0) + 1
+                            continue
                 if op == "between":
                     raw = item.get(field)
                     if raw in (None, ""):

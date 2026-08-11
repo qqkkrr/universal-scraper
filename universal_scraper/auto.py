@@ -185,10 +185,27 @@ v3 任务包 config.json 结构（字段含义）：
 def _extract_json(raw: str) -> dict:
     raw = raw.strip()
     raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
-    m = re.search(r"\{.*\}", raw, re.S)
-    if not m:
-        raise ValueError("AI 未返回 JSON: " + raw[:200])
-    return json.loads(m.group(0))
+    # 1) 整体解析（最常见）
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    # 2) 从每个 { 位置 raw_decode：LLM 常夹带文字/多 JSON 块，逐候选找第一个合法对象
+    import json as _json
+    dec = _json.JSONDecoder()
+    idx = 0
+    while True:
+        i = raw.find("{", idx)
+        if i < 0:
+            break
+        try:
+            obj, _ = dec.raw_decode(raw[i:])
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+        idx = i + 1
+    raise ValueError("AI 未返回 JSON: " + raw[:200])
 
 
 def _llm_chat(messages: List[Dict[str, str]], timeout: int = 200) -> str:
