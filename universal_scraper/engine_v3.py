@@ -113,16 +113,24 @@ class EngineV3:
         self.logger = Logger(log_file=log_file or (out_dir / f".run_{task.name}.log"))
         self._log_cb = log_cb
         anti["_log_cb"] = log_cb  # 供 fetcher（浏览器交互提示）回传 WebUI 进度
-        # 🍪 自动会话：按任务入口域名注入（浏览器复用登录态/过盾；http 直抓自动带已存 Cookie）
+        # 🍪 自动会话：任务启动自动获取目标域名 cookie（默认 temp：用完即删）
+        #   cookie_mode: temp(默认，任务结束删除) / persist(长期复用) / off(不用)
+        self._cookie_domain = ""
+        self._cookie_acquired: Dict[str, Any] = {}
         try:
             _su0 = (self.config.get("start_urls") or [""])[0]
             _domain = ""
             if "//" in str(_su0):
                 _domain = str(_su0).split("//")[-1].split("/")[0].lower().lstrip("www.")
             if _domain:
+                _cm = (anti.get("cookie_mode") or "temp").lower()
                 anti["cookie_domain"] = _domain
-                from .cookies import has_cookies, cookie_header
-                if has_cookies(_domain):
+                self._cookie_domain = _domain
+                from .cookies import acquire_for_task, cookie_header
+                _acq = acquire_for_task(_domain, port=int(anti.get("cookie_port") or 9222),
+                                        mode=_cm, log=log_cb)
+                self._cookie_acquired = _acq
+                if _acq.get("source") in ("reused", "imported"):
                     _src = self.config.get("source") or {}
                     if (_src.get("type") or "http") == "http":
                         _hdrs = _src.setdefault("headers", {})
@@ -409,6 +417,15 @@ class EngineV3:
                 _lock.unlink(missing_ok=True)
             except Exception:
                 pass
+            # 🍪 任务结束：temp 模式自动删除本次获取的 cookie（用完即删，不留隐私）
+            if self._cookie_domain and self._cookie_acquired:
+                try:
+                    from .cookies import release_temp
+                    if release_temp(self._cookie_domain, self._cookie_acquired):
+                        if self._log_cb:
+                            self._log_cb(f"🍪 任务结束，已自动删除临时会话（{self._cookie_domain}）")
+                except Exception:
+                    pass
 
     def _run_locked(self) -> Dict[str, Any]:
         # 桥/一次性取数：不走队列，直接 fetch_all → 流水线 → 存储

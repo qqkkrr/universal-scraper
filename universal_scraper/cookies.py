@@ -105,6 +105,40 @@ def has_cookies(domain: str) -> bool:
     return bool(load_cookies(domain))
 
 
+def acquire_for_task(domain: str, port: int = 9222, mode: str = "temp", log=None) -> Dict[str, Any]:
+    """任务启动时获取目标域名 cookie：
+      - mode=temp（默认，用完即删）：已有存档直接用；没有则自动从调试 Chrome 导入；任务结束应 release
+      - mode=persist：长期复用（不自动删除）
+      - mode=off：不使用 cookie
+    返回 {mode, source: reused|imported|none, count}。
+    """
+    if mode == "off" or not domain:
+        return {"mode": mode, "source": "none", "count": 0}
+    if has_cookies(domain):
+        return {"mode": mode, "source": "reused", "count": len(load_cookies(domain))}
+    # 无存档 → 自动从调试 Chrome 拉取（只拉目标域；Chrome 未运行则 none）
+    try:
+        from urllib.parse import urlparse
+        r = import_from_cdp_patchright(port=port, log=log)
+        if r.get("ok") and has_cookies(domain):
+            return {"mode": mode, "source": "imported", "count": len(load_cookies(domain))}
+        return {"mode": mode, "source": "none", "count": 0, "error": r.get("error", "")}
+    except Exception as e:
+        return {"mode": mode, "source": "none", "count": 0, "error": str(e)}
+
+
+def release_temp(domain: str, acquired: Dict[str, Any]) -> bool:
+    """任务结束后删除"本次自动导入"的临时 cookie（用完即删）。
+    - source=imported（本次从调试 Chrome 拉取的）→ 删除（不留隐私）
+    - source=reused（用户长期存档）→ 保留，不误删用户资产
+    """
+    if not domain or not acquired:
+        return False
+    if acquired.get("mode") == "temp" and acquired.get("source") == "imported":
+        return delete(domain)
+    return False
+
+
 def list_saved() -> List[Dict[str, Any]]:
     """列出已保存的会话域名。"""
     out = []
