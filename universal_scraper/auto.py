@@ -479,7 +479,7 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     if re.search(r"上交所|科创板", description or "") and ("sjtu" in _su0 or "kcb.sse.com.cn" in _su0):
         cfg["start_urls"] = ["https://www.sse.com.cn/listing/renewal/ipo/"]
         _su0 = cfg["start_urls"][0]
-        cfg["source"] = {"type": "browser", "headless": False, "scroll_count": 4, "scroll_wait_ms": 800}
+        cfg["source"] = {"type": "browser", "headless": True, "scroll_count": 4, "scroll_wait_ms": 800}
         _src = cfg["source"]
 
     # 已知强登录/反爬站点：AI 若配成 http 直抓，自动升为 browser+登录（否则必 0 条）
@@ -517,7 +517,7 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             break
     # 杭州房管局预售公示页是 JS 壳：http 拿不到列表，强制 browser
     if "fgj.hangzhou.gov.cn" in _su0 and _src.get("type") == "http":
-        cfg["source"] = {"type": "browser", "headless": False, "scroll_count": 4, "scroll_wait_ms": 800}
+        cfg["source"] = {"type": "browser", "headless": True, "scroll_count": 4, "scroll_wait_ms": 800}
         _src = cfg["source"]
     if _st == "http" and not (_src.get("headers") or {}).get("Cookie") \
             and any(_host.endswith(d) for d in _login_domains):
@@ -536,7 +536,7 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
                                    "api.zhihu.com") if k != "leetcode.cn/api")
     if _st == "http" and _spa and "leetcode.cn/api" not in _su0:
         cfg["source"] = {
-            "type": "browser", "headless": False,
+            "type": "browser", "headless": True,
             "scroll_count": 4, "scroll_wait_ms": 800,
             "record_from": "capture_all", "capture_all": True,
             "actions": [{"type": "scroll", "direction": "down", "amount": 1200, "ms": 600}],
@@ -1341,18 +1341,16 @@ def _fix_dead_domains(cfg: dict, description: str = "", log=None) -> dict:
 
 
 def _force_browser_waf(cfg: dict) -> dict:
-    """把 http 配置升级为 browser + WAF 滑块人工验证（CWAP/wzws 等）。"""
+    """把 http 配置升级为 browser（默认无头自动过盾，不弹窗骚扰用户）。
+
+    Cloudflare/JS壳/5秒盾：无头浏览器 + waitCloudflare 自动等 challenge 完成即可；
+    只有用户明确要求人工（login/verify）或登录域才弹窗。失败后引擎会给出"需人工"方案。"""
     old = cfg.get("source") or {}
     src = {
         "type": "browser",
-        "headless": False,
+        "headless": True,
         "scroll_count": int(old.get("scroll_count", 4)),
         "scroll_wait_ms": int(old.get("scroll_wait_ms", 800)),
-        "verify": {
-            "enabled": True,
-            "markers": ["waf_slider_verify", "wzws-waf-cgi", "wzws_waf", "CWAP-waf", "请完成安全验证", "滑动填"],
-            "max_wait_ms": 600000,
-        },
     }
     for k in ("headers", "cdp", "record_from", "capture_all"):
         if old.get(k):

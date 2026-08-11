@@ -170,7 +170,7 @@ async function dismissOverlays(page) {
   } catch (e) { /* 静默 */ }
 }
 
-module.exports = { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy };
+module.exports = { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy, waitCloudflare };
 
 /** 解析代理串（http://user:pass@host:port / socks5://host:port / host:port）为 Playwright proxy 配置 */
 function parseProxy(proxy) {
@@ -189,4 +189,49 @@ function parseProxy(proxy) {
     else username = decodeURIComponent(cred);
   }
   return { server: `${scheme}://${s}`, username: username || undefined, password: password || undefined };
+}
+
+// ============================================================
+// Cloudflare 5秒盾自动过（反反爬：无头也能过，等 challenge JS 执行完成）
+// 检测 "Just a moment" / cf-chl- / challenge-platform / __cf_chl_tk →
+// 轮询 cf_clearance cookie / 页面变化，最多等 18s，然后 reload 一次再确认
+// ============================================================
+async function waitCloudflare(page, context, timeoutMs = 18000) {
+  const looksLikeChallenge = async () => {
+    try {
+      const t = await page.evaluate(() => {
+        const txt = (document.body ? document.body.innerText : "") || "";
+        const hasCfMark = !!document.querySelector("#challenge-form, [id*=challenge], [class*=challenge], [class*=cf-chl]")
+          || /just a moment|cf-chl|challenge-platform|__cf_chl_tk/i.test(txt + location.search);
+        return { hasCfMark, title: document.title || "", len: txt.length };
+      }).catch(() => ({ hasCfMark: false, title: "", len: 0 }));
+      return t.hasCfMark || /just a moment|attention required|cf-chl/i.test(t.title);
+    } catch (e) { return false; }
+  };
+  const hasClearance = async () => {
+    try {
+      const ck = await context.cookies();
+      return ck.some(c => c.name === "cf_clearance" && c.value);
+    } catch (e) { return false; }
+  };
+  try {
+    if (!(await looksLikeChallenge()) || await hasClearance()) return true;
+  } catch (e) { return true; }
+  // 等 challenge JS 自动执行（轮询 cookie + 页面退出 challenge）
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    await sleep(2000);
+    try {
+      if (await hasClearance()) break;
+      if (!(await looksLikeChallenge())) break;
+    } catch (e) { break; }
+  }
+  // 再 reload 一次让 challenge 后页面正常加载（Cloudflare 常见流程）
+  try {
+    if (await hasClearance() || !(await looksLikeChallenge())) {
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await sleep(4000);
+    }
+  } catch (e) {}
+  return await hasClearance() || !(await looksLikeChallenge());
 }

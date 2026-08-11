@@ -6,7 +6,7 @@
  */
 const fs = require("node:fs");
 const path = require("node:path");
-const { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy } = require("./browser_common.cjs");
+const { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy, waitCloudflare } = require("./browser_common.cjs");
 const out = (o) => console.log(JSON.stringify(o));
 function arg(n, d) { const i = process.argv.indexOf("--" + n); return i >= 0 ? process.argv[i + 1] : d; }
 
@@ -35,6 +35,7 @@ async function main() {
     if (stealth) await applyStealth(context);
     const page = await context.newPage();
     await page.goto(url, { timeout: 90000, waitUntil: "domcontentloaded" });
+    await waitCloudflare(page, context).catch(() => {});
     if (jsPre) await page.evaluate(jsPre);
     if (removeOverlays) await dismissOverlays(page);
     if (actionsJson) await runActions(page, JSON.parse(actionsJson));

@@ -16,7 +16,7 @@
  */
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseProxy } = require("./browser_common.cjs");
+const { parseProxy, waitCloudflare } = require("./browser_common.cjs");
 
 let chromium = null;
 // 优先 NODE_PATH 的 playwright（本地 patchright 旧版可能被 WAF 识别），再回退本地 patchright
@@ -379,6 +379,7 @@ function centerCaptcha(page) {
       if (!needLogin) {
         try {
           await page.goto(spec.url, { timeout: 45000, waitUntil: "domcontentloaded" });
+        await waitCloudflare(page, context).catch(() => {});
           await sleep(2500);
           let _t2 = "";
           try { _t2 = String(await page.evaluate(() => document.body ? document.body.innerText.slice(0, 500) : "")); } catch (e) {}

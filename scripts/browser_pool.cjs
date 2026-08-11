@@ -12,7 +12,7 @@
  */
 const fs = require("node:fs");
 const readline = require("node:readline");
-const { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy } = require("./browser_common.cjs");
+const { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy, waitCloudflare } = require("./browser_common.cjs");
 
 const POOL_SIZE = Math.max(1, parseInt(process.env.US_POOL_SIZE || "3", 10));
 const IDLE_MS = Math.max(1000, parseInt(process.env.US_POOL_IDLE_MS || "120000", 10));
@@ -28,6 +28,8 @@ async function renderPage(context, req, stealthApplied) {
   const page = await context.newPage();
   try {
     await page.goto(req.url, { timeout: 60000, waitUntil: "domcontentloaded" });
+    // Cloudflare 5秒盾自动过（无头也能过：等 challenge JS + cf_clearance cookie）
+    await waitCloudflare(page, context).catch(() => {});
     if (req.js) await page.evaluate(req.js);
     if (req.remove_overlays) await dismissOverlays(page);
     await runActions(page, req.actions);
