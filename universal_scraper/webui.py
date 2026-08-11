@@ -168,9 +168,28 @@ def run_journal_job(job: dict, site: str, since: int, out: str, workers: int, wi
             _job_error(job, f"{type(e).__name__}: {e}")
 
 
+def _job_heartbeat(job: dict, key: str = "配置生成中"):
+    """AI 生成配置/任务执行期间的心跳：避免页面长时间无输出让用户以为卡死。"""
+    t0 = time.time()
+    last_n = len(job.get("messages") or [])
+    while True:
+        time.sleep(25)
+        with JOBS_LOCK:
+            if job.get("status") not in ("running", ""):
+                return
+            n = len(job.get("messages") or [])
+        if n == last_n:
+            _job_log(job, f"⏳ 仍在{key}（已等待 {int(time.time() - t0)} 秒）…")
+            last_n = n + 1
+        else:
+            last_n = n
+            t0 = time.time()
+
+
 def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie="",
                   config=None, name="", task_dir=""):
     job["task_dir"] = task_dir or ""
+    threading.Thread(target=_job_heartbeat, args=(job, "AI 生成配置/执行中"), daemon=True).start()
     try:
         if config:
             from .auto import run_with_config

@@ -1576,6 +1576,55 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
         return {}
 
 
+def _preflight_and_rescue(cfg: dict, description: str = "", log=None) -> dict:
+    """入口预检 + 候选救援（治本：AI 选错入口时自动换可用入口，而不是反复改选择器）。"""
+    su = cfg.get("start_urls") or []
+    if not su:
+        return cfg
+    try:
+        from .sites import fetch_html
+        good = []
+        bad = []
+        for u in su[:3]:
+            try:
+                res = fetch_html(u, timeout=15, allow_html_404=False)
+                ok = bool(res.get("ok")) and int(res.get("status") or 0) in (200, 201, 206)
+                html = res.get("html") or ""
+                if ok and len(html.strip()) >= 200:
+                    good.append(u)
+                else:
+                    bad.append((u, "HTTP %s 内容 %d" % (res.get("status"), len(html))))
+            except Exception as e:
+                bad.append((u, str(e)[:60]))
+        if log:
+            if good:
+                log("🩺 入口预检：%d/%d 可用%s" % (len(good), len(su[:3]),
+                    ("（失效: %s %s）" % (bad[0][0][:50], bad[0][1])) if bad else ""))
+            else:
+                log("🩺 入口预检：全部失效（%s），尝试候选救援…" % "；".join("%s %s" % (u[:40], m) for u, m in bad[:3]))
+        if good:
+            cfg["start_urls"] = good + [u for u in su if u not in good][:3]
+            return cfg
+        try:
+            from .precise_auto import _entry_candidates
+            p = _entry_candidates(description, su[0], log=log)
+            cand_url = p.get("url") or ""
+            if cand_url and cand_url != su[0]:
+                cfg["start_urls"] = [cand_url] + su[:3]
+                if log:
+                    log("✅ 候选入口已替换: %s" % cand_url[:80])
+            elif log:
+                log("⚠️ 候选救援未找到更优入口，保留原入口（依赖自修复）")
+        except Exception as e:
+            if log:
+                log("⚠️ 候选救援失败: %s" % e)
+        return cfg
+    except Exception as e:
+        if log:
+            log("⚠️ 入口预检不可用: %s" % e)
+        return cfg
+
+
 def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
               log_cb=None, round_timeout: Optional[int] = None,
               proxy: Optional[str] = None,
@@ -1621,6 +1670,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         if _fast.get("done"):
             return _fast
         cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
+        # 🩺 入口预检：AI 生成入口后先探测可用性，失效则候选救援（治本：防 404/停更页空转）
+        try:
+            cfg = _preflight_and_rescue(cfg, description, log=log)
+        except Exception as _e:
+            log(f"⚠️ 入口预检异常：{_e}")
         try:
             (task_dir / "config.json").write_text(
                 json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1771,6 +1825,18 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     break
 
         if round_i < rounds:
+            # 🩺 首轮失败先换候选入口（不急着让 LLM 改选择器——入口错改选择器无用）
+            if round_i == 1 and not _llm_ev_tried:
+                try:
+                    _old_su = list(cfg.get("start_urls") or [])
+                    cfg = _preflight_and_rescue(cfg, description, log=log)
+                    if cfg.get("start_urls") != _old_su:
+                        log("🔁 入口已替换，下一轮用新入口重跑")
+                        (task_dir / "config.json").write_text(
+                            json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+                        continue
+                except Exception as _e:
+                    log(f"⚠️ 失败轮入口救援异常：{_e}")
             log(f"⚠️ 第 {round_i} 轮 0 条/报错，AI 正在自修复...")
             _blocks = (result or {}).get("block_stats") or {}
             _bhint = ""
@@ -2084,6 +2150,18 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                     break
 
         if round_i < rounds:
+            # 🩺 首轮失败先换候选入口（不急着让 LLM 改选择器——入口错改选择器无用）
+            if round_i == 1 and not _llm_ev_tried:
+                try:
+                    _old_su = list(cfg.get("start_urls") or [])
+                    cfg = _preflight_and_rescue(cfg, description, log=log)
+                    if cfg.get("start_urls") != _old_su:
+                        log("🔁 入口已替换，下一轮用新入口重跑")
+                        (task_dir / "config.json").write_text(
+                            json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+                        continue
+                except Exception as _e:
+                    log(f"⚠️ 失败轮入口救援异常：{_e}")
             log(f"⚠️ 第 {round_i} 轮 0 条/报错，AI 正在自修复...")
             fix_messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},

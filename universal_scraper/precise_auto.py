@@ -387,7 +387,9 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
     det = next((o.get("data") or {}) for o in objs if o.get("type") == "detect") or {}
     status = det.get("httpStatus")
     text_len = int(det.get("textLen") or 0)
-    waf = status in (403, 412, 429) or (status == 200 and text_len < 300)
+    # 修复：status 非 2xx（含 None/0=连接失败）一律视为不可用，否则连不上的地址被误判"可用"
+    ok_status = status in (200, 201, 206)
+    waf = (not ok_status) or (ok_status and text_len < 300)
     if not waf:
         det["_url"] = url
         if log:
