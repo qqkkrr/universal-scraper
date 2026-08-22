@@ -12,6 +12,7 @@ universal-scraper/
 │   ├── engine.py           # 执行引擎（列表→流水线→详情→下载→导出）
 │   ├── core.py             # HttpClient(urllib) + RequestsClient(连接池) + 导出
 │   ├── fetchers.py         # 4 种取数器：http_json / http_html / browser_script / browser
+│   └── modules/fetchers.py # v3 取数器：http / bridge / browser / scrapling(可选·过Cloudflare)
 │   ├── selectors.py        # JSON路径 / CSS(lxml) / XPath / 正则
 │   ├── antibot.py          # 反爬四级方案（ddddocr/滑块/2captcha/人机）
 │   ├── middleware.py       # 中间件钩子（request/response/data/error）

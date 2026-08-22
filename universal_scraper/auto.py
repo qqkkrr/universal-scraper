@@ -36,7 +36,7 @@ v3 任务包 config.json 结构（字段含义）：
   "start_urls": ["入口网址(必须 http/https)"],
   "queue": {"max_depth": 3, "max_requests": 100, "max_concurrency": 2},
   "source": {
-    "type": "http",              // http=普通请求；browser=浏览器渲染(JS页面/需要登录后DOM)
+    "type": "http",              // http=普通请求；browser=浏览器渲染(JS页面/需要登录后DOM)；scrapling=可选反爬取数器(过 Cloudflare/WAF，需已装 scrapling[fetchers])
     "query": {"参数": "值"},       // 可选固定 URL 参数
     "headers": {"可选": "自定义请求头"},
     "actions": [{"type":"click","selector":"#more"}]   // 仅 browser：点击/输入/滚动等
@@ -171,6 +171,7 @@ v3 任务包 config.json 结构（字段含义）：
   用户在弹窗里：先过滑块，再扫码/账号登录；工具自动继续并保存会话。
 - **大众点评列表页如被风控需要住宅代理**：只有用户明确提供了真实代理时才在 anti_bot.proxy 里填写；**不要写 "host:port" 之类的示例占位符**（会导致请求报错）。用户没给代理就不配置 proxy。
 - 图片验证码：anti_bot 加 "captcha":{"strategy":"auto"}（自动识别，失败则人工兜底）。
+- **Cloudflare/WAF 拦截（非登录类）**：可优先 source.type 用 "scrapling"（可选依赖，需已安装：python3 -m pip install "scrapling[fetchers]"）。scrapling 用 curl_cffi TLS 指纹伪装，比裸 http 更不易被 403；若还过不了，加 "stealthy": true（需另装 camoufox：python3 -m scrapling install）。工具未装 scrapling 时会自动降级为浏览器模式，不会空转。
 - **CDP 直连真实浏览器（强风控站的王炸）**：如果用户说"已登录/用我自己的浏览器"，source.type 用 browser 并加 "cdp":"http://127.0.0.1:9222"（用户需先开 Chrome：退出 Chrome 后执行 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=9222 并登录目标站）。CDP 模式附着真实浏览器=真实指纹+真实登录态，京东/知乎/微博/小红书/抖音这类站最稳；不要配 login（用户浏览器已登录）。
 - Cloudflare/Turnstile 挑战：工具会自动尝试点击"我不是机器人"复选框并等待 cf_clearance，仍失败才转人工；无需额外配置。
 - **强风控 SPA（小红书/抖音/知乎/微博等，数据全靠加密接口）**：source.type 用 browser + 登录/CDP，并加 "record_from":"capture_all" 与 "capture_all":true——工具会**自动捕获页面上所有 JSON 接口响应**（不用预先知道接口名），任务结束后记录在 {_api_url, data}，再由 LLM/解析器挑字段。比硬逆向签名省事得多。
@@ -262,7 +263,7 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     cfg.setdefault("parsers", {})
     # source.type 规范化
     st = cfg["source"].get("type", "http")
-    if st not in ("http", "browser", "bridge"):
+    if st not in ("http", "browser", "bridge", "scrapling"):
         cfg["source"]["type"] = "http"
     # storage.type 规范化
     st2 = cfg["storage"].get("type", "jsonl")

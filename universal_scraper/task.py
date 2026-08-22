@@ -71,8 +71,9 @@ class Task:
         cls = self._find_class(mod, BaseFetcher, "Fetcher")
         if cls:
             return cls
-        from .modules.fetchers import HttpFetcher, BridgeFetcher, BrowserFetcher
-        m = {"http": HttpFetcher, "bridge": BridgeFetcher, "browser": BrowserFetcher}
+        from .modules.fetchers import HttpFetcher, BridgeFetcher, BrowserFetcher, ScraplingFetcher
+        m = {"http": HttpFetcher, "bridge": BridgeFetcher, "browser": BrowserFetcher,
+             "scrapling": ScraplingFetcher}
         return m.get(self.config.get("source", {}).get("type", "http"), HttpFetcher)
 
     def get_parsers(self) -> Dict[str, Type[BaseParser]]:

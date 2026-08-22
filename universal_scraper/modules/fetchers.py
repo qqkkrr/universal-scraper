@@ -226,6 +226,69 @@ class HttpFetcher(BaseFetcher):
                 return 0.0
 
 
+class ScraplingFetcher(BaseFetcher):
+    """Scrapling 取数器（可选依赖，懒加载）：curl_cffi 内核 + 可选 StealthyFetcher 过 Cloudflare/WAF。
+
+    任务配置 source: {"type": "scrapling", "stealthy": true|false, "impersonate": "chrome"}
+    - 未安装 scrapling 时：抛 PermanentFetchError，引擎会自动升级到浏览器模式（不空转）
+    - stealthy=true 且已装 camoufox（scrapling install）：StealthyFetcher 自动过 Cloudflare
+    - stealthy 未装 camoufox：自动降级为静态 Fetcher 并给出提示
+    """
+    name = "scrapling"
+
+    def __init__(self, config, task_vars, anti):
+        super().__init__(config, task_vars, anti)
+        self.impersonate = config.get("impersonate") or "chrome"
+        self.stealthy = bool(config.get("stealthy"))
+
+    def fetch(self, req: Request) -> Response:
+        try:
+            from scrapling.fetchers import Fetcher, StealthyFetcher
+        except Exception as e:  # noqa: BLE001 - 未安装 scrapling 时给出明确错误
+            from ..protocols import PermanentFetchError
+            # 注意：PermanentFetchError 第一个参数是 url（不是 message），message 走 detail
+            raise PermanentFetchError(
+                url=req.url, status=0,
+                detail=f"未安装 scrapling（可选反爬取数器）。安装：python3 -m pip install \"scrapling[fetchers]\"；"
+                       f"或忽略此报错，工具会自动改走浏览器模式。详情：{e}") from e
+        headers = dict(req.headers or {})
+        headers.update(self.config.get("headers", {}) or {})
+        proxies = None
+        _px = self.anti.get("proxy") or None
+        if _px:
+            proxies = {"http": _px, "https": _px}
+        kwargs = dict(impersonate=self.impersonate, timeout=30, headers=headers or None,
+                      proxies=proxies, follow_redirects=True)
+        try:
+            if self.stealthy:
+                try:
+                    # 毫秒单位超时；camoufox 未安装会抛 ImportError
+                    r = StealthyFetcher.fetch(req.url, timeout=60000,
+                                              solve_cloudflare=True, network_idle=True)
+                except Exception as _e:  # noqa: BLE001 - 无 camoufox 自动降级静态
+                    log(f"⚠️ scrapling stealthy 不可用（{_e}），降级为静态 Fetcher")
+                    r = Fetcher.get(req.url, **kwargs)
+            else:
+                r = Fetcher.get(req.url, **kwargs)
+        except Exception as e:  # noqa: BLE001
+            from ..protocols import PermanentFetchError
+            raise PermanentFetchError(url=req.url, status=0, detail=f"scrapling 抓取失败: {e}") from e
+        # scrapling 0.4.x 的 Response：正文在 .body(bytes)，.text 属性可能为空，优先 .body
+        _body = getattr(r, "body", None)
+        if not _body:
+            _body = (getattr(r, "text", "") or "").encode("utf-8", "replace")
+        _enc = getattr(r, "encoding", None) or "utf-8"
+        _text = ""
+        try:
+            _html = getattr(r, "html_content", None)
+            _text = str(_html) if _html is not None else _body.decode(_enc, errors="replace")
+        except Exception:
+            _text = _body.decode("utf-8", errors="replace")
+        return Response(request=req, status=int(getattr(r, "status", 0) or 0),
+                        body=_body, text=_text,
+                        url=getattr(r, "url", "") or req.url)
+
+
 class BridgeFetcher(BaseFetcher):
     """桥取数器：调用 Node 桥（过 WAF / 驱动 Vue 等复杂页面），一次性返回整批记录。
 

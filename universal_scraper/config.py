@@ -23,7 +23,7 @@ ALL_STORAGE_TYPES = {"jsonl", "csv", "sqlite", "multi"}
 # 兼容别名（旧代码引用）
 PIPELINE_TYPES = ALL_PIPELINE_TYPES
 V3_ACTION_TYPES = ALL_ACTION_TYPES
-V3_SOURCE_TYPES = {"http", "browser", "bridge"}
+V3_SOURCE_TYPES = {"http", "browser", "bridge", "scrapling"}
 
 
 class ConfigError(ValueError):
