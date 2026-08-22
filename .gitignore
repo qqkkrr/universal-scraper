@@ -27,3 +27,4 @@ challenges/learnspider_results.json
 tests/run500_results.json
 tests/smoke_report.md
 tests/tasks_*.json
+tests/batch_*.jsonl
