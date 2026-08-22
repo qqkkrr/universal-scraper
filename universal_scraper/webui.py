@@ -707,7 +707,7 @@ class Handler(BaseHTTPRequestHandler):
                 # AI 人话指南（小白友好）
                 try:
                     from .auto import human_guide
-                    plan["guide"] = human_guide(desc, plan.get("config") or {}, plan.get("route") or {})
+                    plan["guide"] = human_guide(desc, plan.get("config") or {})
                 except Exception:
                     plan["guide"] = {}
                 # 推荐精配提示：AI 不确定入口 / 数据形态特殊（榜单/图片/PDF/强反爬）
@@ -758,7 +758,7 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                 from .auto import diagnose_failure
                 try:
-                    d = diagnose_failure(desc, cfg, task_dir, log_text)
+                    d = diagnose_failure(desc, cfg, log_text)
                     self._json({"ok": True, **d})
                 except Exception as e:
                     self._json({"error": f"诊断失败: {e}"})

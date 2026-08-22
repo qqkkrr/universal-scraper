@@ -2547,7 +2547,7 @@ def run_auto_cli(description: str, limit: Optional[int] = None) -> Dict[str, Any
         return {"error": f"{type(e).__name__}: {e}", "messages": lines}
 
 
-def human_guide(description: str, cfg: dict, route: dict) -> dict:
+def human_guide(description: str, cfg: dict) -> dict:
     """生成小白友好的人话任务指南（LLM 生成，规则兜底）。"""
     su = (cfg.get("start_urls") or [""])[0]
     src = cfg.get("source", {}) or {}
@@ -2556,7 +2556,6 @@ def human_guide(description: str, cfg: dict, route: dict) -> dict:
     needs_login = bool((src.get("login") or {}).get("enabled"))
     needs_verify = bool((src.get("verify") or {}).get("enabled"))
     needs_cookie = bool((src.get("headers") or {}).get("Cookie"))
-    has_proxy = bool((cfg.get("anti_bot") or {}).get("proxy"))
     is_browser = st in ("browser", "bridge")
     # 从描述猜风险词
     hard_words = ["登录", "验证码", "滑块", "反爬", "淘宝", "大众点评", "抖音", "小红书", "boss", "boss直聘", "携程", "12306", "知网", "需要登录"]
@@ -2605,7 +2604,7 @@ def human_guide(description: str, cfg: dict, route: dict) -> dict:
     }
 
 
-def diagnose_failure(description: str, cfg: dict, task_dir, log_text: str = "") -> dict:
+def diagnose_failure(description: str, cfg: dict, log_text: str = "") -> dict:
     """AI 诊断一次失败/0条运行：给可操作建议。"""
     su = (cfg.get("start_urls") or [""])[0]
     st = ((cfg.get("source") or {}) or {}).get("type", "http")

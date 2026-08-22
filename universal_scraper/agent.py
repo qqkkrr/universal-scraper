@@ -196,7 +196,8 @@ def agent_task(description: str, start_url: str = "", max_steps: int = 12,
     def _stopped():
         try:
             if stop_file and _os.path.exists(stop_file):
-                return bool(str(open(stop_file, encoding="utf-8", errors="replace").read() or "").strip())
+                with open(stop_file, encoding="utf-8", errors="replace") as _f:
+                    return bool(str(_f.read() or "").strip())
         except Exception:
             pass
         return False

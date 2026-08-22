@@ -470,7 +470,7 @@ function renderSolution(d){
   (sol.steps||[]).forEach(st=>{ h+='<li>'+esc(st)+'</li>'; });
   h+='</ol>';
   if(sol.action && sol.action.api){
-    h+='<div style="margin:10px 0"><button class="btn" onclick="runSolutionAction(\''+sol.action.api+'\',\''+String(sol.action.url||'').replace(/\\/g,'\\\\').replace(/\'/g,'\\\'')+'\')">'+esc(sol.action.label||'执行')+'</button>'
+    h+='<div style="margin:10px 0"><button class="btn" data-sol-api="'+esc(sol.action.api)+'" data-sol-url="'+esc(sol.action.url||'')+'" onclick="runSolutionActionFrom(this)">'+esc(sol.action.label||'执行')+'</button>'
       +'<div class="muted" style="font-size:12px;margin-top:6px">'+esc(sol.action.tip||'')+'</div></div>';
   }
   if(sol.resources) h+='<div class="muted" style="font-size:12px">资源：'+esc(sol.resources)+'</div>';
@@ -483,6 +483,12 @@ async function runSolutionAction(api,url){
     const d=await api(api,{method:'POST',body:JSON.stringify({url:url})});
     alert(d && d.ok ? (d.message||'已启动调试 Chrome') : ('失败：'+((d&&d.error)||'未知')));
   }catch(e){ alert('失败：'+e.message); }
+}
+// 从按钮的 data 属性读 api/url（HTML 属性已用 esc() 转义，避免 JS 字符串注入/换行破坏）
+function runSolutionActionFrom(btn){
+  const api=btn.getAttribute('data-sol-api');
+  const url=btn.getAttribute('data-sol-url');
+  runSolutionAction(api,url);
 }
 function renderResult(box,d){
   let html='';
