@@ -1087,11 +1087,13 @@ def parse_github_topics(html: str, url: str) -> List[Dict[str, Any]]:
         return []
     out = []
     for art in doc.cssselect("article.border"):
-        a = art.cssselect("h3 a")
-        if not a:
+        h3 = art.cssselect("h3")
+        if not h3:
             continue
-        name = _re.sub(r"\s+", " ", a[0].text_content()).strip().replace(" / ", "/")
-        href = a[0].get("href") or ""
+        # h3 全文 = owner / name（两个 a + 分隔 span），text_content 一次拿全
+        name = _re.sub(r"\s+", " ", h3[0].text_content()).strip().replace(" / ", "/")
+        a = art.cssselect("h3 a")
+        href = a[0].get("href") if a else ""
         desc = _css_text(art, "p")
         # star 数：Topics 页是按钮文本 "Star 171k"（无 stargazers 链接），先精确再兜底
         stars = _css_text(art, "a[aria-label*='stargazers']") or ""
@@ -1102,7 +1104,7 @@ def parse_github_topics(html: str, url: str) -> List[Dict[str, Any]]:
                 stars = _m.group(1)
         lang = _css_text(art, "[itemprop='programmingLanguage']")
         out.append({"repo": name, "url": "https://github.com" + href if href.startswith("/") else href,
-                    "description": desc[:200], "stars": stars.strip(), "language": lang,
+                    "description": desc[:200], "stars": stars.strip().replace("Star ", ""), "language": lang,
                     "_site": "github_topics"})
         if len(out) >= 30:
             break

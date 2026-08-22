@@ -1665,6 +1665,29 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
 LEARNED_DIR = ROOT / "configs" / "learned"
 
 
+def _drop_learned_by_start_url(start_url: str, reason: str = "", log=None) -> bool:
+    """删除 start_url 对应的已学配置（网站改版/意图不符/质量下降时）。
+    返回是否删除了文件。多处共用，避免复制粘贴。"""
+    if not start_url:
+        return False
+    try:
+        from pathlib import Path as _P
+        for _lf in (_P(LEARNED_DIR)).glob("*.json"):
+            try:
+                _d = json.loads(_lf.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            _su = (_d.get("config") or {}).get("start_urls") or []
+            if _su and _su[0] == start_url:
+                _lf.unlink(missing_ok=True)
+                if log:
+                    log(f"🧠 已删除已学配置（{reason or '网站可能改版'}），下次重新学习")
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _save_learned(cfg: dict, description: str, log=None) -> None:
     """任务成功后自动沉淀为「已学精配」：同站下次任务直接复用，不再让 AI 重新猜。
     只保存可复用的配置（start_urls/source/rules/parsers/pipelines/detail），跳过 intent 等一次性字段。"""
@@ -1980,17 +2003,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
             # 已学配置产生的内容不是用户要的 → 该配置是坏的，立即删掉（防止每轮都复用坏配置空转）
             if _learned:
-                try:
-                    from pathlib import Path as _P2
-                    for _lf in (_P2(ROOT / "configs" / "learned")).glob("*.json"):
-                        _d = json.loads(_lf.read_text(encoding="utf-8"))
-                        _su = (_d.get("config") or {}).get("start_urls") or []
-                        if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
-                            _lf.unlink(missing_ok=True)
-                            log(f"🧠 已学配置意图校验失败（{_intent_bad[:50]}），已删除，下次重新学习")
-                            break
-                except Exception:
-                    pass
+                _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
+                                           reason=f"意图校验失败：{_intent_bad[:50]}", log=log)
         if _miss:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
@@ -2029,17 +2043,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             if round_i == 1 and not _llm_ev_tried:
                 # 已学配置首轮失败 → 网站可能改版：删除 learned，下轮 AI 重新生成（防一直用坏配置）
                 if _learned:
-                    try:
-                        from pathlib import Path as _P2
-                        for _lf in (_P2(ROOT / "configs" / "learned")).glob("*.json"):
-                            _d = json.loads(_lf.read_text(encoding="utf-8"))
-                            _su = (_d.get("config") or {}).get("start_urls") or []
-                            if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
-                                _lf.unlink(missing_ok=True)
-                                log(f"🧠 已学配置失效（网站可能改版），已删除，将重新 AI 生成")
-                                break
-                    except Exception:
-                        pass
+                    _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
+                                               reason="首轮失败，网站可能改版", log=log)
                 try:
                     _old_su = list(cfg.get("start_urls") or [])
                     cfg = _preflight_and_rescue(cfg, description, log=log)
@@ -2212,15 +2217,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             _low = [c for c in verify["checks"] if c.get("name", "").startswith("字段完整率")
                     and not c.get("pass", True)]
             if len(_low) >= 2:
-                try:
-                    for _lf in (Path(ROOT / "configs" / "learned")).glob("*.json"):
-                        _su = ((json.loads(_lf.read_text(encoding="utf-8")) or {}).get("config") or {}).get("start_urls") or []
-                        if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
-                            _lf.unlink(missing_ok=True)
-                            log("🧠 已学配置质量下降（字段完整率偏低），已删除，下次将重新学习")
-                            break
-                except Exception:
-                    pass
+                _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
+                                           reason="质量下降（字段完整率偏低）", log=log)
         try:
             _save_learned(cfg, description, log=log)
         except Exception:
@@ -2362,17 +2360,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
             # 已学配置产生的内容不是用户要的 → 该配置是坏的，立即删掉（防止每轮都复用坏配置空转）
             if _learned:
-                try:
-                    from pathlib import Path as _P2
-                    for _lf in (_P2(ROOT / "configs" / "learned")).glob("*.json"):
-                        _d = json.loads(_lf.read_text(encoding="utf-8"))
-                        _su = (_d.get("config") or {}).get("start_urls") or []
-                        if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
-                            _lf.unlink(missing_ok=True)
-                            log(f"🧠 已学配置意图校验失败（{_intent_bad[:50]}），已删除，下次重新学习")
-                            break
-                except Exception:
-                    pass
+                _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
+                                           reason=f"意图校验失败：{_intent_bad[:50]}", log=log)
         if _miss:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
@@ -2407,17 +2396,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             if round_i == 1 and not _llm_ev_tried:
                 # 已学配置首轮失败 → 网站可能改版：删除 learned，下轮 AI 重新生成（防一直用坏配置）
                 if _learned:
-                    try:
-                        from pathlib import Path as _P2
-                        for _lf in (_P2(ROOT / "configs" / "learned")).glob("*.json"):
-                            _d = json.loads(_lf.read_text(encoding="utf-8"))
-                            _su = (_d.get("config") or {}).get("start_urls") or []
-                            if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
-                                _lf.unlink(missing_ok=True)
-                                log(f"🧠 已学配置失效（网站可能改版），已删除，将重新 AI 生成")
-                                break
-                    except Exception:
-                        pass
+                    _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
+                                               reason="首轮失败，网站可能改版", log=log)
                 try:
                     _old_su = list(cfg.get("start_urls") or [])
                     cfg = _preflight_and_rescue(cfg, description, log=log)
@@ -2536,15 +2516,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             _low = [c for c in verify["checks"] if c.get("name", "").startswith("字段完整率")
                     and not c.get("pass", True)]
             if len(_low) >= 2:
-                try:
-                    for _lf in (Path(ROOT / "configs" / "learned")).glob("*.json"):
-                        _su = ((json.loads(_lf.read_text(encoding="utf-8")) or {}).get("config") or {}).get("start_urls") or []
-                        if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
-                            _lf.unlink(missing_ok=True)
-                            log("🧠 已学配置质量下降（字段完整率偏低），已删除，下次将重新学习")
-                            break
-                except Exception:
-                    pass
+                _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
+                                           reason="质量下降（字段完整率偏低）", log=log)
         try:
             _save_learned(cfg, description, log=log)
         except Exception:
