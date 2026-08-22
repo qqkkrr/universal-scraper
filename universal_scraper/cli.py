@@ -189,6 +189,10 @@ def main() -> int:
     jp.add_argument("--no-meta", action="store_true", help="跳过摘要/关键词拉取（更快）")
 
     pr_p = sub.add_parser("proxy", help="🔄 免费代理池自动构建（抓取+验证+入库）")
+    rp_p = sub.add_parser("report", help="📊 爬取CSV → 自动可视化报告（概览/统计/分组/分布图）")
+    rp_p.add_argument("csv", help="输入 CSV 文件")
+    rp_p.add_argument("--group", default=None, help="分组列名（可选）")
+    rp_p.add_argument("--out", default="report.html", help="输出 HTML 报告路径")
     pr_p.add_argument("--refresh", action="store_true", help="抓取公开源代理并验证")
     pr_p.add_argument("--out", default="outputs/proxies.txt", help="输出文件")
     pr_p.add_argument("--workers", type=int, default=30)
@@ -410,10 +414,32 @@ def main() -> int:
         print("  us llm --vision qwen-vl-max        # 视觉模型（看截图/验证码）")
         return 0
 
-        from .proxy_fetch import refresh as _pf_refresh
-        r = _pf_refresh(out=args.out, workers=args.workers)
-        print(json.dumps(r, ensure_ascii=False))
-        return 0 if r.get("ok", 0) > 0 else 1
+    if args.cmd == "proxy":
+        if args.refresh:
+            from .proxy_fetch import refresh as _pf_refresh
+            r = _pf_refresh(out=args.out, workers=args.workers)
+            print(json.dumps(r, ensure_ascii=False))
+            return 0 if r.get("ok", 0) > 0 else 1
+        # 无 --refresh：显示现有代理池（不抓取）
+        from pathlib import Path as _PP
+        p = _PP(args.out)
+        if p.exists():
+            lines = [l for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+            print(json.dumps({"ok": len(lines), "file": str(p.resolve())}))
+            return 0 if lines else 1
+        print(json.dumps({"ok": 0, "file": str(p), "msg": "代理池不存在，请用 --refresh 构建"}))
+        return 1
+
+    if args.cmd == "report":
+        from .report import generate as _report_gen
+        try:
+            r = _report_gen(args.csv, args.group, args.out)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ 报告生成失败: {e}", file=sys.stderr)
+            print("用法: us report <csv> [--group 列名] [--out 报告.html]", file=sys.stderr)
+            return 1
+        print(f"✅ 报告已生成：{r['report']}（{r['rows']}行 / {r['cols']}列 / {r['numeric']}数值列 / {r['groups']}组）")
+        return 0
 
     if args.cmd == "cookies":
         from .core import smart_decode  # noqa
