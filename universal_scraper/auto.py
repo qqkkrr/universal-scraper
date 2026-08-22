@@ -1978,6 +1978,19 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                 log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
                 break
             log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
+            # 已学配置产生的内容不是用户要的 → 该配置是坏的，立即删掉（防止每轮都复用坏配置空转）
+            if _learned:
+                try:
+                    from pathlib import Path as _P2
+                    for _lf in (_P2(ROOT / "configs" / "learned")).glob("*.json"):
+                        _d = json.loads(_lf.read_text(encoding="utf-8"))
+                        _su = (_d.get("config") or {}).get("start_urls") or []
+                        if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
+                            _lf.unlink(missing_ok=True)
+                            log(f"🧠 已学配置意图校验失败（{_intent_bad[:50]}），已删除，下次重新学习")
+                            break
+                except Exception:
+                    pass
         if _miss:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
@@ -2170,6 +2183,12 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     files = _dr["files"]
                     total = min(int(_dr["total"] or 0), _lim)
                     real = sample
+                    # 结果同步：精配路径更新了 total/files，但 last_result 未同步会导致
+                    # WebUI 显示「0 条」而 summary 却报成功——必须回写
+                    last_result = dict(last_result or {})
+                    last_result["total"] = total
+                    if files:
+                        last_result["files"] = files
                     log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
                 elif _dr.get("error"):
                     log(f"⚠️ 精配解析[{_site}]失败：{_dr['error']}")
@@ -2341,6 +2360,19 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                 log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
                 break
             log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
+            # 已学配置产生的内容不是用户要的 → 该配置是坏的，立即删掉（防止每轮都复用坏配置空转）
+            if _learned:
+                try:
+                    from pathlib import Path as _P2
+                    for _lf in (_P2(ROOT / "configs" / "learned")).glob("*.json"):
+                        _d = json.loads(_lf.read_text(encoding="utf-8"))
+                        _su = (_d.get("config") or {}).get("start_urls") or []
+                        if _su and _su[0] == (cfg.get("start_urls") or [""])[0]:
+                            _lf.unlink(missing_ok=True)
+                            log(f"🧠 已学配置意图校验失败（{_intent_bad[:50]}），已删除，下次重新学习")
+                            break
+                except Exception:
+                    pass
         if _miss:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
@@ -2454,6 +2486,12 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                     files = _dr["files"]
                     total = min(int(_dr["total"] or 0), _lim)
                     real = sample
+                    # 结果同步：精配路径更新了 total/files，但 last_result 未同步会导致
+                    # WebUI 显示「0 条」而 summary 却报成功——必须回写
+                    last_result = dict(last_result or {})
+                    last_result["total"] = total
+                    if files:
+                        last_result["files"] = files
                     log(f"🏆 精配解析[{_site}]覆盖：{total} 条（字段干净）")
                 elif _dr.get("error"):
                     log(f"⚠️ 精配解析[{_site}]失败：{_dr['error']}")

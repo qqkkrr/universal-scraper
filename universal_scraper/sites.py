@@ -1077,6 +1077,46 @@ register("github_trending", match_github_trending, parse_github_trending,
          desc="GitHub Trending：每周/每日热门仓库（SSR）")
 
 
+# ---------- GitHub Topics（SSR，article.border 卡片结构） ----------
+def parse_github_topics(html: str, url: str) -> List[Dict[str, Any]]:
+    import re as _re
+    from lxml import html as lh
+    try:
+        doc = lh.fromstring(html)
+    except Exception:
+        return []
+    out = []
+    for art in doc.cssselect("article.border"):
+        a = art.cssselect("h3 a")
+        if not a:
+            continue
+        name = _re.sub(r"\s+", " ", a[0].text_content()).strip().replace(" / ", "/")
+        href = a[0].get("href") or ""
+        desc = _css_text(art, "p")
+        # star 数：Topics 页是按钮文本 "Star 171k"（无 stargazers 链接），先精确再兜底
+        stars = _css_text(art, "a[aria-label*='stargazers']") or ""
+        if not stars:
+            _txt = _re.sub(r"\s+", " ", art.text_content())
+            _m = _re.search(r"Star (\d+(?:\.\d+)?k?)", _txt)
+            if _m:
+                stars = _m.group(1)
+        lang = _css_text(art, "[itemprop='programmingLanguage']")
+        out.append({"repo": name, "url": "https://github.com" + href if href.startswith("/") else href,
+                    "description": desc[:200], "stars": stars.strip(), "language": lang,
+                    "_site": "github_topics"})
+        if len(out) >= 30:
+            break
+    return out
+
+
+def match_github_topics(url: str) -> bool:
+    return "github.com/topics/" in url
+
+
+register("github_topics", match_github_topics, parse_github_topics,
+         desc="GitHub Topics：按主题浏览热门仓库（SSR，article.border）")
+
+
 # ---------- arXiv（Atom API / list HTML） ----------
 def parse_arxiv(html: str, url: str) -> List[Dict[str, Any]]:
     import xml.etree.ElementTree as ET
