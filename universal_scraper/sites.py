@@ -98,6 +98,7 @@ _DESC_ROUTE = [
     ("ajcass", ("社科院期刊", "期刊系", "ajcass"), ""),
     ("weathercn", ("中国天气", "天气", "天气预报", "实时气温"), ""),
     ("github_trending", ("github trending", "github热榜", "热门仓库"), ""),
+    ("stackoverflow", ("stack overflow", "stackoverflow", "stackoverflow.com", "stack exchange"), "https://api.stackexchange.com/2.3/questions?tagged={TAG}&fromdate=EPOCH24H&sort=creation&order=desc&site=stackoverflow&pagesize=20&filter=default"),
     ("arxiv", ("arxiv", "论文预印本", "每日论文"), ""),
     ("leetcode", ("leetcode", "力扣", "题库"), ""),
     ("douban", ("豆瓣", "豆瓣电影", "豆瓣读书"), ""),
@@ -131,9 +132,23 @@ def seed_url_for(desc: str) -> str:
                 from datetime import datetime, timedelta, timezone
                 seed = seed.replace("NOW24H",
                                     (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S"))
+            if "EPOCH24H" in seed:
+                # Stack Exchange API 要 Unix 秒，不是 ISO 时间
+                from datetime import datetime, timedelta, timezone as _tz
+                seed = seed.replace("EPOCH24H",
+                                    str(int((datetime.now(_tz.utc) - timedelta(hours=24)).timestamp())))
             elif "TODAY" in seed:
                 from datetime import date
                 seed = seed.replace("TODAY", date.today().strftime("%Y-%m-%dT%H:%M:%S"))
+            if "{TAG}" in seed:
+                # 从描述抽标签（如 标签"python" / tagged=python），抽不到就删掉 tagged 参数
+                import re as _re, urllib.parse as _up
+                _m = _re.search('(?:标签|tagged|tag)[:=：\\s]*["\'“”]?([A-Za-z0-9][A-Za-z0-9\\-+#.]{0,30})', d)
+                _tag = _m.group(1).strip() if _m else ""
+                if _tag:
+                    seed = seed.replace("{TAG}", _up.quote(_tag))
+                else:
+                    seed = seed.replace("tagged={TAG}&", "")
             return seed
     return ""
 
@@ -1075,6 +1090,39 @@ def match_github_trending(url: str) -> bool:
 
 register("github_trending", match_github_trending, parse_github_trending,
          desc="GitHub Trending：每周/每日热门仓库（SSR）")
+
+
+# ---------- Stack Overflow（公开 API api.stackexchange.com，免 Cloudflare） ----------
+def parse_stackoverflow(html: str, url: str) -> List[Dict[str, Any]]:
+    try:
+        data = json.loads(html)
+    except Exception:
+        return []
+    items = data.get("items") or []
+    out = []
+    for it in items[:30]:
+        out.append({
+            "title": (it.get("title") or "").strip(),
+            "url": it.get("link") or "",
+            "score": it.get("score"),
+            "answer_count": it.get("answer_count"),
+            "tags": ",".join(it.get("tags") or [])[:100],
+            "creation_date": it.get("creation_date") or "",
+            "_site": "stackoverflow",
+        })
+    # 24h 新问题里按分数排序（任务常要"高分问题"）
+    out.sort(key=lambda r: r.get("score") if isinstance(r.get("score"), (int, float)) else -1e9, reverse=True)
+    return out
+
+
+def match_stackoverflow(url: str) -> bool:
+    return "api.stackexchange.com" in url or "stackoverflow.com" in url
+
+
+register("stackoverflow", match_stackoverflow, parse_stackoverflow,
+         desc="Stack Overflow：问答（公开 API api.stackexchange.com，绕 Cloudflare）",
+         keywords=("stack overflow", "stackoverflow", "stack exchange"),
+         seed_url="https://api.stackexchange.com/2.3/questions?tagged={TAG}&fromdate=EPOCH24H&sort=creation&order=desc&site=stackoverflow&pagesize=20&filter=default")
 
 
 # ---------- GitHub Topics（SSR，article.border 卡片结构） ----------
