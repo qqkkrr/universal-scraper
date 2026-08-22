@@ -61,3 +61,33 @@ def test_report_name_sanitized(srv):
 def test_report_empty_content_rejected(srv):
     code, d = _post(srv, "/api/report", {"name": "x", "content": ""})
     assert not d.get("ok")
+
+
+def test_auto_start_config_without_taskdir_safe(srv):
+    """config 给了但 task_dir 缺失：必须安全推导到 tasks/ 内，不得写到服务 CWD/项目根。"""
+    import hashlib, time, shutil
+    desc = "测试安全推导 task_dir 的位置"
+    h = hashlib.md5(desc.encode()).hexdigest()[:10]
+    name = f"auto_{h}"
+    cfg = {"name": name, "start_urls": ["http://127.0.0.1:9/x"], "source": {"type": "http"},
+           "rules": [{"match": "contains", "pattern": "x", "parser": "default"}],
+           "parsers": {"default": {"type": "html", "row_css": ".a", "fields": {"t": {"css": ".t::text"}}}}}
+    code, d = _post(srv, "/api/auto/start", {"description": desc, "config": cfg, "name": name})
+    assert code == 200 and d.get("job"), d
+    jid = d["job"]
+    td = ROOT / "tasks" / name
+    ok = False
+    for _ in range(30):
+        if (td / "config.json").exists():
+            ok = True
+            break
+        time.sleep(0.5)
+    assert ok, "config 应写入 tasks/<name>/config.json"
+    # 原 bug：无 task_dir 时 run_with_config 写到 CWD（项目根）——必须不存在
+    assert not (ROOT / "config.json").exists(), "config 不得写到项目根（CWD）"
+    # 停掉后台任务并清理
+    try:
+        _post(srv, "/api/job/stop", {"job": jid})
+    except Exception:
+        pass
+    shutil.rmtree(td, ignore_errors=True)

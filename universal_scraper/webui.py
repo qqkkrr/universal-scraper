@@ -771,12 +771,16 @@ class Handler(BaseHTTPRequestHandler):
                 config = body.get("config")
                 name = str(body.get("name", "") or "").strip()
                 task_dir = str(body.get("task_dir", "") or "").strip()
-                if config and name and task_dir:
+                if config:
                     # 安全：task_dir 只允许 tasks/ 下（防路径穿越写任意文件，分享模式=远程RCE风险）
                     import re as _re
-                    if not _re.fullmatch(r"[A-Za-z0-9_\-]+", name):
-                        self._json({"error": "非法任务名（仅允许字母数字_-）"})
-                        return
+                    import hashlib as _hl
+                    if not name or not _re.fullmatch(r"[A-Za-z0-9_\-]+", name):
+                        # 缺 name / 非法 name：用描述哈希安全推导（绝不落到 CWD/根目录）
+                        name = f"auto_{_hl.md5(desc.encode()).hexdigest()[:10]}"
+                    if not task_dir:
+                        # 缺 task_dir：安全推导到 tasks/auto_<md5>，防止 run_with_config 写到 CWD
+                        task_dir = str((ROOT / "tasks" / name).resolve())
                     _td = Path(task_dir)
                     if not _td.is_absolute():
                         _td = ROOT / _td
