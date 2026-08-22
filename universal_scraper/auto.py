@@ -2126,7 +2126,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                 _u0 = (cfg.get("start_urls") or [""])[0]
                 _cdp0 = str(_src_now.get("cdp") or "")
                 ag = agent_task(description, start_url=_u0, max_steps=10,
-                                cdp=_cdp0, limit=limit, log_cb=log)
+                                cdp=_cdp0, limit=limit, log_cb=log,
+                                stop_file=str(Path(task_dir) / ".stop"))
                 if ag.get("items"):
                     sample = ag["items"][:5]
                     total = ag["total"]
@@ -2216,6 +2217,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     return {
         "name": name,
         "config": cfg,
+        "task_dir": str(task_dir),
         "result": last_result,
         "log": last_log[-3000:],
         "sample": sample,
@@ -2543,3 +2545,91 @@ def run_auto_cli(description: str, limit: Optional[int] = None) -> Dict[str, Any
         return out
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}", "messages": lines}
+
+
+def human_guide(description: str, cfg: dict, route: dict) -> dict:
+    """生成小白友好的人话任务指南（LLM 生成，规则兜底）。"""
+    su = (cfg.get("start_urls") or [""])[0]
+    src = cfg.get("source", {}) or {}
+    st = src.get("type", "http")
+    # 规则侧信息
+    needs_login = bool((src.get("login") or {}).get("enabled"))
+    needs_verify = bool((src.get("verify") or {}).get("enabled"))
+    needs_cookie = bool((src.get("headers") or {}).get("Cookie"))
+    has_proxy = bool((cfg.get("anti_bot") or {}).get("proxy"))
+    is_browser = st in ("browser", "bridge")
+    # 从描述猜风险词
+    hard_words = ["登录", "验证码", "滑块", "反爬", "淘宝", "大众点评", "抖音", "小红书", "boss", "boss直聘", "携程", "12306", "知网", "需要登录"]
+    risk_hits = [w for w in hard_words if w in description]
+    # 拼一个给 LLM 的提示
+    prompt = f"""请用【大白话】给一个不懂技术的用户讲解下面这个爬虫任务，输出 JSON：
+{{"一句话说明": "这个任务要做什么（人话，30字内）",
+"预计能拿到": "能抓到的内容/字段（人话）",
+"你需要准备": "用户需要提前做什么（如：登录网站/准备cookie/手机验证码）——没有则写'什么都不用准备'",
+"可能遇到": "可能的问题（验证码/登录墙/反爬/数据要翻页等），以及应对",
+"耗时估计": "大致耗时（如'约1-3分钟'）",
+"注意事项": "一条最重要的提醒"}}
+
+任务描述：{description}
+技术方案概要：{'浏览器（可能需要人工登录/验证）' if needs_login or needs_verify else ('浏览器渲染JS页面' if is_browser else 'HTTP直接抓取')}
+入口：{su}
+{"检测到可能需要登录/验证的词：" + ",".join(risk_hits) if risk_hits else ""}
+
+只输出 JSON，不要多余文字。"""
+    try:
+        raw = _llm_chat([{"role": "user", "content": prompt}], timeout=60)
+        g = _extract_json(raw)
+        if isinstance(g, dict) and g.get("一句话说明"):
+            return {k: str(v)[:300] for k, v in g.items()}
+    except Exception:
+        pass
+    # 规则兜底
+    prep = []
+    if needs_login: prep.append("需要登录该网站（会弹出浏览器窗口，登录一次即可）")
+    if needs_verify: prep.append("可能弹验证码/滑块，需要你手动通过")
+    if needs_cookie: prep.append("已带 Cookie 直抓，无需额外操作")
+    if not prep: prep.append("什么都不用准备，直接开始")
+    risk = []
+    if needs_login: risk.append("登录墙（已自动处理，只需你登录一次）")
+    if needs_verify: risk.append("验证码/滑块（弹出时手动通过）")
+    if risk_hits: risk.append(f"检测到敏感词：{'、'.join(risk_hits[:3])}，可能需人工配合")
+    if not risk: risk.append("公开页面，一般不会遇到障碍")
+    _desc_short = (description[:60] if description else "目标内容")
+    return {
+        "一句话说明": _desc_short,
+        "预计能拿到": "按你描述的内容结构化导出（CSV/Excel），结果文件在 outputs 目录",
+        "你需要准备": "；".join(prep),
+        "可能遇到": "；".join(risk),
+        "耗时估计": "约 1-5 分钟（视数据量）",
+        "注意事项": "先看「任务理解」是否准确，确认后再开始；入口网址：" + str(su)[:80],
+    }
+
+
+def diagnose_failure(description: str, cfg: dict, task_dir, log_text: str = "") -> dict:
+    """AI 诊断一次失败/0条运行：给可操作建议。"""
+    su = (cfg.get("start_urls") or [""])[0]
+    st = ((cfg.get("source") or {}) or {}).get("type", "http")
+    log_tail = log_text[-2000:]
+    prompt = f"""一个爬虫任务失败了（或抓取到0条）。请诊断原因并给出【小白能照做】的解决建议，输出 JSON：
+{{"可能原因": "最可能的原因（人话，50字内）",
+"解决办法": "具体可操作步骤（1-3条，每条一句话，含'点哪里/填什么'）",
+"需要人工吗": "是/否（是否必须用户动手，如登录/验证码）",
+"建议下一步": "重试/换cookie/换浏览器/精配/放弃改关键词 等"}}
+
+任务描述：{description}
+技术方案：{'浏览器' if st in ('browser','bridge') else 'HTTP'} 入口：{su}
+运行日志（末尾）：
+{log_tail}"""
+    try:
+        raw = _llm_chat([{"role": "user", "content": prompt}], timeout=60)
+        d = _extract_json(raw)
+        if isinstance(d, dict) and d.get("可能原因"):
+            return {k: str(v)[:400] for k, v in d.items()}
+    except Exception:
+        pass
+    return {
+        "可能原因": "未自动识别到具体原因，建议查看运行日志",
+        "解决办法": "1) 确认网址可直接访问（浏览器打开试试）；2) 若需登录/验证码，勾选浏览器模式或填 Cookie；3) 重试一次",
+        "需要人工吗": "是",
+        "建议下一步": "查看日志或重试",
+    }

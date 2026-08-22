@@ -251,13 +251,27 @@ def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie=
                             round_timeout=timeout, log_cb=lambda m: _job_log(job, m),
                             proxy=proxy or None, cookie=cookie or None)
         # ⚠️ 0 条失败也要给引导卡片（之前只有异常才显示）——"跑不出数据"同样需要方案
+        # 注意：不能简单用 "0 条" in 文本——"成功 10 条" 也会命中（子串匹配），必须整词匹配
         _sum = str(out.get("summary") or "")
-        if "0 条" in _sum or "0 条" in _sum.replace("任务结束：", ""):
+        import re as _re
+        _zero = _re.search(r"(?<![0-9])0\s*条", _sum) is not None
+        if _zero:
             try:
                 from .solutions import attach_solution
                 attach_solution(job, _sum + " " + " ".join((job.get("messages") or [])[-5:]))
             except Exception:
                 pass
+        # 记录 task_dir（供 AI 诊断读取 config）：直跑路径也能从 name 推导
+        try:
+            _td = str(out.get("task_dir") or "")
+            if not _td:
+                _n = str(out.get("name") or "")
+                if _n:
+                    _td = str(ROOT / "tasks" / _n)
+            if _td:
+                job["task_dir"] = _td
+        except Exception:
+            pass
         _job_done(job, out.get("result"), out.get("summary"), out.get("verify"))
     except BaseException as e:
         if isinstance(e, KeyboardInterrupt):
@@ -538,12 +552,19 @@ def _auto_verify(rows, cfg):
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         data = body.encode("utf-8") if isinstance(body, str) else body
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # 客户端提前断开（关页面/切网络）：静默忽略，不打印吓人的 traceback
+            try:
+                self.close_connection = True
+            except Exception:
+                pass
 
     def _json(self, obj, code=200):
         self._send(code, json.dumps(obj, ensure_ascii=False, default=str))
@@ -569,6 +590,15 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         try:
+            if u.path.startswith("/reports/"):
+                fp = (ROOT / "outputs" / "reports" / u.path[len("/reports/"):]).resolve()
+                if fp.is_file() and fp.exists():
+                    data = fp.read_bytes()
+                    ctype = "text/html; charset=utf-8" if fp.suffix == ".html" else "text/plain"
+                    self._send(200, data, ctype)
+                else:
+                    self._send(404, "报告不存在")
+                return
             if u.path in ("/", "/index.html"):
                 if INDEX.exists():
                     self._send(200, INDEX.read_text(encoding="utf-8"), "text/html; charset=utf-8")
@@ -633,6 +663,27 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         try:
             body = self._read_body()
+            if u.path == "/api/report":
+                content = str(body.get("content", "") or "").strip()
+                if len(content) > 5_000_000:
+                    self._json({"error": "CSV 太大（>5MB）"})
+                    return
+                if not content:
+                    self._json({"error": "请粘贴 CSV 内容"})
+                    return
+                name = str(body.get("name", "") or "report").strip() or "report"
+                group = str(body.get("group", "") or "").strip() or None
+                rdir = ROOT / "outputs" / "reports"
+                rdir.mkdir(parents=True, exist_ok=True)
+                csv_path = rdir / f"{name}.csv"
+                csv_path.write_text(content, encoding="utf-8-sig")
+                from .report import generate as _report_gen
+                try:
+                    r = _report_gen(str(csv_path), group_col=group, out=str(rdir / f"{name}.html"))
+                    self._json({"ok": True, "report": f"/reports/{name}.html", "stats": r})
+                except Exception as e:
+                    self._json({"error": f"生成失败: {e}"})
+                return
             if u.path == "/api/auto/plan":
                 desc = str(body.get("description", "")).strip()
                 if not desc:
@@ -644,6 +695,12 @@ class Handler(BaseHTTPRequestHandler):
                                  proxy=body.get("proxy", "") or None,
                                  cookie=body.get("cookie", "") or None,
                                  log_cb=lambda m: None)
+                # AI 人话指南（小白友好）
+                try:
+                    from .auto import human_guide
+                    plan["guide"] = human_guide(desc, plan.get("config") or {}, plan.get("route") or {})
+                except Exception:
+                    plan["guide"] = {}
                 # 推荐精配提示：AI 不确定入口 / 数据形态特殊（榜单/图片/PDF/强反爬）
                 try:
                     _cfg = plan.get("config") or {}
@@ -663,6 +720,33 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 self._json(plan)
+            if u.path == "/api/auto/diagnose":
+                task_dir = str(body.get("task_dir", "") or "").strip()
+                desc = str(body.get("description", "") or "").strip()
+                log_text = str(body.get("log", "") or "")[:4000]
+                cfg = {}
+                candidates = []
+                if task_dir:
+                    candidates.append(Path(task_dir) if Path(task_dir).is_absolute() else ROOT / task_dir)
+                # 直跑路径兜底：tasks/auto_<md5(desc)[:10]>
+                if desc and not task_dir:
+                    import hashlib as _hl
+                    candidates.append(ROOT / "tasks" / f"auto_{_hl.md5(desc.encode()).hexdigest()[:10]}")
+                for _p in candidates:
+                    try:
+                        _cfg_f = _p / "config.json"
+                        if _cfg_f.exists():
+                            cfg = json.loads(_cfg_f.read_text(encoding="utf-8"))
+                            break
+                    except Exception:
+                        pass
+                from .auto import diagnose_failure
+                try:
+                    d = diagnose_failure(desc, cfg, task_dir, log_text)
+                    self._json({"ok": True, **d})
+                except Exception as e:
+                    self._json({"error": f"诊断失败: {e}"})
+                return
             if u.path == "/api/auto/start":
                 desc = str(body.get("description", "")).strip()
                 if not desc:

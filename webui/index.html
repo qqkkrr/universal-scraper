@@ -180,20 +180,67 @@
 </nav>
 
 <main>
+<div class="card" style="margin-bottom:16px;padding:14px">
+  <h3 style="margin-top:0">📊 数据报告（us report）</h3>
+  <p style="font-size:12.5px;color:#666;margin:4px 0">粘贴爬取结果 CSV（或任意表格），自动生成可视化报告（概览/统计/分组对比/分布图）。</p>
+  <input id="rp_name" placeholder="报告名（英文/数字）" value="report1" style="width:160px;padding:5px;border:1px solid #ccc;border-radius:6px;margin-bottom:6px">
+  <input id="rp_group" placeholder="分组列名（可选，如：城市）" style="width:180px;padding:5px;border:1px solid #ccc;border-radius:6px;margin-left:6px">
+  <textarea id="rp_csv" placeholder="在此粘贴 CSV 内容（第一行为列名）…" style="width:100%;height:120px;border:1px solid #ccc;border-radius:6px;padding:6px;font-family:monospace;font-size:12px;box-sizing:border-box"></textarea>
+  <div style="margin-top:6px">
+    <button onclick="genReport()" style="padding:6px 16px;background:#4361ee;color:#fff;border:none;border-radius:6px;cursor:pointer">生成报告</button>
+    <span id="rp_status" style="font-size:12px;margin-left:8px"></span>
+  </div>
+  <div id="rp_result" style="margin-top:8px"></div>
+</div>
+
 
 <!-- ============ 一句话任务 ============ -->
 <div class="tab active" id="tab-auto">
+  <details style="margin-bottom:16px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:12px 16px">
+    <summary style="cursor:pointer;font-weight:650;font-size:13.5px;color:var(--amber)">🙋 第一次用？1 分钟看懂怎么用（点开看）</summary>
+    <div style="margin-top:10px;font-size:12.5px;line-height:1.9;color:var(--text)">
+      <b>三步完成一个爬虫任务：</b><br>
+      ① 在下面「一句话任务」框里，<b>用大白话写下你要什么</b>（比如：抓取某网站的商品名称和价格）。不会写就点「常见例子」选一个再改。<br>
+      ② 点「生成执行计划」→ AI 会先告诉你怎么做、需要准备什么 → 你点「确认无误，开始执行」。<br>
+      ③ 等着就行：如果需要登录/验证码，会弹出浏览器窗口，你手动完成一次，工具自动继续。跑完的结果在「导出文件」里（json/csv/xlsx）。<br><br>
+      <b>经常卡住？看这里：</b>
+      <ul style="margin:4px 0 0 22px">
+        <li>要求登录的网站 → 勾选「需要登录 / JS 渲染」；或点右上角「🍪 导入会话」（先在调试 Chrome 登录一次）</li>
+        <li>遇到验证码/滑块 → 在弹出窗口里手动滑/点，完成后自动继续</li>
+        <li>抓出 0 条 → 点「🤖 没跑出来？让 AI 帮你找原因」，按它的建议做</li>
+        <li>被网站拦截（403/频繁）→ 手机开热点重试，或填代理</li>
+        <li>抓的数据不对 → 改任务描述，把「要哪几列、翻几页」写得更具体，重新生成计划</li>
+      </ul>
+    </div>
+  </details>
   <div class="card">
     <div class="card-title"><span class="idx">01 / TASK</span><h2>一句话任务</h2></div>
     <div class="desc">AI 自动理解任务、生成配置并运行，全程实时反馈。先出「计划」供你确认，再真正执行。</div>
     <label>任务描述</label>
     <textarea id="a_desc" rows="4" placeholder="例如：抓取 https://quotes.toscrape.com/ 的名言、作者和标签，翻 2 页"></textarea>
+    <div style="margin-top:8px">
+      <select id="a_examples" style="width:100%;font-size:12.5px" onchange="applyExample(this)">
+        <option value="">👇 不会描述任务？点这里选个常见例子（可直接改）</option>
+        <option value="抓取 https://quotes.toscrape.com/ 的名言、作者和标签，翻 2 页">📖 网页列表（名言/标题/价格…）</option>
+        <option value="抓取 https://news.ycombinator.com/ 今天的新闻标题、链接和分数，取前 30 条">🗞️ 新闻/文章列表</option>
+        <option value="抓取 淘宝 搜索「露营帐篷」按销量排序的商品标题、价格、销量，前 20 个">🛒 电商商品（淘宝/京东）</option>
+        <option value="抓取 小红书 话题 #淮安美食 的笔记标题、作者、点赞数、发布时间，日期在 2025-01-01 到 2025-01-03 之间">📱 小红书笔记</option>
+        <option value="抓取 抖音 搜索「美食探店」的视频标题、作者、点赞数，前 20 个">🎬 抖音视频</option>
+        <option value="抓取 大众点评 上海「美食」搜索结果前 10 个商家的店名、人均、点评数、地址">🍜 大众点评商家</option>
+        <option value="抓取 https://www.miit.gov.cn/zwgk/zcwj/wjfb/tz/ 工信部 APP 违规通报列表：标题、日期、链接，翻 3 页">🏛️ 政府公告/通报</option>
+        <option value="下载《沈阳体育学院学报》2024 年之后的所有论文 PDF 和摘要">📄 期刊论文下载</option>
+        <option value="抓取 巨潮资讯网 某公司 2024 年全部公告的标题、日期、公告类型和 PDF 链接">📑 上市公司公告</option>
+      </select>
+    </div>
+    <label class="ck"><input id="a_browser" type="checkbox"><span>需要登录 / JS 渲染的网站：勾选后优先用浏览器（会弹出窗口，登录一次自动保存复用）</span></label>
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;font-weight:600;color:var(--muted);font-size:12.5px">⚙️ 高级选项（代理 / 定时 / Cookie / 并发 — 一般不用动，小白可直接跳过）</summary>
+      <div style="margin-top:10px">
     <div class="row mt">
       <div><label>最多条数 <span class="l-hint">留空=不限</span></label><input id="a_limit" type="number" min="1" placeholder="如 50"></div>
       <div><label>自修复轮数 <span class="l-hint">1–3</span></label><input id="a_rounds" type="number" min="1" max="3" value="2"></div>
       <div><label>单轮超时 <span class="l-hint">秒</span></label><input id="a_timeout" type="number" min="10" value="240"></div>
     </div>
-    <label class="ck"><input id="a_browser" type="checkbox"><span>需要登录 / JS 渲染的网站：勾选后优先用浏览器（会弹出窗口，登录一次自动保存复用）</span></label>
     <label>代理 <span class="l-hint">可选 — 没有真实代理就留空（示例不能直接用）</span></label>
     <input id="a_proxy" placeholder="留空=不用代理；有代理填 http://user:pass@真实IP:真实端口">
     <div class="row mt" id="schedRow">
@@ -231,6 +278,8 @@
 ⑤ 测试显示“被重定向验证中心” → Cookie 过期或 IP 被风控：重新复制 / 切手机热点
 
 粘贴后点「测试 Cookie」，显示 ✅ 就说明可用。</pre>
+    </details>
+      </div>
     </details>
     <button class="btn btn-primary btn-block" onclick="planAuto()" id="a_btn">生成执行计划</button>
     <div class="muted" style="font-size:11.5px;margin-top:10px;text-align:center">先让 AI 生成「任务理解 + 技术路线」，你确认后才会真正开始抓取。</div>
@@ -372,6 +421,13 @@ async function api(path,opts){
   try { return await r.json(); }
   catch(e){ return {error:'响应解析失败（服务器可能返回了非 JSON）: '+e}; }
 }
+function applyExample(sel){
+  const v=sel.value; if(!v) return;
+  const ta=document.getElementById('a_desc');
+  ta.value=v;
+  ta.focus();
+  sel.value='';
+}
 async function testCookie(cid,resid,urlid){
   const cookie=$('#'+cid).value.trim();
   const url=urlid?$('#'+urlid).value.trim():'https://www.dianping.com/search/keyword/2/0_%E7%BE%8E%E9%A3%9F';
@@ -430,11 +486,18 @@ async function runSolutionAction(api,url){
 }
 function renderResult(box,d){
   let html='';
+  const zeroRows = !!(d.result && !d.result.total);
   if(d.error){ html='<div class="banner err">失败：'+esc(d.error)+'</div>'+renderSolution(d); }
   else {
     const ok=!!(d.result&&d.result.total);
     html+='<div class="banner '+(ok?'ok':'warn')+'">'+(ok?'任务结束 · 抓取成功':'任务结束 · 0 条')+'<div class="sub">'+esc(d.summary||'')+'</div></div>';
     if(d.result) html+='<div class="stats"><div>条目<b>'+d.result.total+'</b></div><div>抓取<b>'+d.result.fetched+'</b> 页</div><div>错误<b>'+d.result.errors+'</b></div></div>';
+    if(ok) html+='<div class="muted" style="font-size:12.5px;margin-top:8px">✅ 数据已保存到工具目录的 <b>outputs</b> 文件夹（JSON / CSV / Excel 三种格式，CSV 可直接用 Excel/WPS 打开）。想看图表？把 CSV 粘到最上方「📊 数据报告」生成可视化报告。</div>';
+    if(!ok){
+      // 0 条也展示失败引导（登录/验证码/选择器方案）
+      html+=renderSolution(d);
+      if(d.messages&&d.messages.length) html+='<h4>执行过程（已结束）</h4><div class="terminal"><div class="term-head"><span class="tdot"></span><span>输出</span></div><pre>'+esc(d.messages.join('\n'))+'</pre></div>';
+    }
     if(d.verify){
       html+='<h4>复核报告</h4>';
       const okv=d.verify.ok;
@@ -444,12 +507,56 @@ function renderResult(box,d){
         html+='<div class="check"><span class="mk '+(pass?'pass':'fail')+'">'+(pass?'✓':'✕')+'</span> '+esc(c.name)+'<span class="v">'+esc(c.value||'')+'</span></div>';
       });
     }
-    if(d.messages&&d.messages.length) html+='<h4>执行过程（已结束）</h4><div class="terminal"><div class="term-head"><span class="tdot"></span><span>输出</span></div><pre>'+esc(d.messages.join('\n'))+'</pre></div>';
+    if(ok && d.messages&&d.messages.length) html+='<h4>执行过程（已结束）</h4><div class="terminal"><div class="term-head"><span class="tdot"></span><span>输出</span></div><pre>'+esc(d.messages.join('\n'))+'</pre></div>';
     if(d.result&&d.result.files&&Object.keys(d.result.files).length) html+='<h4>导出文件</h4><pre>'+esc(JSON.stringify(d.result.files,null,2))+'</pre>';
   }
-    const rerunLabel = d.kind==='auto' ? '↻ 重跑此任务（复用已学配置）' : '↻ 重新抓取此网址';
-  html+='<div style="margin-top:12px"><button class="btn" onclick="rerunJob(this,\''+d.id+'\')">'+rerunLabel+'</button></div>';
+  // 0 条 / 出错：提供 AI 一键诊断（小白按建议照做即可）
+  if(d.error || zeroRows){
+    html+='<div id="diag_wrap" style="margin-top:14px;border:1px solid var(--line-2);border-radius:12px;padding:14px 16px;background:var(--bg-3)">'
+      +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      +'<b style="font-size:13.5px">🤖 没跑出来？让 AI 帮你找原因</b>'
+      +'<span class="muted" style="font-size:12px">约 10-30 秒，会自动看日志并给出你能照做的步骤</span>'
+      +'<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="diagnoseJob(this,\''+d.id+'\')">开始诊断</button>'
+      +'</div>'
+      +'<div id="diag_out" class="muted" style="font-size:12.5px;margin-top:10px"></div>'
+      +'</div>';
+  }
+  const rerunLabel = d.kind==='auto' ? '↻ 重跑此任务（复用已学配置）' : '↻ 重新抓取此网址';
+  html+='<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">'
+    +'<button class="btn" onclick="rerunJob(this,\''+d.id+'\')">'+rerunLabel+'</button>'
+    +(d.solution && d.solution.action ? '<button class="btn" onclick="runSolutionAction(\''+d.solution.action.api+'\',\''+String(d.solution.action.url||'').replace(/\\/g,'\\\\').replace(/\'/g,'\\\'')+'\')">'+esc(d.solution.action.label||'打开调试 Chrome')+'</button>' : '')
+    +'</div>';
   box.innerHTML=html; box.style.display='block';
+  // 失败/0 条时自动触发一次 AI 诊断（无需点击；用户也可手动再点）
+  if((d.error || zeroRows) && document.getElementById('diag_wrap')){
+    const _jid = d.id;
+    setTimeout(()=>{
+      const _b = document.getElementById('diag_wrap') && document.getElementById('diag_wrap').querySelector('button');
+      diagnoseJob(_b, _jid);
+    }, 1200);
+  }
+}
+async function diagnoseJob(btn, jobId){
+  const out=document.getElementById('diag_out'); if(!out) return;
+  if(btn) btn.disabled=true;
+  out.innerHTML='<span style="color:var(--amber)">⏳ AI 正在查看运行日志并分析…（约 10-30 秒）</span>';
+  let d;
+  try{
+    const job=await api('/api/job?job='+jobId);
+    d=await api('/api/auto/diagnose',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({task_dir:job.task_dir||'', description:job.description||job.title||'', log:(job.messages||[]).join('\n')})});
+  }catch(e){ d={error:'请求失败: '+e.message}; }
+  if(btn) btn.disabled=false;
+  if(d.error){ out.innerHTML='<span class="err">❌ '+esc(d.error)+'</span>'; return; }
+  const steps=(d['解决办法']||'').split(/[\n\n]+|\n(?=\d[.、])/).map(x=>x.trim()).filter(Boolean);
+  let h='<div style="border:1px solid var(--green);border-radius:10px;padding:12px 14px;background:rgba(116,207,145,.08);margin-top:6px">'
+    +'<div style="font-size:13px;margin-bottom:6px"><b>🔍 可能原因：</b>'+esc(d['可能原因']||'')+'</div>'
+    +'<div style="font-size:13px;margin-bottom:6px"><b>需要人工吗：</b><span class="'+(String(d['需要人工吗']||'').indexOf('是')>=0?'err':'ok')+'">'+esc(d['需要人工吗']||'')+'</span></div>'
+    +'<div style="font-size:13px;margin-bottom:4px"><b>你可以这样做：</b></div>'
+    +'<ol style="margin:0 0 6px 20px;font-size:13px;line-height:1.8">'+(steps.length?steps.map(x=>'<li>'+esc(x)+'</li>').join(''):'<li>'+esc(d['解决办法']||'')+'</li>')+'</ol>'
+    +'<div class="muted" style="font-size:12px"><b>建议下一步：</b>'+esc(d['建议下一步']||'')+'</div>'
+    +'</div>';
+  out.innerHTML=h;
 }
 function startJob(path,payload,btn,box){
   btn.disabled=true; btn.textContent='运行中…';
@@ -490,9 +597,10 @@ async function planAuto(){
   let html='<div class="card">'
     +'<div class="card-title"><span class="idx">PLAN</span><h2>AI 的任务理解与技术路线</h2><span class="hint">请确认</span></div>'
     +'<div id="a_warns"></div>'
+    +'<div id="a_guide"></div>'
     +intentBlock(d.config)
     +'<h4>任务摘要</h4><pre>'+esc(d.summary||'')+'</pre>'
-    +'<h4>技术路线</h4><pre>'+esc(d.route||'')+'</pre>'
+    +'<details><summary style="cursor:pointer;font-weight:600;color:#4361ee;margin-top:10px">🔧 技术路线（进阶，一般不用管）</summary><pre style="margin-top:8px">'+esc(d.route||'')+'</pre></details>'
     +'<h4>完整配置（可直接修改，确认时以你改过的为准）</h4>'
     +'<div class="muted" style="font-size:11.5px;margin-bottom:6px">日期过滤在 pipelines 的 between：min/max 是<b>北京时间 Unix 秒</b>（'+todayHint()+'）；要取消日期过滤就删除该条 between。</div>'
     +'<textarea id="a_config_edit" rows="12" style="width:100%;font-family:var(--mono);font-size:12px">'+esc(JSON.stringify(d.config,null,2))+'</textarea>'
@@ -510,6 +618,19 @@ async function planAuto(){
     if(wb) wb.innerHTML=d.warnings.map(w=>'<div class="banner warn">'+esc(w)+'</div>').join('');
   }
   box.innerHTML=html;
+  if(d.guide && d.guide['一句话说明']){
+    const g=d.guide;
+    document.getElementById('a_guide').innerHTML=
+      '<div style="border:1px solid #4ade80;border-radius:12px;padding:14px 16px;margin:10px 0;background:rgba(74,222,128,.08)">'
+      +'<div style="font-size:13px;font-weight:700;margin-bottom:8px">🤖 AI 说人话</div>'
+      +'<div style="font-size:13px;margin-bottom:6px"><b>做什么：</b>'+esc(g['一句话说明']||'')+'</div>'
+      +'<div style="font-size:13px;margin-bottom:6px"><b>预计能拿到：</b>'+esc(g['预计能拿到']||'')+'</div>'
+      +'<div style="font-size:13px;margin-bottom:6px"><b>你需要准备：</b>'+esc(g['你需要准备']||'')+'</div>'
+      +'<div style="font-size:13px;margin-bottom:6px"><b>可能遇到：</b>'+esc(g['可能遇到']||'')+'</div>'
+      +'<div style="font-size:13px;margin-bottom:6px"><b>耗时估计：</b>'+esc(g['耗时估计']||'')+'</div>'
+      +'<div style="font-size:12.5px;color:#666"><b>⚠️ 注意：</b>'+esc(g['注意事项']||'')+'</div>'
+      +'</div>';
+  }
 }
 async function confirmAuto(){
   if(!lastPlan || lastPlan._submitted) return;
@@ -727,6 +848,26 @@ async function restartServer(){
 }
 setInterval(checkCodeChanged, 20000);
 checkCodeChanged();
+
+
+async function genReport(){
+  const name = (document.getElementById('rp_name').value||'report1').replace(/[^A-Za-z0-9_-]/g,'')||'report1';
+  const group = document.getElementById('rp_group').value.trim();
+  const content = document.getElementById('rp_csv').value;
+  const st = document.getElementById('rp_status');
+  const res = document.getElementById('rp_result');
+  if(!content.trim()){ st.textContent='请先粘贴 CSV'; return; }
+  st.textContent='生成中…';
+  try{
+    const r = await fetch('/api/report', {method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token': (window.AUTH_TOKEN||'')},
+      body: JSON.stringify({name, group, content})});
+    const d = await r.json();
+    if(d.ok){
+      st.textContent='✅ 完成';
+      res.innerHTML = `<p style="font-size:12.5px">${d.stats.rows} 行 / ${d.stats.cols} 列 / ${d.stats.numeric} 数值列 / ${d.stats.groups} 组 &nbsp; <a href="${d.report}" target="_blank" style="color:#4361ee">打开报告 →</a></p>`;
+    } else { st.textContent='❌ '+d.error; }
+  }catch(e){ st.textContent='❌ 请求失败: '+e; }
+}
 </script>
 </body>
 </html>

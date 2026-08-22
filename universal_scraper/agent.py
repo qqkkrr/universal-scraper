@@ -180,14 +180,26 @@ def _extract_items(description: str, page_text: str, schema: Dict[str, Any],
 
 def agent_task(description: str, start_url: str = "", max_steps: int = 12,
                cdp: str = "", headless: bool = True,
-               limit: Optional[int] = None, log_cb=None) -> Dict[str, Any]:
-    """LLM 浏览器代理执行。返回 {items, log, steps, error}。"""
+               limit: Optional[int] = None, log_cb=None,
+               stop_file: Optional[str] = None) -> Dict[str, Any]:
+    """LLM 浏览器代理执行。返回 {items, log, steps, error}。
+    stop_file: 该路径存在（内容非空）时，代理会尽快停止（WebUI「停止任务」用）。
+    """
+    import os as _os
     lines: List[str] = []
 
     def log(m):
         lines.append(m)
         if log_cb:
             log_cb(m)
+
+    def _stopped():
+        try:
+            if stop_file and _os.path.exists(stop_file):
+                return bool(str(open(stop_file, encoding="utf-8", errors="replace").read() or "").strip())
+        except Exception:
+            pass
+        return False
 
     items: List[Dict[str, Any]] = []
     history: List[str] = []
@@ -202,6 +214,9 @@ def agent_task(description: str, start_url: str = "", max_steps: int = 12,
 
         failed = 0
         for step in range(1, max_steps + 1):
+            if _stopped():
+                log("⏹ 收到停止信号，代理已停止")
+                break
             if limit and len(items) >= limit:
                 log(f"✅ 已达数量上限 {limit} 条，停止")
                 break
