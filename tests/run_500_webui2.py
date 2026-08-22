@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 BASE = "http://127.0.0.1:8642"
 TASKS = json.loads(Path("tests/tasks_601_1100.json").read_text(encoding="utf-8"))
 RESULT = Path("tests/run500_results.json")
-HARD_TIMEOUT = 600   # 10 分钟
+HARD_TIMEOUT = 300   # 5 分钟（与工具出方案对齐，提速）
 POLL = 20
 
 def api(path, body=None, timeout=30):
@@ -27,7 +27,7 @@ def start_one(task):
 def judge(task, d):
     summary = d.get("summary") or ""
     sol = d.get("solution") or {}
-    if "成功" in summary and "0 条" not in summary:
+    if "任务结束：成功" in summary and not summary.lstrip().startswith("⚠️"):
         return "SUCCESS"
     if d.get("status") == "error":
         return "ERROR"

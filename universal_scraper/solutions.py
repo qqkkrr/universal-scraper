@@ -45,7 +45,7 @@ def classify_failure(error_text: str = "", messages: Optional[list] = None,
                  r"加密.*pdf|pdf.*密码|word 解析失败|excel 无数据|附件.*失效", txt, re.I):
         return "attachment_failed"
     # 5) 解析/选择器失败（0 条、未命中、不相关）
-    if re.search(r"0 条|解析 0|未命中|选择器|不相关|试跑 0|条目 0|没有匹配|row_css|"
+    if re.search(r"(?<![0-9])0\s*条|解析 0|未命中|选择器|不相关|试跑 0|条目 0|没有匹配|row_css|"
                  r"解析失败|假成功|列表 0", txt, re.I):
         return "selector_failed"
     # 6) 超时 / 卡住

@@ -86,6 +86,16 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   | python3 -m universal_scraper.mcp_server --once
 ```
 
+## 运行测试（正式回归套件）
+
+```bash
+python3 -m pip install pytest        # 首次
+python3 -m pytest tests/ -q          # 38 个用例，全离线（本地服务器/ mock），无需外网
+```
+
+覆盖：配置校验 / HTML+JSON 解析 / 管道过滤去重 / 失败分类 / **安全回归**（路径穿越封堵）/
+取数器降级 / AI 指南兜底 / 前端 JS 语法。新增测试时保持离线。
+
 ## 快速开始
 
 ```bash
