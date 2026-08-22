@@ -487,7 +487,10 @@ async function runSolutionAction(api,url){
 function renderResult(box,d){
   let html='';
   const zeroRows = !!(d.result && !d.result.total);
-  if(d.error){ html='<div class="banner err">失败：'+esc(d.error)+'</div>'+renderSolution(d); }
+  if(d.error){
+    html='<div class="banner err">失败：'+esc(d.error)+'</div>'+renderSolution(d);
+    if(d.messages&&d.messages.length) html+='<h4>执行过程（已结束）</h4><div class="terminal"><div class="term-head"><span class="tdot"></span><span>输出</span></div><pre>'+esc(d.messages.join('\n'))+'</pre></div>';
+  }
   else {
     const ok=!!(d.result&&d.result.total);
     html+='<div class="banner '+(ok?'ok':'warn')+'">'+(ok?'任务结束 · 抓取成功':'任务结束 · 0 条')+'<div class="sub">'+esc(d.summary||'')+'</div></div>';
@@ -512,13 +515,13 @@ function renderResult(box,d){
   }
   // 0 条 / 出错：提供 AI 一键诊断（小白按建议照做即可）
   if(d.error || zeroRows){
-    html+='<div id="diag_wrap" style="margin-top:14px;border:1px solid var(--line-2);border-radius:12px;padding:14px 16px;background:var(--bg-3)">'
+    html+='<div class="diag_wrap" style="margin-top:14px;border:1px solid var(--line-2);border-radius:12px;padding:14px 16px;background:var(--bg-3)">'
       +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
       +'<b style="font-size:13.5px">🤖 没跑出来？让 AI 帮你找原因</b>'
       +'<span class="muted" style="font-size:12px">约 10-30 秒，会自动看日志并给出你能照做的步骤</span>'
       +'<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="diagnoseJob(this,\''+d.id+'\')">开始诊断</button>'
       +'</div>'
-      +'<div id="diag_out" class="muted" style="font-size:12.5px;margin-top:10px"></div>'
+      +'<div class="diag_out muted" style="font-size:12.5px;margin-top:10px"></div>'
       +'</div>';
   }
   const rerunLabel = d.kind==='auto' ? '↻ 重跑此任务（复用已学配置）' : '↻ 重新抓取此网址';
@@ -528,16 +531,21 @@ function renderResult(box,d){
     +'</div>';
   box.innerHTML=html; box.style.display='block';
   // 失败/0 条时自动触发一次 AI 诊断（无需点击；用户也可手动再点）
-  if((d.error || zeroRows) && document.getElementById('diag_wrap')){
-    const _jid = d.id;
+  if((d.error || zeroRows) && box.querySelector('.diag_wrap')){
+    const _jid = d.id, _box = box;
     setTimeout(()=>{
-      const _b = document.getElementById('diag_wrap') && document.getElementById('diag_wrap').querySelector('button');
-      diagnoseJob(_b, _jid);
+      const _b = _box.querySelector('.diag_wrap button');
+      if(_b) diagnoseJob(_b, _jid);
     }, 1200);
   }
 }
 async function diagnoseJob(btn, jobId){
-  const out=document.getElementById('diag_out'); if(!out) return;
+  const wrap = btn ? btn.closest('.diag_wrap') : null;
+  const out = wrap ? wrap.querySelector('.diag_out') : null;
+  if(!out) return;
+  // 并发防抖：已在分析中就不再重复发起（LLM 调用浪费）
+  if(out.dataset.state==='loading') return;
+  out.dataset.state='loading';
   if(btn) btn.disabled=true;
   out.innerHTML='<span style="color:var(--amber)">⏳ AI 正在查看运行日志并分析…（约 10-30 秒）</span>';
   let d;
@@ -557,6 +565,7 @@ async function diagnoseJob(btn, jobId){
     +'<div class="muted" style="font-size:12px"><b>建议下一步：</b>'+esc(d['建议下一步']||'')+'</div>'
     +'</div>';
   out.innerHTML=h;
+  out.dataset.state='done';
 }
 function startJob(path,payload,btn,box){
   btn.disabled=true; btn.textContent='运行中…';

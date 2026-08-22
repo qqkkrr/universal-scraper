@@ -591,7 +591,14 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(u.query)
         try:
             if u.path.startswith("/reports/"):
-                fp = (ROOT / "outputs" / "reports" / u.path[len("/reports/"):]).resolve()
+                # 路径穿越防护：只允许 outputs/reports 目录内（resolve 后校验前缀，拒绝绝对路径/..）
+                try:
+                    _rp_root = (ROOT / "outputs" / "reports").resolve()
+                    fp = (_rp_root / u.path[len("/reports/"):]).resolve()
+                    fp.relative_to(_rp_root)
+                except Exception:
+                    self._send(403, "非法路径")
+                    return
                 if fp.is_file() and fp.exists():
                     data = fp.read_bytes()
                     ctype = "text/html; charset=utf-8" if fp.suffix == ".html" else "text/plain"
@@ -672,6 +679,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "请粘贴 CSV 内容"})
                     return
                 name = str(body.get("name", "") or "report").strip() or "report"
+                # 路径穿越防护：只允许英文/数字/下划线/连字符（文件名不得含 / 和 ..）
+                name = re.sub(r"[^A-Za-z0-9_-]", "", name)[:80] or "report"
                 group = str(body.get("group", "") or "").strip() or None
                 rdir = ROOT / "outputs" / "reports"
                 rdir.mkdir(parents=True, exist_ok=True)
@@ -727,11 +736,18 @@ class Handler(BaseHTTPRequestHandler):
                 cfg = {}
                 candidates = []
                 if task_dir:
-                    candidates.append(Path(task_dir) if Path(task_dir).is_absolute() else ROOT / task_dir)
+                    # 只允许 tasks/ 目录内的 config（防分享模式读任意路径配置）
+                    try:
+                        _tasks_root = (ROOT / "tasks").resolve()
+                        _p = (Path(task_dir) if Path(task_dir).is_absolute() else ROOT / task_dir).resolve()
+                        _p.relative_to(_tasks_root)
+                        candidates.append(_p)
+                    except Exception:
+                        pass
                 # 直跑路径兜底：tasks/auto_<md5(desc)[:10]>
                 if desc and not task_dir:
                     import hashlib as _hl
-                    candidates.append(ROOT / "tasks" / f"auto_{_hl.md5(desc.encode()).hexdigest()[:10]}")
+                    candidates.append((ROOT / "tasks" / f"auto_{_hl.md5(desc.encode()).hexdigest()[:10]}").resolve())
                 for _p in candidates:
                     try:
                         _cfg_f = _p / "config.json"
