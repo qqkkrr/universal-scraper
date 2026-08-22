@@ -525,9 +525,9 @@ function renderResult(box,d){
       +'</div>';
   }
   const rerunLabel = d.kind==='auto' ? '↻ 重跑此任务（复用已学配置）' : '↻ 重新抓取此网址';
+  // 注意：solution 卡片（renderSolution）内已包含"打开调试 Chrome"动作按钮，这里不再重复渲染
   html+='<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">'
     +'<button class="btn" onclick="rerunJob(this,\''+d.id+'\')">'+rerunLabel+'</button>'
-    +(d.solution && d.solution.action ? '<button class="btn" onclick="runSolutionAction(\''+d.solution.action.api+'\',\''+String(d.solution.action.url||'').replace(/\\/g,'\\\\').replace(/\'/g,'\\\'')+'\')">'+esc(d.solution.action.label||'打开调试 Chrome')+'</button>' : '')
     +'</div>';
   box.innerHTML=html; box.style.display='block';
   // 失败/0 条时自动触发一次 AI 诊断（无需点击；用户也可手动再点）
@@ -555,7 +555,7 @@ async function diagnoseJob(btn, jobId){
       body:JSON.stringify({task_dir:job.task_dir||'', description:job.description||job.title||'', log:(job.messages||[]).join('\n')})});
   }catch(e){ d={error:'请求失败: '+e.message}; }
   if(btn) btn.disabled=false;
-  if(d.error){ out.innerHTML='<span class="err">❌ '+esc(d.error)+'</span>'; return; }
+  if(d.error){ out.innerHTML='<span class="err">❌ '+esc(d.error)+'</span>'; out.dataset.state='idle'; return; }
   const steps=(d['解决办法']||'').split(/[\n\n]+|\n(?=\d[.、])/).map(x=>x.trim()).filter(Boolean);
   let h='<div style="border:1px solid var(--green);border-radius:10px;padding:12px 14px;background:rgba(116,207,145,.08);margin-top:6px">'
     +'<div style="font-size:13px;margin-bottom:6px"><b>🔍 可能原因：</b>'+esc(d['可能原因']||'')+'</div>'
