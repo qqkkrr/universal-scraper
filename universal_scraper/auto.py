@@ -1665,6 +1665,14 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
 LEARNED_DIR = ROOT / "configs" / "learned"
 
 
+def _learnable(last_result) -> bool:
+    """只有常规解析成功才值得沉淀为已学配置。
+    LLM 兜底 / LLM 证据抽取 / 浏览器代理成功说明选择器并没有真正工作——
+    入库会产生下次必失败的毒配置，返回 False。"""
+    _r = last_result or {}
+    return not bool(_r.get("llm_fallback") or _r.get("llm_extract") or _r.get("agent_mode"))
+
+
 def _drop_learned_by_start_url(start_url: str, reason: str = "", log=None) -> bool:
     """删除 start_url 对应的已学配置（网站改版/意图不符/质量下降时）。
     返回是否删除了文件。多处共用，避免复制粘贴。"""
@@ -2219,10 +2227,12 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             if len(_low) >= 2:
                 _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
                                            reason="质量下降（字段完整率偏低）", log=log)
-        try:
-            _save_learned(cfg, description, log=log)
-        except Exception:
-            pass
+        # ⚠️ LLM 兜底/浏览器代理成功 ≠ 配置真的有效（见 _learnable）——不沉淀毒配置
+        if _learnable(last_result):
+            try:
+                _save_learned(cfg, description, log=log)
+            except Exception:
+                pass
         vtxt = ""
         if verify and verify.get("checks"):
             bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]
@@ -2518,10 +2528,12 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             if len(_low) >= 2:
                 _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
                                            reason="质量下降（字段完整率偏低）", log=log)
-        try:
-            _save_learned(cfg, description, log=log)
-        except Exception:
-            pass
+        # ⚠️ LLM 兜底/浏览器代理成功 ≠ 配置真的有效（见 _learnable）——不沉淀毒配置
+        if _learnable(last_result):
+            try:
+                _save_learned(cfg, description, log=log)
+            except Exception:
+                pass
         vtxt = ""
         if verify and verify.get("checks"):
             bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]

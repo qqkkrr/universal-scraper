@@ -58,3 +58,11 @@ def test_parse_github_topics():
     # 无 aria-label 的卡片走正则兜底
     assert rows[1]["stars"] == "75.8k"
     assert rows[1]["repo"] == "D4Vinci/Cr3dOv3r"
+
+
+def test_learnable_rejects_llm_fallback():
+    assert auto._learnable({"total": 10}) is True
+    assert auto._learnable({"total": 10, "llm_fallback": True}) is False
+    assert auto._learnable({"total": 10, "llm_extract": True}) is False
+    assert auto._learnable({"total": 10, "agent_mode": True}) is False
+    assert auto._learnable(None) is True
