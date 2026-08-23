@@ -751,6 +751,13 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": f"生成失败: {e}"})
                 return
             if u.path == "/api/settings":
+                if body.get("reset"):
+                    # 恢复默认：清空持久化配置 + 从 env 移除（回落 QWEN_API_KEY 等默认）
+                    _save_settings({})
+                    for _env in _LLM_ENV_KEYS.values():
+                        os.environ.pop(_env, None)
+                    self._json({"ok": True, "message": "已恢复默认（清空保存的 AI 配置）"})
+                    return
                 allowed = {k: str(body.get(k) or "").strip() for k in _LLM_ENV_KEYS}
                 _save_settings(allowed)
                 _apply_settings_to_env(allowed)

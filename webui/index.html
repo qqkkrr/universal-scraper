@@ -413,6 +413,7 @@
     <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="saveSettings()">💾 保存并立即生效</button>
       <button class="btn" onclick="testSettings()">🔌 测试连通</button>
+      <button class="btn btn-ghost" onclick="resetSettings()">🔄 恢复默认</button>
       <span id="st_res" style="font-size:12.5px;align-self:center"></span>
     </div>
     <div class="muted" style="font-size:12px;margin-top:10px">💡 模型/接口/Key 保存后立刻生效，下次任务就用新 AI。Key 只存在本机配置文件里，界面显示脱敏。</div>
@@ -921,7 +922,10 @@ async function loadSettings(){
       if($('#st_base')) $('#st_base').value = d.base_url || '';
       if($('#st_vmodel')) $('#st_vmodel').value = d.vision_model || '';
       if($('#st_vbase')) $('#st_vbase').value = d.vision_base_url || '';
-      if(d._masked && d._masked.api_key && $('#st_key')) $('#st_key').placeholder = '已保存（'+($('#st_key').placeholder||'sk-...')+')，留空沿用';
+      if(d._masked && d._masked.api_key && $('#st_key')){
+        const base = $('#st_key').dataset.base || 'sk-...';
+        $('#st_key').placeholder = '已保存，留空沿用（不修改）';
+      }
     }
   }catch(e){}
   try{
@@ -956,6 +960,14 @@ async function saveSettings(){
   if(btn) btn.disabled=false;
   loadSettings();
 }
+async function resetSettings(){
+  if(!confirm('确认恢复默认？将清空保存的模型/接口/Key，改回环境变量默认。')) return;
+  const st=$('#st_res'); st.textContent='恢复中…';
+  const d = await api('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reset:true})});
+  st.textContent = d.ok ? '✅ '+d.message : '❌ '+(d.error||'失败');
+  ['st_model','st_base','st_key','st_vmodel','st_vbase','st_vkey'].forEach(id=>{ const el=$('#'+id); if(el) el.value=''; });
+  loadSettings();
+}
 async function testSettings(){
   const st=$('#st_res'); st.innerHTML='<span style="color:var(--amber)">⏳ 测试中（约 5-15 秒）…</span>';
   const d = await api('/api/settings/test',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -963,9 +975,6 @@ async function testSettings(){
   st.innerHTML = d.ok ? '<span class="ok">'+esc(d.message)+'</span>' : '<span class="err">'+esc(d.message||'测试失败')+'</span>';
 }
 // 打开设置页签时刷新
-document.querySelectorAll('.seg button').forEach(b=>{
-  const orig = b.onclick;
-});
 document.querySelectorAll('.seg button').forEach(b=>{
   if(b.dataset.tab==='settings') b.addEventListener('click', ()=>setTimeout(loadSettings, 50));
 });
