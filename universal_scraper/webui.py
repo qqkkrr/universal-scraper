@@ -624,6 +624,19 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return (headers.get("X-Auth-Token") or "") == AUTH_TOKEN
 
+    def _origin_ok(self) -> bool:
+        """CSRF 防护：POST 必须同源。
+        无 Origin（curl/CLI/非浏览器）放行；浏览器跨站 POST 必带 Origin，host 不一致则拒绝。"""
+        origin = self.headers.get("Origin", "")
+        if not origin:
+            return True
+        host = self.headers.get("Host", "")
+        try:
+            from urllib.parse import urlparse
+            return urlparse(origin).netloc == host
+        except Exception:
+            return False
+
     def do_GET(self):
         # 页面/静态资源不鉴权（否则用户连输入令牌的页面都打不开）；仅 /api/* 需要
         if self.path.startswith("/api/") and not self._auth_ok(self.headers):
@@ -723,6 +736,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._auth_ok(self.headers):
             self._send(403, "Forbidden: 需要 X-Auth-Token")
+            return
+        if not self._origin_ok():
+            self._send(403, "跨域请求被拒绝（CSRF 防护）")
             return
         u = urllib.parse.urlparse(self.path)
         try:

@@ -91,3 +91,26 @@ def test_auto_start_config_without_taskdir_safe(srv):
     except Exception:
         pass
     shutil.rmtree(td, ignore_errors=True)
+
+
+def test_csrf_foreign_origin_rejected(srv):
+    """跨站 POST 必须被拒绝（CSRF 防护）：恶意网页不能改 AI 配置/触发任务。"""
+    import urllib.request
+    req = urllib.request.Request(srv + "/api/settings",
+                                 data=b'{"model":"evil"}',
+                                 headers={"Content-Type": "application/json",
+                                          "Origin": "https://evil.example.com"},
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            assert False, "跨站 POST 应被拒绝"
+    except urllib.error.HTTPError as e:
+        assert e.code == 403, f"应 403，实际 {e.code}"
+
+
+def test_same_origin_post_allowed(srv):
+    """同源 POST 放行（WebUI 正常操作）。"""
+    code, d = _post(srv, "/api/settings", {"model": "test-model-xyz"})
+    assert code == 200 and d.get("ok"), d
+    # 恢复默认，别污染后续测试
+    _post(srv, "/api/settings", {"reset": True})
