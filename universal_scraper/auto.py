@@ -936,6 +936,9 @@ def _try_auto_precise(description: str, cfg: dict, limit, log, cookie="", proxy=
         return None
     rows = pr["rows"]
     sample = rows[:5]
+    files = pr.get("files") or {}
+    total = len(rows)
+    name = str(pr.get("name") or f"auto_precise_{pr.get('host', 'site')}")
     # 🛡️ 质量闸门：自动精配结果也要过意图校验/关键字段/数量检查——防止锁定"1条但用户要10条"的差结果
     _ap_miss = _missing_key_field(description, sample)
     _ap_bad = _intent_check(description, sample, log) if not _ap_miss else ""
@@ -947,9 +950,6 @@ def _try_auto_precise(description: str, cfg: dict, limit, log, cookie="", proxy=
     if _m and total > 0 and total * 2 < int(_m.group(1)):
         log(f"⚠️ 自动精配只出 {total} 条，但任务要求前 {_m.group(1)} 条，不采纳（数量不足）")
         return None
-    files = pr.get("files") or {}
-    total = len(rows)
-    name = str(pr.get("name") or f"auto_precise_{pr.get('host', 'site')}")
     verify = None
     try:
         from .verify import verify_rows

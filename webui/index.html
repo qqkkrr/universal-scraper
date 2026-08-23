@@ -56,10 +56,11 @@
   @keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 
   /* ---------- 卡片 ---------- */
-  .card{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+  .card{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:border-color .2s}
+  .card:hover{border-color:var(--line-2)}
   .card-title{display:flex;align-items:center;gap:10px;margin-bottom:4px}
   .card-title .idx{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:.06em}
-  .card-title h2{font-size:14px;font-weight:650;letter-spacing:.01em}
+  .card-title h2{font-size:15px;font-weight:700;letter-spacing:.01em}
   .card-title .hint{margin-left:auto;font-size:11.5px;color:var(--faint)}
   .card .desc{font-size:12.5px;color:var(--muted);margin-bottom:14px}
 
@@ -89,7 +90,10 @@
   details pre{margin-top:10px;font-family:var(--mono);font-size:11.5px;line-height:1.8;white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:12px 14px;color:var(--muted)}
 
   /* ---------- 按钮 ---------- */
-  .btn{appearance:none;border:1px solid transparent;border-radius:var(--r-s);font-family:var(--ui);font-size:13px;font-weight:650;padding:8px 18px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:filter .15s,background .15s,border-color .15s;line-height:1.3}
+  .btn{appearance:none;border:1px solid transparent;border-radius:var(--r-s);font-family:var(--ui);font-size:13px;font-weight:650;padding:8px 18px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:filter .15s,background .15s,border-color .15s,transform .12s,box-shadow .15s;line-height:1.3}
+  .btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.35)}
+  .btn:active:not(:disabled){transform:translateY(0)}
+  .btn:disabled{opacity:.55;cursor:not-allowed}
   .btn:disabled{opacity:.45;cursor:wait}
   .btn-primary{background:var(--amber);color:var(--amber-ink);box-shadow:0 1px 2px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.25)}
   .btn-primary:hover:not(:disabled){filter:brightness(1.07)}
@@ -176,18 +180,19 @@
     <button data-tab="auto" class="active"><span class="k">01</span>一句话任务</button>
     <button data-tab="paste"><span class="k">02</span>贴网页爬虫</button>
     <button data-tab="journal"><span class="k">03</span>期刊下载</button>
+    <button data-tab="settings"><span class="k">04</span>⚙️ 设置</button>
   </div>
 </nav>
 
 <main>
-<div class="card" style="margin-bottom:16px;padding:14px">
-  <h3 style="margin-top:0">📊 数据报告（us report）</h3>
+<div class="card" style="margin-bottom:16px">
+  <div class="card-title"><span class="idx">REPORT</span><h2>📊 数据报告</h2><span class="hint">爬完的 CSV → 可视化图表</span></div>
   <p style="font-size:12.5px;color:#666;margin:4px 0">粘贴爬取结果 CSV（或任意表格），自动生成可视化报告（概览/统计/分组对比/分布图）。</p>
   <input id="rp_name" placeholder="报告名（英文/数字）" value="report1" style="width:160px;padding:5px;border:1px solid #ccc;border-radius:6px;margin-bottom:6px">
   <input id="rp_group" placeholder="分组列名（可选，如：城市）" style="width:180px;padding:5px;border:1px solid #ccc;border-radius:6px;margin-left:6px">
   <textarea id="rp_csv" placeholder="在此粘贴 CSV 内容（第一行为列名）…" style="width:100%;height:120px;border:1px solid #ccc;border-radius:6px;padding:6px;font-family:monospace;font-size:12px;box-sizing:border-box"></textarea>
   <div style="margin-top:6px">
-    <button onclick="genReport()" style="padding:6px 16px;background:#4361ee;color:#fff;border:none;border-radius:6px;cursor:pointer">生成报告</button>
+    <button onclick="genReport()" style="padding:6px 16px;background:var(--amber);color:var(--amber-ink);border:none;border-radius:6px;cursor:pointer;font-weight:650">生成报告</button>
     <span id="rp_status" style="font-size:12px;margin-left:8px"></span>
   </div>
   <div id="rp_result" style="margin-top:8px"></div>
@@ -217,7 +222,7 @@
     <div class="card-title"><span class="idx">01 / TASK</span><h2>一句话任务</h2></div>
     <div class="desc">AI 自动理解任务、生成配置并运行，全程实时反馈。先出「计划」供你确认，再真正执行。</div>
     <label>任务描述</label>
-    <textarea id="a_desc" rows="4" placeholder="例如：抓取 https://quotes.toscrape.com/ 的名言、作者和标签，翻 2 页"></textarea>
+    <textarea id="a_desc" rows="4" placeholder="例如：抓取 https://quotes.toscrape.com/ 的名言、作者和标签，翻 2 页" style="font-size:14px;line-height:1.6;resize:vertical"></textarea>
     <div style="margin-top:8px">
       <select id="a_examples" style="width:100%;font-size:12.5px" onchange="applyExample(this)">
         <option value="">👇 不会描述任务？点这里选个常见例子（可直接改）</option>
@@ -281,7 +286,7 @@
     </details>
       </div>
     </details>
-    <button class="btn btn-primary btn-block" onclick="planAuto()" id="a_btn">生成执行计划</button>
+    <button class="btn btn-primary btn-block" onclick="planAuto()" id="a_btn" style="padding:12px 18px;font-size:14.5px">🚀 生成执行计划</button>
     <div class="muted" style="font-size:11.5px;margin-top:10px;text-align:center">先让 AI 生成「任务理解 + 技术路线」，你确认后才会真正开始抓取。</div>
   </div>
   <div id="a_progress" style="display:none"></div>
@@ -382,6 +387,49 @@
     <button class="btn btn-primary btn-block" onclick="startJournal()" id="j_btn">下载全部 PDF</button>
   </div>
   <div id="j_progress" style="display:none"></div>
+</div>
+
+<!-- ============ 设置 ============ -->
+<div class="tab" id="tab-settings">
+  <div class="card">
+    <div class="card-title"><span class="idx">04 / AI</span><h2>🤖 AI 配置（自己定模型）</h2><span class="hint">分享给别人时，对方在这里填自己的 AI</span></div>
+    <div class="desc">万能爬虫工具的「大脑」就是 AI（负责理解任务/生成配置/诊断失败）。默认走你本机配置的模型；改成你自己的任意 OpenAI 兼容接口即可（DeepSeek / 千问 / GPT / 本地 Ollama 都行）。</div>
+    <div class="row">
+      <div style="flex:1.4"><label>模型名 <span class="l-hint">如 deepseek-chat / qwen-max / gpt-4o</span></label>
+        <input id="st_model" placeholder="deepseek-v4-flash"></div>
+      <div style="flex:1.6"><label>接口地址 <span class="l-hint">OpenAI 兼容 /v1</span></label>
+        <input id="st_base" placeholder="https://api.deepseek.com/v1"></div>
+      <div style="flex:1.4"><label>API Key <span class="l-hint">留空=沿用当前</span></label>
+        <input id="st_key" type="password" placeholder="sk-..."></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div><label>视觉模型 <span class="l-hint">可选：看截图/验证码</span></label>
+        <input id="st_vmodel" placeholder="qwen-vl-max（可留空）"></div>
+      <div><label>视觉接口 <span class="l-hint">可选</span></label>
+        <input id="st_vbase" placeholder="通常同主接口，可留空"></div>
+      <div><label>视觉 Key <span class="l-hint">可选</span></label>
+        <input id="st_vkey" type="password" placeholder="可留空"></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="saveSettings()">💾 保存并立即生效</button>
+      <button class="btn" onclick="testSettings()">🔌 测试连通</button>
+      <span id="st_res" style="font-size:12.5px;align-self:center"></span>
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:10px">💡 模型/接口/Key 保存后立刻生效，下次任务就用新 AI。Key 只存在本机配置文件里，界面显示脱敏。</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="idx">04 / SHARE</span><h2>📤 分享给其他人</h2><span class="hint">同一网络下即可</span></div>
+    <div class="desc">默认只在本机访问。要分享：重启工具时加 <code>--share</code>，对方在浏览器打开你的「局域网地址 + 访问令牌」就能用（不需要装任何东西）。对方第一次用时在「⚙️ 设置」里填自己的 AI 即可。</div>
+    <div id="shareInfo" class="muted" style="font-size:12.5px;line-height:1.9">读取中…</div>
+    <div class="muted" style="font-size:12px;margin-top:8px">启动分享的命令：<code>python3 -m universal_scraper.cli webui --share</code></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="idx">04 / INFO</span><h2>ℹ️ 关于</h2></div>
+    <div class="desc" style="font-size:12.5px">万能爬虫工具 v3 · 宗旨「不管是大佬还是小白，天下没有难爬的虫」<br>
+    一键任务 AI 自动理解 → 自动精配 → 失败自动诊断；数据导出 JSON / CSV / Excel。</div>
+  </div>
 </div>
 
 <!-- ============ 最近任务 ============ -->
@@ -615,7 +663,7 @@ async function planAuto(){
     +'<div id="a_guide"></div>'
     +intentBlock(d.config)
     +'<h4>任务摘要</h4><pre>'+esc(d.summary||'')+'</pre>'
-    +'<details><summary style="cursor:pointer;font-weight:600;color:#4361ee;margin-top:10px">🔧 技术路线（进阶，一般不用管）</summary><pre style="margin-top:8px">'+esc(d.route||'')+'</pre></details>'
+    +'<details><summary style="cursor:pointer;font-weight:600;color:var(--teal);margin-top:10px">🔧 技术路线（进阶，一般不用管）</summary><pre style="margin-top:8px">'+esc(d.route||'')+'</pre></details>'
     +'<h4>完整配置（可直接修改，确认时以你改过的为准）</h4>'
     +'<div class="muted" style="font-size:11.5px;margin-bottom:6px">日期过滤在 pipelines 的 between：min/max 是<b>北京时间 Unix 秒</b>（'+todayHint()+'）；要取消日期过滤就删除该条 between。</div>'
     +'<textarea id="a_config_edit" rows="12" style="width:100%;font-family:var(--mono);font-size:12px">'+esc(JSON.stringify(d.config,null,2))+'</textarea>'
@@ -636,7 +684,7 @@ async function planAuto(){
   if(d.guide && d.guide['一句话说明']){
     const g=d.guide;
     document.getElementById('a_guide').innerHTML=
-      '<div style="border:1px solid #4ade80;border-radius:12px;padding:14px 16px;margin:10px 0;background:rgba(74,222,128,.08)">'
+      '<div style="border:1px solid var(--teal);border-radius:12px;padding:14px 16px;margin:10px 0;background:rgba(94,207,192,.08)">'
       +'<div style="font-size:13px;font-weight:700;margin-bottom:8px">🤖 AI 说人话</div>'
       +'<div style="font-size:13px;margin-bottom:6px"><b>做什么：</b>'+esc(g['一句话说明']||'')+'</div>'
       +'<div style="font-size:13px;margin-bottom:6px"><b>预计能拿到：</b>'+esc(g['预计能拿到']||'')+'</div>'
@@ -865,6 +913,63 @@ setInterval(checkCodeChanged, 20000);
 checkCodeChanged();
 
 
+async function loadSettings(){
+  try{
+    const d = await api('/api/settings');
+    if(d && typeof d === 'object'){
+      if($('#st_model')) $('#st_model').value = d.model || '';
+      if($('#st_base')) $('#st_base').value = d.base_url || '';
+      if($('#st_vmodel')) $('#st_vmodel').value = d.vision_model || '';
+      if($('#st_vbase')) $('#st_vbase').value = d.vision_base_url || '';
+      if(d._masked && d._masked.api_key && $('#st_key')) $('#st_key').placeholder = '已保存（'+($('#st_key').placeholder||'sk-...')+')，留空沿用';
+    }
+  }catch(e){}
+  try{
+    const st = await api('/api/status');
+    const el = $('#shareInfo'); if(!el) return;
+    if(st.share){
+      const url = 'http://'+(st.host||'127.0.0.1')+':'+st.port;
+      el.innerHTML = '<div class="ok">✅ 分享模式已开启</div>'
+        +'<div>🔗 局域网地址：<code>'+url+'</code></div>'
+        +'<div>🔑 访问令牌：<code>'+esc(st.token)+'</code>（对方打开页面后输入）</div>'
+        +'<div style="margin-top:6px">当前 AI：<code>'+esc(st.llm_model||'?')+'</code> @ '+esc((st.llm_base_url||'').replace('https://','').replace('http://',''))+'</div>';
+    } else {
+      el.innerHTML = '<div>📡 当前：仅本机访问（<code>http://127.0.0.1:'+(st.port||8642)+'</code>）</div>'
+        +'<div>要分享给同一 Wi-Fi 的人：用 <code>--share</code> 重启（命令见下）</div>'
+        +'<div style="margin-top:6px">当前 AI：<code>'+esc(st.llm_model||'?')+'</code></div>';
+    }
+  }catch(e){ const el=$('#shareInfo'); if(el) el.textContent='读取失败：'+e.message; }
+}
+async function saveSettings(){
+  const btn=event&&event.target; if(btn) btn.disabled=true;
+  const st=$('#st_res'); st.textContent='保存中…';
+  const payload={
+    model:$('#st_model').value.trim(),
+    base_url:$('#st_base').value.trim(),
+    api_key:$('#st_key').value.trim(),
+    vision_model:$('#st_vmodel').value.trim(),
+    vision_base_url:$('#st_vbase').value.trim(),
+    vision_api_key:$('#st_vkey').value.trim(),
+  };
+  const d = await api('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  st.textContent = d.ok ? '✅ '+d.message : '❌ '+(d.error||'失败');
+  if(btn) btn.disabled=false;
+  loadSettings();
+}
+async function testSettings(){
+  const st=$('#st_res'); st.innerHTML='<span style="color:var(--amber)">⏳ 测试中（约 5-15 秒）…</span>';
+  const d = await api('/api/settings/test',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model:$('#st_model').value.trim(), base_url:$('#st_base').value.trim(), api_key:$('#st_key').value.trim()})});
+  st.innerHTML = d.ok ? '<span class="ok">'+esc(d.message)+'</span>' : '<span class="err">'+esc(d.message||'测试失败')+'</span>';
+}
+// 打开设置页签时刷新
+document.querySelectorAll('.seg button').forEach(b=>{
+  const orig = b.onclick;
+});
+document.querySelectorAll('.seg button').forEach(b=>{
+  if(b.dataset.tab==='settings') b.addEventListener('click', ()=>setTimeout(loadSettings, 50));
+});
+
 async function genReport(){
   const name = (document.getElementById('rp_name').value||'report1').replace(/[^A-Za-z0-9_-]/g,'')||'report1';
   const group = document.getElementById('rp_group').value.trim();
@@ -879,7 +984,7 @@ async function genReport(){
     const d = await r.json();
     if(d.ok){
       st.textContent='✅ 完成';
-      res.innerHTML = `<p style="font-size:12.5px">${d.stats.rows} 行 / ${d.stats.cols} 列 / ${d.stats.numeric} 数值列 / ${d.stats.groups} 组 &nbsp; <a href="${d.report}" target="_blank" style="color:#4361ee">打开报告 →</a></p>`;
+      res.innerHTML = `<p style="font-size:12.5px">${d.stats.rows} 行 / ${d.stats.cols} 列 / ${d.stats.numeric} 数值列 / ${d.stats.groups} 组 &nbsp; <a href="${d.report}" target="_blank" style="color:var(--teal)">打开报告 →</a></p>`;
     } else { st.textContent='❌ '+d.error; }
   }catch(e){ st.textContent='❌ 请求失败: '+e; }
 }

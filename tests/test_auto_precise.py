@@ -15,6 +15,9 @@ def _mock_ok(**kw):
 
 
 def test_auto_precise_success(monkeypatch):
+    # 质量闸门（意图/关键字段/数量）走真实 LLM 会拖慢测试 → mock 掉闸门检查
+    monkeypatch.setattr(auto, "_intent_check", lambda *a, **k: "")
+    monkeypatch.setattr(auto, "_missing_key_field", lambda *a, **k: "")
     logs = []
     monkeypatch.setattr(pa, "generate_precise", _mock_ok())
     out = auto._try_auto_precise("抓取列表", CFG, 10, logs.append)
@@ -36,6 +39,17 @@ def test_auto_precise_exception_returns_none(monkeypatch):
     monkeypatch.setattr(pa, "generate_precise", boom)
     out = auto._try_auto_precise("抓取列表", CFG, 10, lambda m: None)
     assert out is None
+
+
+def test_auto_precise_volume_gate_rejects(monkeypatch):
+    """描述要"前 20 条"但自动精配只出 3 条 → 不采纳（质量闸门）。"""
+    monkeypatch.setattr(auto, "_intent_check", lambda *a, **k: "")
+    monkeypatch.setattr(auto, "_missing_key_field", lambda *a, **k: "")
+    logs = []
+    monkeypatch.setattr(pa, "generate_precise", _mock_ok())
+    out = auto._try_auto_precise("抓取列表前 20 条", CFG, 10, logs.append)
+    assert out is None
+    assert any("数量不足" in m for m in logs)
 
 
 def test_auto_precise_no_url_returns_none():

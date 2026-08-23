@@ -41,6 +41,48 @@ AUTH_TOKEN = ""
 
 # 任务历史持久化：重启不丢，可复盘（用户说"跑过"的任务必须能回看）
 HISTORY_FILE = ROOT / "jobs_history.json"
+SETTINGS_FILE = ROOT / "configs" / "settings.json"
+_LLM_ENV_KEYS = {
+    "model": "LLM_MODEL",
+    "base_url": "OPENAI_BASE_URL",
+    "api_key": "OPENAI_API_KEY",
+    "vision_model": "VISION_MODEL",
+    "vision_base_url": "VISION_BASE_URL",
+    "vision_api_key": "VISION_API_KEY",
+}
+
+
+def _load_settings() -> dict:
+    try:
+        if SETTINGS_FILE.exists():
+            return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_settings(st: dict) -> None:
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(st, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _apply_settings_to_env(st: dict) -> None:
+    """把持久化的 AI 配置写进当前进程 env（LLMClient 每次读 env，立即生效）。"""
+    for key, env in _LLM_ENV_KEYS.items():
+        v = (st.get(key) or "").strip()
+        if v:
+            os.environ[env] = v
+
+
+def _mask_key(k: str) -> str:
+    if not k:
+        return ""
+    return k[:6] + "••••" + k[-4:] if len(k) > 12 else "••••"
+
+
 CODE_DIRS = (ROOT / "universal_scraper", ROOT / "scripts", ROOT / "webui")
 _CODE_FP_START = ""
 
@@ -641,6 +683,21 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/ip":
                 from .net import detect_ip
                 self._json(detect_ip())
+            elif u.path == "/api/settings":
+                st = dict(_load_settings())
+                out = {k: (v if k != "api_key" and k != "vision_api_key" else _mask_key(v))
+                       for k, v in st.items()}
+                out["_masked"] = {"api_key": bool(st.get("api_key")), "vision_api_key": bool(st.get("vision_api_key"))}
+                self._json(out)
+            elif u.path == "/api/status":
+                self._json({
+                    "share": bool(AUTH_TOKEN),
+                    "token": AUTH_TOKEN or "",
+                    "port": int(os.environ.get("US_WEBUI_PORT", "8642")),
+                    "host": os.environ.get("US_WEBUI_HOST", "127.0.0.1"),
+                    "llm_model": os.environ.get("LLM_MODEL", "qwen3.7-plus"),
+                    "llm_base_url": os.environ.get("OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+                })
             elif u.path == "/api/verify":
                 name = q.get("file", [""])[0]
                 # 路径穿越防护：只允许 outputs 目录内（resolve 后校验前缀，拒绝绝对路径/..）
@@ -692,6 +749,24 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": True, "report": f"/reports/{name}.html", "stats": r})
                 except Exception as e:
                     self._json({"error": f"生成失败: {e}"})
+                return
+            if u.path == "/api/settings":
+                allowed = {k: str(body.get(k) or "").strip() for k in _LLM_ENV_KEYS}
+                _save_settings(allowed)
+                _apply_settings_to_env(allowed)
+                self._json({"ok": True, "message": "AI 配置已保存并生效"})
+                return
+            if u.path == "/api/settings/test":
+                model = str(body.get("model") or os.environ.get("LLM_MODEL", "qwen3.7-plus")).strip()
+                base_url = str(body.get("base_url") or os.environ.get("OPENAI_BASE_URL", "")).strip()
+                api_key = str(body.get("api_key") or os.environ.get("OPENAI_API_KEY", "")).strip()
+                try:
+                    from .llm import LLMClient
+                    c = LLMClient(model=model or None, base_url=base_url or None, api_key=api_key or None)
+                    r = c.chat([{"role": "user", "content": "只回复：OK"}], temperature=0.1)
+                    self._json({"ok": True, "message": f"✅ 连通成功：{model} 返回「{str(r)[:30]}」"})
+                except Exception as e:
+                    self._json({"ok": False, "message": f"❌ 连通失败：{type(e).__name__}: {str(e)[:120]}"})
                 return
             if u.path == "/api/auto/plan":
                 desc = str(body.get("description", "")).strip()
@@ -1034,6 +1109,13 @@ def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
     global PY, AUTH_TOKEN
     import sys, secrets
     global _CODE_FP_START
+    # ⚙️ 启动时加载持久化 AI 配置（用户上次在界面里配置的模型/接口/Key 自动生效）
+    try:
+        _apply_settings_to_env(_load_settings())
+    except Exception:
+        pass
+    os.environ["US_WEBUI_PORT"] = str(port)
+    os.environ["US_WEBUI_HOST"] = host
     _load_jobs()
     threading.Thread(target=_scheduler_loop, daemon=True).start()  # ⏰ 定时任务调度
     _CODE_FP_START = _code_fingerprint()
