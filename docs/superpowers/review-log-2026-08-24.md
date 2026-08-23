@@ -12,6 +12,6 @@
 | R6 | 无 | - | 2 |
 | R7 | 无 | - | 3 |
 | R8 | settings.json 未 gitignore（Key 有误提交风险） | 补 .gitignore | - |
-| R9 | | | |
+| R9 | 无 | - | 1 |
 
 基线：pytest 55 passed；webapp 12/12；CSRF/越权读封堵。
