@@ -232,11 +232,18 @@ def _llm_chat(messages: List[Dict[str, str]], timeout: int = 120) -> str:
             raise box["e"]
         return box["r"]
 
-    out = _call(0.2)
-    if out is None or not str(out).strip():
-        _t.sleep(2)
-        out = _call(0.7)   # 空响应：提高温度重试一次
-    return str(out or "")
+    # 弹性：超时/异常/空响应都重试（模型波动不应让整单任务失败）
+    last_err = ""
+    for attempt in range(1, 4):
+        try:
+            out = _call(0.2 if attempt == 1 else 0.7)
+            if out is not None and str(out).strip():
+                return str(out)
+            last_err = "空响应"
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+        _t.sleep(2 * attempt)  # 2s / 4s 退避
+    raise RuntimeError(f"LLM 连续 3 次失败：{last_err}（模型接口/网络波动，可稍后重试）")
 
 
 def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
@@ -929,6 +936,17 @@ def _try_auto_precise(description: str, cfg: dict, limit, log, cookie="", proxy=
         return None
     rows = pr["rows"]
     sample = rows[:5]
+    # 🛡️ 质量闸门：自动精配结果也要过意图校验/关键字段/数量检查——防止锁定"1条但用户要10条"的差结果
+    _ap_miss = _missing_key_field(description, sample)
+    _ap_bad = _intent_check(description, sample, log) if not _ap_miss else ""
+    if _ap_miss or _ap_bad:
+        log(f"⚠️ 自动精配结果不达要求（{_ap_miss or _ap_bad}），不采纳，继续自修复/通用流程")
+        return None
+    import re as _re3
+    _m = _re3.search(r"前\s*(\d+)", description or "")
+    if _m and total > 0 and total * 2 < int(_m.group(1)):
+        log(f"⚠️ 自动精配只出 {total} 条，但任务要求前 {_m.group(1)} 条，不采纳（数量不足）")
+        return None
     files = pr.get("files") or {}
     total = len(rows)
     name = str(pr.get("name") or f"auto_precise_{pr.get('host', 'site')}")

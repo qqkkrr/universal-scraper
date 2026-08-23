@@ -26,12 +26,12 @@ def run_one(task):
            "summary": "", "error": "", "t_sec": 0}
     t0 = time.time()
     try:
-        j = api("/api/auto/start", "POST", {"description": desc, "limit": 20, "rounds": 1, "timeout": 200}, timeout=60)
+        j = api("/api/auto/start", "POST", {"description": desc, "limit": 20, "rounds": _ROUNDS, "timeout": 200}, timeout=60)
         jid = j.get("job")
         if not jid:
             rec["status"] = "no_job"; rec["error"] = str(j)[:200]
             return rec
-        while time.time() - t0 < 260:
+        while time.time() - t0 < _TIMEOUT:
             d = api("/api/job?job=" + jid, timeout=30)
             st = d.get("status")
             if st in ("done", "error"):
@@ -62,11 +62,16 @@ def main():
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--task", type=int, default=None, help="只跑指定编号")
     ap.add_argument("--probe", action="store_true", help="对需登录任务做快速探测分类")
+    ap.add_argument("--timeout", type=int, default=600, help="单个任务总上限秒")
+    ap.add_argument("--rounds", type=int, default=1)
     a = ap.parse_args()
     tasks = PUBLIC if not a.probe else LOGIN_OR_ANTIBOT
     if a.task:
         tasks = [t for t in tasks if t[0] == a.task]
-    print(f"待跑 {len(tasks)} 个任务，并发 {a.workers}")
+    global _TIMEOUT, _ROUNDS
+    _TIMEOUT = a.timeout
+    _ROUNDS = a.rounds
+    print(f"待跑 {len(tasks)} 个任务，并发 {a.workers}，单任务上限 {a.timeout}s")
     if OUT.exists(): OUT.unlink()
     q = queue.Queue()
     for t in tasks: q.put(t)
