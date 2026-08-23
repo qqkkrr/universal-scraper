@@ -109,8 +109,20 @@ def test_csrf_foreign_origin_rejected(srv):
 
 
 def test_same_origin_post_allowed(srv):
-    """同源 POST 放行（WebUI 正常操作）。"""
-    code, d = _post(srv, "/api/settings", {"model": "test-model-xyz"})
-    assert code == 200 and d.get("ok"), d
-    # 恢复默认，别污染后续测试
-    _post(srv, "/api/settings", {"reset": True})
+    """同源 POST 放行（WebUI 正常操作）。
+    注意：测试服务器与真实服务共用 configs/settings.json——必须快照并在结束后恢复，
+    否则会污染线上 AI 配置。"""
+    import shutil
+    st_file = ROOT / "configs" / "settings.json"
+    backup = st_file.read_bytes() if st_file.exists() else None
+    try:
+        code, d = _post(srv, "/api/settings", {"model": "test-model-xyz"})
+        assert code == 200 and d.get("ok"), d
+        # 确实生效（设置已写入）
+        code2, d2 = _get(srv, "/api/settings")
+        assert code2 == 200 and json.loads(d2).get("model") == "test-model-xyz", d2
+    finally:
+        if backup is not None:
+            st_file.write_bytes(backup)
+        else:
+            st_file.unlink(missing_ok=True)
