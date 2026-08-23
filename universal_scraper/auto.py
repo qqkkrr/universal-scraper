@@ -1679,11 +1679,26 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
 
     返回 {}（未命中/失败，调用方继续 AI 流程）或完整 auto_task 结果。"""
     try:
-        from .sites import match_site_by_description, seed_url_for, run_site
+        from .sites import match_site_by_description, seed_url_for, run_site, SITES, match_site
         site = match_site_by_description(description)
+        seed = ""
+        if not site:
+            # 描述里直接出现已注册精配域名（含自动精配，如 www.producthunt.com）
+            # → 直接走精配，跳过 AI 生成配置（省 LLM、更快）
+            import re as _re
+            for _tok in _re.findall(r"(?:https?://)?([a-zA-Z0-9][a-zA-Z0-9.\-]*\.[a-z]{2,})", description or ""):
+                _tok = _tok.lower()
+                for _n, _s in SITES.items():
+                    if _s.get("run") and _s.get("match") and _s["match"](_tok):
+                        site, seed = _n, ("https://" + _tok)
+                        log(f"🏆 描述含已注册精配域名[{site}]：跳过 AI 生成配置，直接走精配…")
+                        break
+                if site:
+                    break
         if not site:
             return {}
-        seed = seed_url_for(description)
+        if not seed:
+            seed = seed_url_for(description)
         if not seed:
             return {}
         import hashlib as _hl
