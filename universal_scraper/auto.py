@@ -890,6 +890,65 @@ def _try_precise_first(description: str, cfg: dict, limit, log, out_name: str = 
         return None
 
 
+def _try_auto_precise(description: str, cfg: dict, limit, log, cookie="", proxy="",
+                       round_timeout=None) -> Optional[Dict[str, Any]]:
+    """🤖 自动精配：通用引擎首轮失败时自动为站点生成精配（探测→战术→LLM→试跑）。
+    返回完整 auto_task 结果（成功）或 None（未命中/失败，调用方继续自修复）。
+    满足"任何需要精配的任务都能自动精配"——不靠用户手动点一键精配。"""
+    su = (cfg.get("start_urls") or [""])[0]
+    if not su:
+        return None
+    try:
+        from .precise_auto import generate_precise
+        import os as _os
+        _ap_timeout = int(_os.environ.get("US_AUTO_PRECISE_TIMEOUT", "240"))
+        log("🤖 通用引擎首轮失败，自动生成精配（探测页面结构 + 生成解析器 + 试跑，约 1-3 分钟）...")
+        box: Dict[str, Any] = {}
+
+        def _run():
+            try:
+                box["r"] = generate_precise(description, su, cfg or None,
+                                            limit=int(limit or 8), log=log)
+            except Exception as e:
+                box["e"] = e
+
+        th = threading.Thread(target=_run, daemon=True)
+        th.start()
+        th.join(_ap_timeout)
+        if th.is_alive():
+            log(f"⏱️ 自动精配超过 {_ap_timeout}s 未完成，放弃自动精配，继续自修复")
+            return None
+        if "e" in box:
+            raise box["e"]
+        pr = box.get("r") or {}
+    except Exception as e:
+        log(f"⚠️ 自动精配不可用：{e}")
+        return None
+    if not (pr.get("ok") and pr.get("rows")):
+        log(f"⚠️ 自动精配未成功（{pr.get('error') or '0 条'}），继续自修复")
+        return None
+    rows = pr["rows"]
+    sample = rows[:5]
+    files = pr.get("files") or {}
+    total = len(rows)
+    name = str(pr.get("name") or f"auto_precise_{pr.get('host', 'site')}")
+    verify = None
+    try:
+        from .verify import verify_rows
+        verify = verify_rows(sample, cfg, sample_n=3, network=True,
+                             declared=total, timeout=12)
+    except Exception:
+        pass
+    summary = (f"✅ 任务结束：自动精配[{pr.get('host', '')}] {total} 条"
+               f"，导出 {list(files.values())}")
+    log(summary)
+    return {"name": name, "config": cfg,
+            "result": {"total": total, "fetched": total, "errors": 0,
+                       "precise": pr.get("host", ""), "files": files},
+            "log": "", "sample": sample, "files": files,
+            "summary": summary, "verify": verify, "done": True}
+
+
 _KEY_DATE_WORDS = ("日期", "时间", "发布", "更新", "date", "time", "publish", "上线", "创建")
 
 
@@ -1925,6 +1984,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                        "precise": _precise.get("site")}
     _loop_rounds = 0 if _precise_done else rounds
     _llm_ev_tried = False
+    _auto_precise_tried = False
     for round_i in range(1, _loop_rounds + 1):
         # 写任务包
         (task_dir / "modules").mkdir(parents=True, exist_ok=True)
@@ -2017,6 +2077,16 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
+
+        # 🤖 自动精配：通用引擎首轮失败 → 自动为站点生成精配（探测+LLM+试跑），成功即收
+        # （满足"任何需要精配的任务都能自动精配"，不再空转 N 轮自修复）
+        if round_i == 1 and not _auto_precise_tried and not _precise_done:
+            _auto_precise_tried = True
+            _ap = _try_auto_precise(description, cfg, limit, log,
+                                    cookie=cookie or "", proxy=proxy or "",
+                                    round_timeout=round_timeout)
+            if _ap is not None:
+                return _ap
 
         # 🛡️ 反爬/验证拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
         # 覆盖 waf/cloudflare/verify/captcha/anti_bot/rate_limit 等：http 硬刚只会一直 0 条
@@ -2298,6 +2368,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                        "precise": _precise.get("site")}
     _loop_rounds = 0 if _precise_done else rounds
     _llm_ev_tried = False
+    _auto_precise_tried = False
     import os as _os
     import threading as _th
     if round_timeout is None:
@@ -2376,6 +2447,15 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
+
+        # 🤖 自动精配：通用引擎首轮失败 → 自动为站点生成精配（同 auto_task）
+        if round_i == 1 and not _auto_precise_tried and not _precise_done:
+            _auto_precise_tried = True
+            _ap = _try_auto_precise(description or "", config, limit, log,
+                                    cookie=cookie or "", proxy=proxy or "",
+                                    round_timeout=round_timeout)
+            if _ap is not None:
+                return _ap
 
         # 🛡️ WAF 滑块拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
         # 注意：即使本轮有真实行，只要 WAF 拦截导致关键字段缺失/详情失败，也必须升级
