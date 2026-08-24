@@ -465,8 +465,9 @@ def generate_precise(description: str, url: str, config: Optional[Dict[str, Any]
                   "html_engine": _tactic_engine_probe}[tactic]
         rows, files, detail = _repair_probe(meta, url, limit, runner, _lg)
         _lg(f"✅ 试跑成功：{len(rows)} 条")
+        # rows 返回完整数据（自动精配要拿全量；之前只给 3 行样例会让质量闸门误判"数量不足"）
         return {"ok": True, "host": host, "kind": f"tactic:{tactic}", "name": meta["name"],
-                "rows": rows[:3], "files": files, "error": "", "detail": detail}
+                "rows": rows, "sample": rows[:3], "files": files, "error": "", "detail": detail}
     except Exception as e:
         _lg(f"❌ 试跑失败：{type(e).__name__}: {e}")
         return {"ok": False, "host": host, "kind": f"tactic:{tactic}", "name": meta["name"],

@@ -888,6 +888,18 @@ def _try_precise_first(description: str, cfg: dict, limit, log, out_name: str = 
             raise box["e"]
         dr = box.get("r") or {}
         if dr.get("rows"):
+            # 🛡️ 质量闸门：已注册精配也可能被坏配置/错页污染（曾抓到商品页冒充 GitHub 仓库），
+            # 必须过关键字段+意图校验，不过则拒用并回退通用引擎（与 _try_auto_precise 一致）
+            try:
+                _precise_sample = (dr.get("rows") or [])[:5]
+                _miss = _missing_key_field(description or "", _precise_sample)
+                _bad = _intent_check(description or "", _precise_sample, log) if not _miss else ""
+                if _miss or _bad:
+                    log(f"⚠️ 直达精配[{site}]结果不达要求（{_miss or _bad}），不采纳，改用通用引擎")
+                    return {"total": 0, "rows": [], "files": {},
+                            "error": f"直达精配[{site}]结果不达要求：{_miss or _bad}", "site": site}
+            except Exception as _e:
+                log(f"⚠️ 直达精配[{site}]质量校验异常（{_e}），继续使用精配结果")
             log(f"🏆 直达精配[{site}]成功：{dr['total']} 条")
         elif dr.get("error"):
             log(f"⚠️ 直达精配[{site}]失败：{dr['error']}（改用通用引擎兜底）")
@@ -2337,10 +2349,14 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             except Exception:
                 pass
         vtxt = ""
+        _vbad = []
         if verify and verify.get("checks"):
             bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]
+            _vbad = bad
             vtxt = ("｜复核 ✅ 通过" if not bad else "｜复核 ⚠️ " + "；".join(bad))
-        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段）{vtxt}{_font_obfuscation_hint(real)}，导出 {list(files)}"
+        # 复核发现关键问题（字段完整率/数量校验失败）→ 不能叫"✅ 成功"，改"⚠️ 部分成功"
+        _flag = "✅" if not _vbad else "⚠️"
+        summary = f"{_flag} 任务结束：成功 {total} 条{vtxt}{_font_obfuscation_hint(real)}，导出 {list(files)}"
     else:
         reason = _diagnose_failure(cfg.get("start_urls"), last_result, log)
         summary = f"⚠️ 任务结束：0 条。原因诊断：{reason}"
@@ -2387,6 +2403,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     except Exception:
         pass
 
+    # 与 auto_task 一致：run_with_config 也用到 _learned（直达精配成功/意图失败删除），必须初始化
+    _learned = None
     last_result = {}
     last_log = ""
     sample: List[Dict[str, Any]] = []
@@ -2484,8 +2502,9 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         # 🤖 自动精配：通用引擎首轮失败 → 自动为站点生成精配（同 auto_task）
         if round_i == 1 and not _auto_precise_tried and not _precise_done:
             _auto_precise_tried = True
+            # run_with_config 没有 cookie/proxy 形参（已在 config 里），传空即可
             _ap = _try_auto_precise(description or "", config, limit, log,
-                                    cookie=cookie or "", proxy=proxy or "",
+                                    cookie="", proxy="",
                                     round_timeout=round_timeout)
             if _ap is not None:
                 return _ap
@@ -2648,10 +2667,14 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             except Exception:
                 pass
         vtxt = ""
+        _vbad = []
         if verify and verify.get("checks"):
             bad = [c["name"] for c in verify["checks"] if not c.get("pass", True)]
+            _vbad = bad
             vtxt = ("｜复核 ✅ 通过" if not bad else "｜复核 ⚠️ " + "；".join(bad))
-        summary = f"✅ 任务结束：成功 {total} 条（抽样 {len(real)} 条有真实字段）{vtxt}{_font_obfuscation_hint(real)}，导出 {list(files)}"
+        # 复核发现关键问题（字段完整率/数量校验失败）→ 不能叫"✅ 成功"，改"⚠️ 部分成功"
+        _flag = "✅" if not _vbad else "⚠️"
+        summary = f"{_flag} 任务结束：成功 {total} 条{vtxt}{_font_obfuscation_hint(real)}，导出 {list(files)}"
     else:
         reason = _diagnose_failure(config.get("start_urls"), last_result, log)
         summary = f"⚠️ 任务结束：0 条。原因诊断：{reason}"

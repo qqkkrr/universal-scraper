@@ -55,3 +55,20 @@ def test_auto_precise_volume_gate_rejects(monkeypatch):
 def test_auto_precise_no_url_returns_none():
     out = auto._try_auto_precise("x", {"start_urls": []}, 10, lambda m: None)
     assert out is None
+
+
+def test_run_with_config_initializes_learned():
+    """回归：run_with_config 曾未初始化 _learned → 确认计划命中精配时 NameError 崩溃。"""
+    import ast
+    from pathlib import Path
+    src = (Path(auto.__file__).parent / "auto.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    rwc = next(n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "run_with_config")
+    body_src = src.splitlines()[rwc.lineno-1: rwc.end_lineno]
+    # 顶层必须有 `_learned = None`（而不是只在 if 分支里）
+    has_init = any(line.strip() == "_learned = None" for line in body_src)
+    assert has_init, "run_with_config 缺少 _learned 初始化（会导致确认流程崩溃）"
+    # run_with_config 没有 cookie/proxy 形参 → hook 不得引用它们（曾 NameError）
+    assert "cookie=cookie" not in "\n".join(body_src), "run_with_config hook 引用了不存在的 cookie 形参"
+    assert "proxy=proxy" not in "\n".join(body_src), "run_with_config hook 引用了不存在的 proxy 形参"
