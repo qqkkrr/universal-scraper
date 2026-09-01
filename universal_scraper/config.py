@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 SOURCE_TYPES = {"http_json", "http_html", "browser_script", "browser"}
 PAGINATION_STRATEGIES = {"page_param", "offset", "next_url", "none"}

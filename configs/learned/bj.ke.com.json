@@ -1,0 +1,130 @@
+{
+ "host": "bj.ke.com",
+ "learned_at": 1786428779.541962,
+ "from_description": "贝壳“必看好房”标签房源，自2025年9月1日起，每隔24小时抓取北京所有该标签房源的面积、总价、上榜理由。",
+ "config": {
+  "start_urls": [
+   "https://bj.ke.com/ershoufang/pg1/"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/ershoufang/pg",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": ".sellListContent li, .houseList li, .content .list .item",
+    "fields": {
+     "title": {
+      "css": ".title a:first-of-type::text"
+     },
+     "link": {
+      "css": ".title a:first-of-type::attr(href)"
+     },
+     "area": {
+      "css": ".houseInfo::text"
+     },
+     "total_price": {
+      "css": ".totalPrice span::text, .totalPrice::text"
+     },
+     "tag": {
+      "css": ".houseInfo::text, .followInfo::text, .tag::text"
+     }
+    },
+    "extract_links": {
+     "allow": "^/ershoufang/pg\\d+/$",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": ".sellListContent li, .houseList li, .content .list .item",
+    "fields": {
+     "title": {
+      "css": ".title a:first-of-type::text"
+     },
+     "link": {
+      "css": ".title a:first-of-type::attr(href)"
+     },
+     "area": {
+      "css": ".houseInfo::text"
+     },
+     "total_price": {
+      "css": ".totalPrice span::text, .totalPrice::text"
+     },
+     "tag": {
+      "css": ".houseInfo::text, .followInfo::text, .tag::text"
+     }
+    },
+    "extract_links": {
+     "allow": "^/ershoufang/pg\\d+/$",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "tag",
+    "op": "contains",
+    "value": "必看好房"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://bj.ke.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "area",
+     "type": "css_text",
+     "selector": "div.base .content li::text, .houseInfo::text"
+    },
+    {
+     "name": "total_price",
+     "type": "css_text",
+     "selector": ".totalPrice::text, .price::text"
+    },
+    {
+     "name": "reason",
+     "type": "css_text",
+     "selector": ".feature-list .content li::text, .house-features .content li::text, .recommend-reason::text, .bikan-reason::text, .house-extra .content::text, .tags .content li::text"
+    }
+   ],
+   "filters": [
+    {
+     "type": "filter",
+     "field": "reason",
+     "op": "non_empty"
+    }
+   ],
+   "concurrency": 1,
+   "interval": 1.0
+  },
+  "queue": {
+   "max_depth": 100,
+   "max_requests": 1000,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1.0,
+   "max_retries": 3
+  }
+ }
+}

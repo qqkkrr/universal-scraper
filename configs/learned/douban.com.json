@@ -1,0 +1,129 @@
+{
+ "host": "douban.com",
+ "learned_at": 1786437716.420563,
+ "from_description": "豆瓣同城“深圳·周末活动”，在2025年8月22日抓取8月23日-24日的活动名称、时间、地点、费用。",
+ "config": {
+  "start_urls": [
+   "https://www.douban.com/location/shenzhen/events/future-all"
+  ],
+  "source": {
+   "type": "http",
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "future-all",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": ".event-list li, li.list-item",
+    "fields": {
+     "title": {
+      "css": ".title a::text"
+     },
+     "time": {
+      "css": ".date::text"
+     },
+     "location": {
+      "css": ".place::text"
+     },
+     "price": {
+      "css": ".price::text"
+     },
+     "link": {
+      "css": ".title a::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "start=\\d+",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": ".event-list li, li.list-item",
+    "fields": {
+     "title": {
+      "css": ".title a::text"
+     },
+     "time": {
+      "css": ".date::text"
+     },
+     "location": {
+      "css": ".place::text"
+     },
+     "price": {
+      "css": ".price::text"
+     },
+     "link": {
+      "css": ".title a::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "start=\\d+",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "title"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://www.douban.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "time_detail",
+     "type": "css_text",
+     "selector": "#event_time::text"
+    }
+   ],
+   "filters": [
+    {
+     "type": "parse_date",
+     "field": "time_detail",
+     "out": "ts"
+    },
+    {
+     "type": "filter",
+     "field": "ts",
+     "op": "between",
+     "min": 1787414400,
+     "max": 1787587200
+    }
+   ],
+   "concurrency": 2,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 800,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 1.0,
+   "max_retries": 2
+  }
+ }
+}

@@ -6,6 +6,7 @@
   - auto     一句话任务 → AI 自动生成配置并运行（万能爬虫最强入口）
   - crawl    从 URL 递归爬站（Firecrawl crawl 风格）
   - extract  HTML 文本 → 干净 Markdown / 正文 / 表格（省 token）
+  - books    图书目录采集：ISBN → 豆瓣评分/出版社 + 京东当当比价（只采书目，不下载正文）
   - check    引擎体检：版本、能力矩阵、战绩、LLM 是否可用
 
 传输：stdio + 换行分隔 JSON-RPC 2.0（MCP 标准），零第三方依赖，可直接被
@@ -20,7 +21,6 @@ Claude Desktop / Cursor / Continue / Codex 等通过 stdio 配置接入。
 from __future__ import annotations
 
 import json
-import os
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -99,6 +99,25 @@ TOOLS: List[Dict[str, Any]] = [
                 "max_chars": {"type": "integer", "description": "输出上限字符（默认 50000，防爆 token）"},
             },
             "required": ["html"],
+        },
+    },
+    {
+        "name": "books",
+        "description": (
+            " 图书目录采集：按 ISBN 清单抓取豆瓣评分/作者/出版社、京东+当当聚合比价，"
+            "导出 booklist.csv / booklist.md / books.json / crawl_log.md。"
+            "只采集书目数据与公开封面，不下载电子书/PDF，不绕过登录或付费墙；"
+            "0 条/部分失败会返回逐项诊断与行动方案（status=NO_DATA/PARTIAL），不会伪装成功。"
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec": {"type": "object", "description": '内联 spec：{"name":"我的书单","books":[{"title":"书名","isbn":"9787563394180"}]}'},
+                "spec_path": {"type": "string", "description": "spec JSON 文件路径（与 spec 二选一；相对路径按本仓库根解析，如 examples/books.spec.json）"},
+                "out": {"type": "string", "description": "输出目录（默认 outputs/book_catalog；相对路径基于服务启动目录）"},
+                "download_covers": {"type": "boolean", "description": "是否下载公开封面（默认 true）"},
+                "interval": {"type": "number", "description": "每个 HTTP 请求间隔秒数（默认 1.0，防限流）"},
+            },
         },
     },
     {
@@ -203,6 +222,109 @@ def tool_extract(args: Dict[str, Any]) -> Dict[str, Any]:
     return {"mode": mode, "text": txt}
 
 
+def _load_books_spec(args: Dict[str, Any]):
+    """spec 支持内联对象或本地 JSON 文件路径；返回 (spec_dict, error)。"""
+    spec = args.get("spec")
+    if isinstance(spec, dict):
+        # 结构是否合法交给 build_catalog 统一判定（其 INVALID_SPEC 诊断精确到条目）
+        return spec, ""
+    sp = str(args.get("spec_path") or "").strip()
+    if not sp:
+        return None, ('请提供 spec（内联 {"books":[…]} 对象）或 spec_path（.json 文件路径）')
+    from pathlib import Path
+    p = Path(sp).expanduser()
+    if not p.exists():
+        cand = Path(__file__).resolve().parent.parent / sp
+        if cand.exists():
+            p = cand
+    if not p.exists():
+        return None, f"spec 文件不存在: {sp}（也可改用内联 spec 对象）"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        return None, f"spec 读取/解析失败：{type(e).__name__}: {e}"
+    return data, ""
+
+
+def _clamp_interval(value: Any, default: float = 1.0) -> float:
+    """请求间隔钳制 [0,10] 秒；显式 0 允许（仅离线/测试用），NaN 等非法值回落默认。"""
+    try:
+        iv = float(value)
+    except (TypeError, ValueError):
+        iv = default
+    if iv != iv:  # NaN：比较恒 False，必须在钳制前拦下，否则会变成 0 秒节流
+        iv = default
+    return min(max(iv, 0.0), 10.0)
+
+
+# MCP 返回里每本书保留的字段（省 token；全量看 books.json / booklist.csv）
+BOOK_SAMPLE_FIELDS = ("no", "isbn", "book_title", "author", "publisher", "publish_year",
+                      "douban_rating", "douban_rating_count",
+                      "jd_price", "jd_click_link", "dangdang_price", "dangdang_link", "status")
+
+
+def tool_books(args: Dict[str, Any]) -> Dict[str, Any]:
+    from .book_catalog import build_catalog
+    spec, err = _load_books_spec(args)
+    if err:
+        return {"error": err,
+                "hint": 'spec 结构：{"name":"书单名","books":[{"title":"书名","isbn":"合法 ISBN-10/13"}]}'}
+    result = build_catalog(spec, str(args.get("out") or "outputs/book_catalog"),
+                           download_covers=bool(args.get("download_covers", True)),
+                           min_interval=_clamp_interval(args.get("interval"), 1.0))
+    status = str(result.get("status") or "")
+    rows = result.get("rows") or []
+    out: Dict[str, Any] = {
+        "status": status,
+        "total": len(rows),
+        "coverage": result.get("coverage"),
+        "files": result.get("files"),
+        "sample": [{f: r.get(f) for f in BOOK_SAMPLE_FIELDS} for r in rows[:10]],
+        "diagnostics": [
+            {"isbn": d.get("isbn"), "status": d.get("status"), "diagnostics": d.get("diagnostics")}
+            for d in (result.get("diagnostics") or [])[:20]
+        ],
+    }
+    if status == "INVALID_SPEC":
+        out["error"] = result.get("error") or "spec 不合法"
+        out["hint"] = 'spec 结构：{"name":"书单名","books":[{"title":"书名","isbn":"合法 ISBN-10/13"}]}'
+        return out
+    bad_rows = [r for r in rows if r.get("status") != "OK"]
+    # 真实可达场景：书单里列了重复 ISBN 时跳过必须可见，不能静默少行
+    dup_skipped = int((result.get("coverage") or {}).get("duplicates") or 0)
+    if rows and dup_skipped:
+        out["duplicates_skipped"] = dup_skipped
+        out["notice"] = (f"另有 {dup_skipped} 个重复 ISBN 条目被主键去重跳过"
+                         "（同一版本只保留一行）")
+    if not rows:
+        # 防御层：当前 build_catalog 去重逻辑下“零行且全为重复”构造不出（首条必采），留作回归护栏
+        dup = int((result.get("coverage") or {}).get("duplicates") or 0)
+        if dup:
+            out["error"] = (f"图书采集 0 条结果：spec 里所有条目都是重复 ISBN（{dup} 个重复被主键去重跳过）"
+                            "——这不是成功。行动：检查书单是否重复列了同一版本，补充不同 ISBN 后重跑。")
+        else:
+            out["error"] = ("图书采集 0 条结果——这不是成功。请检查 spec.books 是否为空、"
+                            "ISBN 是否有效，然后重试。")
+        return out
+    bad_n = {s: sum(1 for r in bad_rows if r.get("status") == s) for s in {r.get("status") for r in bad_rows}}
+    if all(r.get("status") == "NO_DATA" for r in rows):
+        out["error"] = (f"图书采集 {len(rows)} 行但全部无可采数据（豆瓣/京东/当当均未命中）——这不是成功。"
+                        "逐项诊断见上方 diagnostics 与 crawl_log.md；"
+                        "常见处理：核对 ISBN、补充 douban_subject_id、调大 interval 防限流后重跑。")
+        return out
+    if not all(r.get("status") == "OK" for r in rows):
+        # 部分失败：不伪装成功，给出诊断指针与行动方案
+        bad_str = "、".join(f"{k}×{v}" for k, v in sorted(bad_n.items()))
+        out["warning"] = (
+            f"部分书目未取全字段：{bad_str}。逐项诊断与行动方案见 "
+            f"{result['files'].get('log') if result.get('files') else 'crawl_log.md'}；"
+            "常见处理：补充 douban_subject_id、降低限流（调大 interval）、稍后重跑。")
+    out["problem_rows"] = [{"isbn": r.get("isbn"), "title": r.get("book_title"),
+                            "row_status": r.get("status"),
+                            "diagnostics": r.get("diagnostics")} for r in bad_rows[:20]]
+    return out
+
+
 def tool_check(_args: Dict[str, Any]) -> Dict[str, Any]:
     from .llm import _get_key
     key = bool(_get_key())
@@ -249,6 +371,7 @@ TOOL_IMPLS = {
     "auto": tool_auto,
     "crawl": tool_crawl,
     "extract": tool_extract,
+    "books": tool_books,
     "check": tool_check,
 }
 
@@ -286,8 +409,9 @@ def handle_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "capabilities": {"tools": {}},
             "serverInfo": {"name": SERVER_NAME, "version": VERSION},
             "instructions": (
-                "万能爬虫引擎 MCP：可用 scrape/auto/crawl/extract/check 五个工具。"
-                "auto 是最强入口——给一句话任务即可全自动爬取。"
+                "万能爬虫引擎 MCP：可用 scrape/auto/crawl/extract/books/check 六个工具。"
+                "auto 是最强入口——给一句话任务即可全自动爬取；"
+                "books 按 ISBN 清单采集图书目录（豆瓣+比价，不下载正文，0 条会返回诊断与行动方案）。"
             ),
         })
     if method in ("notifications/initialized", "initialized"):

@@ -13,10 +13,10 @@ Level 4  人机结合：把验证码图存下来，等你/人工输入答案（s
 桥读到答案文件后自动填码继续 —— 同一浏览器会话不丢 cookie/指纹。
 """
 from __future__ import annotations
+from .core import assert_http_url
 
 import base64
 import json
-import os
 import re
 import time
 import urllib.parse
@@ -40,7 +40,7 @@ def resolve_strategy(anti_cfg: Dict[str, Any]) -> str:
 
 def _has_ddddocr() -> bool:
     try:
-        import ddddocr  # noqa: F401
+        __import__("ddddocr")  # 可用性探测：仅验证可导入
         return True
     except Exception:
         return False
@@ -48,7 +48,7 @@ def _has_ddddocr() -> bool:
 
 def _has_cv2() -> bool:
     try:
-        import cv2  # noqa: F401
+        __import__("cv2")  # 可用性探测：仅验证可导入
         return True
     except Exception:
         return False
@@ -75,7 +75,7 @@ def slider_gap_x(image_path: Path, bg_path: Optional[Path] = None) -> Optional[i
     用 Canny 边缘 + 模板/轮廓方法；返回缺口左侧 x 像素。
     """
     import cv2
-    import numpy as np  # noqa: F401
+    __import__("numpy")  # 预加载 numpy（cv2 依赖），不直接使用
     img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         return None
@@ -113,7 +113,7 @@ def solve_2captcha(
     while time.time() < deadline:
         time.sleep(5)
         q = urllib.parse.urlencode({"key": api_key, "action": "get", "id": captcha_id})
-        with urllib.request.urlopen(host + "/res.php?" + q, timeout=30) as r:
+        with urllib.request.urlopen(assert_http_url(host + "/res.php?" + q), timeout=30) as r:
             resp = r.read().decode()
         if resp.startswith("OK|"):
             return resp.split("|", 1)[1]
@@ -248,7 +248,8 @@ def wait_for_answer_file(answer_file: Path, timeout: int = 300) -> Optional[str]
 # 供 HttpClient/引擎在拿到响应后判断是否要 换代理 / 换 UA / 升级浏览器 / 重试。
 
 BLOCK_PATTERNS = [
-    ("cloudflare", re.compile(r"cf-challenge|cf_clearance|just a moment|cloudflare|__cf_chl|challenges\.cloudflare", re.I)),
+    # 注意：不能用裸词 cloudflare 判拦截——大量站点内容页正常提及该词（技术博客/云厂商文档）
+    ("cloudflare", re.compile(r"cf-challenge|cf_clearance|just a moment|__cf_chl|challenges\.cloudflare\.com|checking your browser", re.I)),
     # CWAP/WZWS 滑块 WAF（期刊/政务站常见）：必须排在 verify 前，命中即判为 waf
     ("waf", re.compile(r"wzws-waf-cgi|CWAP-waf|waf_slider_verify|wzws_waf|waf-cgi|WZWS-RAY|滑动填|请完成安全验证|向右滑动|拖动滑块|拼图完成", re.I)),
     ("verify", re.compile(r"验证中心|安全验证|滑动验证|点选验证|人机验证|拼图验证|spiderindefence|访问过于频繁|异常访问|请求过于频繁|操作频繁|安全检测", re.I)),
@@ -277,10 +278,12 @@ def detect_block(status: int = 200, text: str = "", headers: Optional[Dict[str, 
         return {"kind": STATUS_BLOCK[status], "detail": f"HTTP {status}", "status": status}
     if status >= 400:
         return {"kind": "http_error", "detail": f"HTTP {status}", "status": status}
-    # 2) 头部特征（Cloudflare 等）
-    for key in ("cf-ray", "cf-chl", "cf-cache-status"):
-        if key in h:
-            return {"kind": "cloudflare", "detail": f"header {key}", "status": status}
+    # 2) 头部特征：cf-* 头在 Cloudflare CDN 透传的正常 200（DockerHub/V2EX 等）上同样存在，
+    #    只有"200 但内容极小"（真挑战页特征）才判拦截，否则误杀正常站
+    if any(key in h for key in ("cf-ray", "cf-chl", "cf-cache-status")):
+        if len((text or "").strip()) < 2048:
+            return {"kind": "cloudflare", "detail": "header cf-* + tiny body", "status": status}
+        return {"kind": "none", "detail": "cdn passthrough", "status": status}
     # 3) 正文特征（只在前 20KB 匹配，避免全文误判）
     t = (text or "")[:20000].lower()
     if not t:

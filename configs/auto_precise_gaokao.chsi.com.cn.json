@@ -1,0 +1,15 @@
+{
+  "host": "gaokao.chsi.com.cn",
+  "kind": "tactic:cookie_click",
+  "name": "auto_precise_gaokao.chsi.com.cn",
+  "entry": "https://gaokao.chsi.com.cn/zsgs/zhangcheng/listVerifedZszc--method-index,lb-1.dhtml",
+  "tactic": "cookie_click",
+  "params": {
+    "entry": "https://gaokao.chsi.com.cn/zsgs/zhangcheng/listVerifedZszc--method-index,lb-1.dhtml",
+    "item_css": ".sch-item",
+    "host": "gaokao.chsi.com.cn",
+    "seed": "https://gaokao.chsi.com.cn/",
+    "url_template": ""
+  },
+  "description": "阳光高考招生章程，抓取所有双一流高校章程的链接"
+}

@@ -93,8 +93,7 @@
   .btn{appearance:none;border:1px solid transparent;border-radius:var(--r-s);font-family:var(--ui);font-size:13px;font-weight:650;padding:8px 18px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:filter .15s,background .15s,border-color .15s,transform .12s,box-shadow .15s;line-height:1.3}
   .btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.35)}
   .btn:active:not(:disabled){transform:translateY(0)}
-  .btn:disabled{opacity:.55;cursor:not-allowed}
-  .btn:disabled{opacity:.45;cursor:wait}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn-primary{background:var(--amber);color:var(--amber-ink);box-shadow:0 1px 2px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.25)}
   .btn-primary:hover:not(:disabled){filter:brightness(1.07)}
   .btn-ghost{background:transparent;color:var(--muted);border-color:var(--line-2)}
@@ -103,6 +102,21 @@
   .btn-danger:hover:not(:disabled){background:rgba(238,106,94,.1);border-color:var(--red)}
   .btn-sm{padding:4px 10px;font-size:11.5px}
   .btn-block{margin-top:16px;width:100%;justify-content:center;padding:10px}
+
+  /* ---------- 任务引导步进 ---------- */
+  .steps{display:flex;align-items:center;gap:8px;margin:14px 0 4px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);font-size:11.5px;color:var(--faint)}
+  .steps .step{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .steps .step b{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:var(--line-2);color:var(--muted);font-family:var(--mono);font-size:10px;font-weight:700}
+  .steps .step.active{color:var(--amber)}
+  .steps .step.active b{background:var(--amber);color:var(--amber-ink)}
+  .steps .step.done{color:var(--green)}
+  .steps .step.done b{background:var(--green);color:#08220f}
+  .steps i{flex:1;height:1px;background:var(--line);min-width:8px}
+  .dot.done{background:var(--green)}
+  .dot.warn{background:var(--amber)}
+  .dot.err{background:var(--red)}
+  .dot.interrupted{background:var(--red)}
+  .dot.queued{background:var(--blue)}
 
   /* ---------- 状态条 / 终端 / 统计 ---------- */
   .banner{position:relative;border-radius:var(--r-s);padding:13px 15px 13px 17px;margin-bottom:14px;font-size:13px;font-weight:600;border:1px solid;background:var(--bg)}
@@ -147,6 +161,16 @@
   th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
   th{background:var(--bg-3);color:var(--muted);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
   tr:last-child td{border-bottom:0}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.016)}
+  tbody tr:hover{background:rgba(94,207,192,.05)}
+
+  /* ---------- 导出文件 & 数据预览（小白：看得见、找得到、打得开） ---------- */
+  .filelist{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+  .file-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:8px 12px}
+  .file-row .fname{font-family:var(--mono);font-size:11.5px;color:var(--teal);word-break:break-all;flex:1;min-width:180px}
+  .preview-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-s);margin-top:6px;-webkit-overflow-scrolling:touch}
+  .preview-wrap table{margin:0}
+  .preview-wrap td,.preview-wrap th{white-space:nowrap}
 
   :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:3px}
   @media (max-width:640px){
@@ -180,34 +204,22 @@
     <button data-tab="auto" class="active"><span class="k">01</span>一句话任务</button>
     <button data-tab="paste"><span class="k">02</span>贴网页爬虫</button>
     <button data-tab="journal"><span class="k">03</span>期刊下载</button>
-    <button data-tab="settings"><span class="k">04</span>⚙️ 设置</button>
+    <button data-tab="books"><span class="k">04</span>📚 图书目录</button>
+    <button data-tab="report"><span class="k">05</span>📊 数据报告</button>
+    <button data-tab="settings"><span class="k">06</span>⚙️ 设置</button>
   </div>
 </nav>
 
 <main>
-<div class="card" style="margin-bottom:16px">
-  <div class="card-title"><span class="idx">REPORT</span><h2>📊 数据报告</h2><span class="hint">爬完的 CSV → 可视化图表</span></div>
-  <p style="font-size:12.5px;color:#666;margin:4px 0">粘贴爬取结果 CSV（或任意表格），自动生成可视化报告（概览/统计/分组对比/分布图）。</p>
-  <input id="rp_name" placeholder="报告名（英文/数字）" value="report1" style="width:160px;padding:5px;border:1px solid #ccc;border-radius:6px;margin-bottom:6px">
-  <input id="rp_group" placeholder="分组列名（可选，如：城市）" style="width:180px;padding:5px;border:1px solid #ccc;border-radius:6px;margin-left:6px">
-  <textarea id="rp_csv" placeholder="在此粘贴 CSV 内容（第一行为列名）…" style="width:100%;height:120px;border:1px solid #ccc;border-radius:6px;padding:6px;font-family:monospace;font-size:12px;box-sizing:border-box"></textarea>
-  <div style="margin-top:6px">
-    <button onclick="genReport()" style="padding:6px 16px;background:var(--amber);color:var(--amber-ink);border:none;border-radius:6px;cursor:pointer;font-weight:650">生成报告</button>
-    <span id="rp_status" style="font-size:12px;margin-left:8px"></span>
-  </div>
-  <div id="rp_result" style="margin-top:8px"></div>
-</div>
-
-
 <!-- ============ 一句话任务 ============ -->
 <div class="tab active" id="tab-auto">
   <details style="margin-bottom:16px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:12px 16px">
     <summary style="cursor:pointer;font-weight:650;font-size:13.5px;color:var(--amber)">🙋 第一次用？1 分钟看懂怎么用（点开看）</summary>
     <div style="margin-top:10px;font-size:12.5px;line-height:1.9;color:var(--text)">
       <b>三步完成一个爬虫任务：</b><br>
-      ① 在下面「一句话任务」框里，<b>用大白话写下你要什么</b>（比如：抓取某网站的商品名称和价格）。不会写就点「常见例子」选一个再改。<br>
-      ② 点「生成执行计划」→ AI 会先告诉你怎么做、需要准备什么 → 你点「确认无误，开始执行」。<br>
-      ③ 等着就行：如果需要登录/验证码，会弹出浏览器窗口，你手动完成一次，工具自动继续。跑完的结果在「导出文件」里（json/csv/xlsx）。<br><br>
+      ① 在下面「一句话任务」框里，<b>用大白话写下你要什么</b>（比如：抓取某网站的商品名称和价格）。不会写就点「常见例子」选一个再改，或展开「🙋 纯小白？手把手三步」让它帮你拼。<br>
+      ② 点「🚀 开始任务」→ AI 自动理解、自动配置、自动开跑（想先看方案的高级用户可选下面那个按钮）。<br>
+      ③ 等着就行：如果需要登录/验证码，会弹出浏览器窗口，你手动完成一次，工具自动继续。跑完直接在页面里<b>预览抓到的数据</b>，文件也能一键复制路径/打开所在文件夹。<br><br>
       <b>经常卡住？看这里：</b>
       <ul style="margin:4px 0 0 22px">
         <li>要求登录的网站 → 勾选「需要登录 / JS 渲染」；或点右上角「🍪 导入会话」（先在调试 Chrome 登录一次）</li>
@@ -220,7 +232,13 @@
   </details>
   <div class="card">
     <div class="card-title"><span class="idx">01 / TASK</span><h2>一句话任务</h2></div>
-    <div class="desc">AI 自动理解任务、生成配置并运行，全程实时反馈。先出「计划」供你确认，再真正执行。</div>
+    <div class="desc">写完描述点「🚀 开始任务」，AI 全自动理解、配置、抓取，失败自动重试并告诉你怎么办；想先看方案再决定，可用下方高级按钮。</div>
+    <div class="steps" id="a_steps" aria-label="任务流程">
+      <span class="step active" data-step="1"><b>1</b>说清需求</span><i></i>
+      <span class="step" data-step="2"><b>2</b>AI 规划</span><i></i>
+      <span class="step" data-step="3"><b>3</b>自动执行</span><i></i>
+      <span class="step" data-step="4"><b>4</b>看结果/自救</span>
+    </div>
     <label>任务描述</label>
     <textarea id="a_desc" rows="4" placeholder="例如：抓取 https://quotes.toscrape.com/ 的名言、作者和标签，翻 2 页" style="font-size:14px;line-height:1.6;resize:vertical"></textarea>
     <div style="margin-top:8px">
@@ -237,6 +255,26 @@
         <option value="抓取 巨潮资讯网 某公司 2024 年全部公告的标题、日期、公告类型和 PDF 链接">📑 上市公司公告</option>
       </select>
     </div>
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;font-weight:600;color:var(--amber);font-size:12.5px">🙋 纯小白？手把手三步生成任务描述（点开）</summary>
+      <div style="margin-top:10px;padding:12px 14px;border:1px dashed var(--line-2);border-radius:10px">
+        <div class="row">
+          <div style="flex:1.6"><label>① 要抓的网页网址</label>
+            <input id="w_url" placeholder="把网址粘贴到这里，如 https://example.com/list"></div>
+          <div style="flex:1"><label>② 你想要什么</label>
+            <select id="w_want">
+              <option value="标题和链接">标题和链接</option>
+              <option value="商品名称、价格">价格信息</option>
+              <option value="正文文字内容">正文内容</option>
+              <option value="表格数据">表格</option>
+              <option value="图片链接">图片</option>
+            </select></div>
+        </div>
+        <label>③ 补充要求 <span class="l-hint">可选，如：翻 3 页 / 只要前 50 条 / 只要 2024 年的</span></label>
+        <input id="w_extra" placeholder="留空也行">
+        <button class="btn btn-block" style="margin-top:12px" onclick="wizardBuild()">✨ 帮我生成任务描述（生成后点下方“开始任务”）</button>
+      </div>
+    </details>
     <label class="ck"><input id="a_browser" type="checkbox"><span>需要登录 / JS 渲染的网站：勾选后优先用浏览器（会弹出窗口，登录一次自动保存复用）</span></label>
     <details style="margin-top:12px">
       <summary style="cursor:pointer;font-weight:600;color:var(--muted);font-size:12.5px">⚙️ 高级选项（代理 / 定时 / Cookie / 并发 — 一般不用动，小白可直接跳过）</summary>
@@ -286,10 +324,17 @@
     </details>
       </div>
     </details>
-    <button class="btn btn-primary btn-block" onclick="planAuto()" id="a_btn" style="padding:12px 18px;font-size:14.5px">🚀 生成执行计划</button>
-    <div class="muted" style="font-size:11.5px;margin-top:10px;text-align:center">先让 AI 生成「任务理解 + 技术路线」，你确认后才会真正开始抓取。</div>
+    <button class="btn btn-primary btn-block" onclick="startAutoDirect()" id="a_btn_direct" style="padding:13px 18px;font-size:15px">🚀 开始任务（推荐 · 一步到位）</button>
+    <button class="btn btn-ghost btn-block" onclick="planAuto()" id="a_btn" style="margin-top:8px">先看 AI 执行计划再确认（高级）</button>
+    <div class="muted" style="font-size:11.5px;margin-top:10px;text-align:center">小白选上面：写完描述直接开跑，失败会自动重试并告诉你怎么办；想先看 AI 怎么做再决定，选下面。</div>
   </div>
   <div id="a_progress" style="display:none"></div>
+</div>
+
+<!-- ============ 最近任务 ============ -->
+  <div class="card">
+  <div class="card-title"><span class="idx">REC</span><h2>最近任务</h2><span class="hint">点一下可重新查看</span></div>
+  <ul class="recent" id="recent"><li class="empty">还没有任务 —— 到「01 一句话任务」写下你要什么，点「🚀 开始任务」试试</li></ul>
 </div>
 
 <!-- ============ 贴网页爬虫 ============ -->
@@ -320,7 +365,7 @@
     <label>网址</label>
     <input id="p_url" placeholder="https://example.com/list">
     <div class="row mt">
-      <div><label>模式</label>
+      <div style="flex:1.2"><label>模式</label>
         <select id="p_mode">
           <option value="auto">自动提取正文</option>
           <option value="article">只取正文</option>
@@ -333,6 +378,7 @@
       <div id="p_pages_box" style="display:none"><label>最多页数</label><input id="p_pages" type="number" min="1" value="100"></div>
       <div><label>最多条数 <span class="l-hint">留空=不限</span></label><input id="p_limit" type="number" min="1" placeholder="如 50"></div>
     </div>
+    <div class="muted" id="p_mode_hint" style="font-size:11.5px;margin-top:6px">自动/只取正文 → 1 条正文；表格 → 每行 1 条；链接 → 每个链接 1 条；整站 → 按抓到的页面记录。</div>
     <label class="ck"><input id="p_browser" type="checkbox"><span>浏览器渲染（JS 页面 / 需要登录时勾选）</span></label>
     <label>代理 <span class="l-hint">可选 — 没有真实代理就留空</span></label>
     <input id="p_proxy" placeholder="留空=不用代理；有代理填 http://user:pass@真实IP:真实端口">
@@ -389,10 +435,35 @@
   <div id="j_progress" style="display:none"></div>
 </div>
 
+<!-- ============ 图书目录 ============ -->
+<div class="tab" id="tab-books">
+  <div class="card">
+    <div class="card-title"><span class="idx">04 / BOOKS</span><h2>📚 图书目录采集</h2><span class="hint">只采书目数据 · 不下载正文</span></div>
+    <div class="desc">按 ISBN 清单抓取：豆瓣评分/作者/出版社/封面、京东·当当公开比价，导出 CSV / Markdown 书单。抓不到的逐项给出诊断和下一步建议。</div>
+    <label>书籍清单 spec <span class="l-hint">直接粘贴 JSON；或只填一个 .json 文件路径（如 examples/books.spec.json）</span></label>
+    <textarea id="bk_spec" rows="9" placeholder='{"name":"我的书单","books":[{"group":"系列/分组（可选）","title":"书名","isbn":"9787563394180","language":"中文","edition":"版本说明（可选）"}]}' style="font-family:var(--mono);font-size:12px"></textarea>
+    <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-ghost btn-sm" onclick="fillBookExample()">📋 填入示例</button>
+      <button class="btn btn-ghost btn-sm" onclick="fmtBookSpec()">{} 格式化 JSON</button>
+      <span id="bk_check" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div class="row mt">
+      <div><label>输出目录</label><input id="bk_out" value="outputs/book_catalog"></div>
+      <div><label>请求间隔 <span class="l-hint">秒，防限流</span></label><input id="bk_interval" type="number" step="0.5" min="0" max="10" value="1"></div>
+      <div style="padding-top:22px;flex:none">
+        <label class="ck" style="margin-top:0"><input id="bk_covers" type="checkbox" checked><span>下载公开封面</span></label>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-block" onclick="startBooks()" id="bk_btn">🚀 开始采集书目</button>
+    <div class="muted" style="font-size:11.5px;margin-top:10px;text-align:center">合规提示：只采集书目信息、公开封面与聚合比价；不下载电子书/PDF，不绕过登录或付费墙。0 条结果会如实报告并给出行动方案。</div>
+  </div>
+  <div id="bk_progress" style="display:none"></div>
+</div>
+
 <!-- ============ 设置 ============ -->
 <div class="tab" id="tab-settings">
   <div class="card">
-    <div class="card-title"><span class="idx">04 / AI</span><h2>🤖 AI 配置（自己定模型）</h2><span class="hint">分享给别人时，对方在这里填自己的 AI</span></div>
+    <div class="card-title"><span class="idx">06 / AI</span><h2>🤖 AI 配置（自己定模型）</h2><span class="hint">分享给别人时，对方在这里填自己的 AI</span></div>
     <div class="desc">万能爬虫工具的「大脑」就是 AI（负责理解任务/生成配置/诊断失败）。默认走你本机配置的模型；改成你自己的任意 OpenAI 兼容接口即可（DeepSeek / 千问 / GPT / 本地 Ollama 都行）。</div>
     <div class="row">
       <div style="flex:1.4"><label>模型名 <span class="l-hint">如 deepseek-chat / qwen-max / gpt-4o</span></label>
@@ -420,7 +491,7 @@
   </div>
 
   <div class="card">
-    <div class="card-title"><span class="idx">04 / SHARE</span><h2>📤 分享给其他人</h2><span class="hint">同一网络下即可</span></div>
+    <div class="card-title"><span class="idx">06 / SHARE</span><h2>📤 分享给其他人</h2><span class="hint">同一网络下即可</span></div>
     <div class="desc">默认只在本机访问。要分享：重启工具时加 <code>--share</code>，对方在浏览器打开你的「局域网地址 + 访问令牌」就能用（不需要装任何东西）。对方第一次用时在「⚙️ 设置」里填自己的 AI 即可。</div>
     <div class="banner warn" style="padding:8px 10px;font-size:12px;margin-top:8px">⚠️ AI 配置是这台机器全局的：任何人修改都会影响这台机器上的所有任务。建议只由管理员（你）配置；分享给别人时，对方直接用默认 AI 即可。</div>
     <div id="shareInfo" class="muted" style="font-size:12.5px;line-height:1.9">读取中…</div>
@@ -428,16 +499,28 @@
   </div>
 
   <div class="card">
-    <div class="card-title"><span class="idx">04 / INFO</span><h2>ℹ️ 关于</h2></div>
+    <div class="card-title"><span class="idx">06 / INFO</span><h2>ℹ️ 关于</h2></div>
     <div class="desc" style="font-size:12.5px">万能爬虫工具 v3 · 宗旨「不管是大佬还是小白，天下没有难爬的虫」<br>
-    一键任务 AI 自动理解 → 自动精配 → 失败自动诊断；数据导出 JSON / CSV / Excel。</div>
+    一键任务 AI 自动理解 → 自动精配 → 失败自动诊断；图书目录（ISBN 书单）一键采集；数据导出 JSON / CSV / Excel。</div>
   </div>
 </div>
 
-<!-- ============ 最近任务 ============ -->
-<div class="card">
-  <div class="card-title"><span class="idx">REC</span><h2>最近任务</h2><span class="hint">点一下可重新查看</span></div>
-  <ul class="recent" id="recent"><li class="empty">暂无</li></ul>
+<div class="tab" id="tab-report">
+  <div class="card">
+    <div class="card-title"><span class="idx">05 / REPORT</span><h2>📊 数据报告</h2><span class="hint">爬完的 CSV → 可视化图表</span></div>
+    <div class="desc">粘贴爬取结果 CSV（或任意表格），自动生成可视化报告（概览/统计/分组对比/分布图）。</div>
+    <div class="row report-row" style="margin-top:10px">
+      <div><label>报告名 <span class="l-hint">英文/数字</span></label><input id="rp_name" placeholder="report1" value="report1"></div>
+      <div><label>分组列名 <span class="l-hint">可选，如：城市</span></label><input id="rp_group" placeholder="城市"></div>
+    </div>
+    <label style="margin-top:14px">CSV 内容 <span class="l-hint">第一行为列名</span></label>
+    <textarea id="rp_csv" rows="7" placeholder="在此粘贴 CSV 内容（第一行为列名）…" style="font-family:var(--mono);font-size:12.5px"></textarea>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
+      <button class="btn btn-primary" onclick="genReport()">生成报告</button>
+      <span id="rp_status" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div id="rp_result" style="margin-top:10px"></div>
+  </div>
 </div>
 
 </main>
@@ -451,10 +534,22 @@ document.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   b.classList.add('active'); $('#tab-'+b.dataset.tab).classList.add('active');
 });
+function updatePasteModeHint(){
+  const hints={
+    auto:'自动/只取正文 → 1 条正文；表格 → 每行 1 条；链接 → 每个链接 1 条；整站 → 按抓到的页面记录。',
+    article:'只取正文 → 成功标准是正文非空，通常记为 1 条。',
+    table:'提取表格 → 成功标准是表格行数 > 0；无表格会明确提示，不会假成功。',
+    links:'收集链接 → 成功标准是链接数 > 0；无链接会明确提示。',
+    crawl:'整站爬取 → 递归抓取并合并记录，数量按实际页面数据为准。'
+  };
+  const el=document.getElementById('p_mode_hint');
+  if(el) el.textContent=hints[$('#p_mode').value]||'';
+}
 $('#p_mode').onchange=()=>{
   const m=$('#p_mode').value;
   $('#p_depth_box').style.display = m==='crawl'?'block':'none';
   $('#p_pages_box').style.display = (m==='crawl'||m==='links')?'block':'none';
+  updatePasteModeHint();
 };
 async function api(path,opts){
   opts=opts||{};
@@ -478,6 +573,75 @@ function applyExample(sel){
   ta.focus();
   sel.value='';
 }
+// 🙋 纯小白三步向导：网址 + 要什么 + 补充 → 自动拼成任务描述
+function wizardBuild(){
+  let u=$('#w_url').value.trim();
+  if(!u){ alert('先把要抓的网页网址粘贴到 ① 里'); $('#w_url').focus(); return; }
+  if(!/^https?:\/\//i.test(u)){
+    // 像域名（example.com/list）就自动补协议；明显不是网址就引导走主输入框
+    if(/^[\w.-]+\.[a-z]{2,}([\/?#].*)?$/i.test(u)){
+      u='https://'+u; $('#w_url').value=u;
+    }else{
+      alert('① 里要粘贴完整网址（以 http:// 或 https:// 开头）。\n如果你只有关键词、没有具体网址，请关闭本向导，直接在上方任务描述里写，例如：抓取 大众点评 上海「美食」前 10 家商家的店名、人均、地址。');
+      return;
+    }
+  }
+  const want=$('#w_want').value||'标题和链接';
+  const extra=$('#w_extra').value.trim();
+  let desc=`抓取 ${u} 的${want}`;
+  if(extra) desc+=`，${extra.replace(/。$/,'')}`;
+  $('#a_desc').value=desc;
+  setTaskStep(1);
+  const ta=$('#a_desc'); ta.focus(); ta.setSelectionRange(desc.length,desc.length);
+}
+// 「需要登录 / JS 渲染」勾选框没有独立后端字段——并进任务描述，
+// AI 规划阶段读到这句话就会优先选择浏览器取数器
+function withBrowserHint(desc){
+  const cb=document.getElementById('a_browser');
+  if(cb && cb.checked && desc.indexOf('浏览器')<0){
+    return desc+'（该网站可能需要浏览器渲染或登录才能看到数据）';
+  }
+  return desc;
+}
+// 🚀 一步直达：跳过“看计划再确认”，AI 理解任务后直接执行（小白主路径）
+async function startAutoDirect(){
+  let desc=$('#a_desc').value.trim();
+  if(!desc){
+    alert('请先用大白话写下你要什么（比如：抓取某网站的商品名称和价格）。\n不会写？展开上方「🙋 纯小白？手把手三步」帮你生成。');
+    $('#a_desc').focus();
+    return;
+  }
+  desc=withBrowserHint(desc);
+  const payload={description:desc,
+    limit:$('#a_limit').value||null,
+    rounds:Math.min(Math.max(parseInt($('#a_rounds').value)||2,1),3),
+    timeout:Math.max(parseInt($('#a_timeout').value)||240,10),
+    proxy:$('#a_proxy').value.trim(),
+    cookie:$('#a_cookie').value.trim()};
+  lastPlan=null; // 极速模式没有计划卡；防止 confirmAuto 误用旧计划
+  startJob('/api/auto/start',payload,$('#a_btn_direct'),$('#a_progress'));
+  const p=$('#a_progress');
+  p.innerHTML='<div class="card"><h4>已开始，AI 正在理解任务并执行…</h4>'
+    +'<div class="muted" style="font-size:12px;margin-top:6px">全程自动：理解 → 生成配置 → 抓取 → 失败自修复。弹出浏览器窗口时请在窗口里完成登录/验证。</div></div>';
+  p.style.display='block';
+}
+function setTaskStep(n){
+  const wrap=document.getElementById('a_steps');
+  if(!wrap) return;
+  wrap.querySelectorAll('.step').forEach(el=>{
+    el.classList.remove('active','done');
+    const v=parseInt(el.dataset.step||'1',10);
+    if(v<n) el.classList.add('done');
+    else if(v===n) el.classList.add('active');
+  });
+}
+function focusDescription(){
+  const tab=document.querySelector('[data-tab="auto"]');
+  if(tab) tab.click();
+  const el=document.getElementById('a_desc');
+  if(el){ el.focus(); el.scrollIntoView({behavior:'smooth',block:'center'}); }
+  setTaskStep(1);
+}
 async function testCookie(cid,resid,urlid){
   const cookie=$('#'+cid).value.trim();
   const url=urlid?$('#'+urlid).value.trim():'https://www.dianping.com/search/keyword/2/0_%E7%BE%8E%E9%A3%9F';
@@ -492,19 +656,66 @@ let currentJob=null;
 const timers=new Map();
 async function pollJob(jobId, box){
   const d=await api('/api/job?job='+jobId);
-  if(d.error){ box.innerHTML='<pre class="err">'+esc(d.error)+'</pre>'; clearJobTimer(jobId); return; }
+  // 只有"任务不存在/请求本身失败"（无 status 键）才短路；任务级失败（status=error）
+  // 必须走 renderResult 的完整失败 UX（解决方案卡 + AI 诊断 + 重跑），不能只给一行红字
+  if(d.error && d.status===undefined){
+    // 瞬时网络/解析错误：重试 3 次才放弃（不给用户"卡死"体验）；任务不存在的错误仍立即停止
+    const retryKey='_retry_'+jobId;
+    const prev=(window[retryKey]||0)+1;
+    window[retryKey]=prev;
+    if(prev>=3 || d.error.indexOf('不存在')>=0){
+      delete window[retryKey];
+      box.innerHTML='<pre class="err">'+esc(d.error)+'</pre>';
+      clearJobTimer(jobId); resetStartButtons(jobId); return;
+    }
+    return;  // 短暂故障：保留定时器下轮重试
+  }
+  delete window['_retry_'+jobId];
   renderProgress(box, d);
-  if(d.status!=='running'){ clearJobTimer(jobId); renderResult(box, d); loadRecent(); }
+  if(d.status!=='running'){ clearJobTimer(jobId); renderResult(box, d); loadRecent(); resetStartButtons(jobId); }
 }
+// 任务结束（成功/失败/中断）后恢复启动按钮：否则用户必须刷新页面才能再跑。
+// 精准恢复：只恢复该任务自己的按钮；仍有其他任务在跑时不得提前解锁别人的按钮（防同型双跑）。
+// 默认文案从 data-default-text 读（页面加载时固化），避免在 JS 里维护两份文案。
+const jobBtns=new Map(); // jobId -> 启动按钮（startJob 成功后登记）
+function _restoreBtn(b){
+  if(!b) return;
+  b.disabled=false;
+  b.textContent=b.dataset.defaultText||b.textContent;
+}
+function resetStartButtons(jobId){
+  if(jobId && jobBtns.has(jobId)){
+    const b=jobBtns.get(jobId);
+    jobBtns.delete(jobId);
+    _restoreBtn(b);
+  }
+  // auto 双入口是互斥锁：只要没有任何任务在跑就恢复（无论刚结束的是哪类任务，
+  // 否则跑完一个期刊/图书任务会把"🚀 开始任务"永久锁死）
+  if(timers.size===0){
+    _restoreBtn($('#a_btn_direct'));
+    _restoreBtn($('#a_btn'));
+  }
+  // 兜底（历史回看等没有按钮记录）：无运行任务时恢复其余启动按钮
+  if(!jobId && timers.size===0){
+    ['p_btn','j_btn','bk_btn'].forEach(id=>_restoreBtn(document.getElementById(id)));
+  }
+}
+// 页面加载时把每个按钮的初始文案固化为单一事实源
+document.querySelectorAll('button.btn').forEach(b=>{ if(!b.dataset.defaultText) b.dataset.defaultText=b.textContent; });
 function clearJobTimer(jobId){
   const t=timers.get(jobId);
-  if(t){ clearInterval(t); timers.delete(jobId); }
+  if(t){ clearInterval(t.fn||t); timers.delete(jobId); }
 }
 function renderProgress(box,d){
+  // 只有具备协作停止能力的类型才渲染可用的停止按钮，其余如实注明（不承诺做不到的操作）
+  const canStop=(d.kind==='auto'||d.kind==='books');
+  const stopCtl=canStop
+    ?'<button class="btn btn-danger btn-sm" data-stop-job="'+esc(d.id)+'" onclick="stopJob(this.getAttribute(\'data-stop-job\'))">停止任务</button>'
+    :'<span class="muted" style="font-size:11px;align-self:center">该类型暂不支持中途停止</span>';
   let html='<div class="card">'
     +'<div class="card-title"><span class="idx">RUN</span><h2>执行中</h2>'
     +'<span class="dot running"></span>'
-    +'<span class="hint"><button class="btn btn-danger btn-sm" onclick="stopJob(\'+esc(d.id)+\')">停止任务</button></span></div>'
+    +'<span class="hint">'+stopCtl+'</span></div>'
     +'<div class="banner warn" style="padding:10px 12px;font-size:12.5px;margin-bottom:12px">如果弹出了浏览器窗口，请在窗口里完成验证+登录（先拖滑块/点验证，再扫码或账号登录）；完成后工具自动继续，无需任何代码。</div>'
     +'<div class="terminal"><div class="term-head"><span class="tdot on"></span><span>输出</span></div>'
     +'<pre>'+esc((d.messages||[]).join('\n'))+'</pre></div></div>';
@@ -523,51 +734,109 @@ function renderSolution(d){
     h+='<div style="margin:10px 0"><button class="btn" data-sol-api="'+esc(sol.action.api)+'" data-sol-url="'+esc(sol.action.url||'')+'" onclick="runSolutionActionFrom(this)">'+esc(sol.action.label||'执行')+'</button>'
       +'<div class="muted" style="font-size:12px;margin-top:6px">'+esc(sol.action.tip||'')+'</div></div>';
   }
+  if(sol.action2 && sol.action2.api){
+    h+='<div style="margin:10px 0"><button class="btn btn-primary" data-sol-api="'+esc(sol.action2.api)+'" data-sol-url="'+esc(sol.action2.url||'')+'" onclick="runSolutionActionFrom(this)">'+esc(sol.action2.label||'执行')+'</button>'
+      +'<div class="muted" style="font-size:12px;margin-top:6px">'+esc(sol.action2.tip||'')+'</div></div>';
+  }
   if(sol.resources) h+='<div class="muted" style="font-size:12px">资源：'+esc(sol.resources)+'</div>';
   h+='<div class="muted" style="font-size:11.5px;margin-top:6px">完整手册：《使用者解决方案手册.md》｜ 仍无法解决就把红色错误发我</div>';
   h+='</div>';
   return h;
 }
-async function runSolutionAction(api,url){
+async function runSolutionAction(path, url){
+  // 注意：参数/局部变量绝不能叫 api——会遮蔽全局 api() 请求函数，
+  // 曾经因此把字符串 "/api/chrome/start" 当函数调用（"api is not a function"）
   try{
-    const d=await api(api,{method:'POST',body:JSON.stringify({url:url})});
-    alert(d && d.ok ? (d.message||'已启动调试 Chrome') : ('失败：'+((d&&d.error)||'未知')));
+    const d=await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url})});
+    if(d && d.ok===false){ alert('失败：'+((d&&d.error)||'未知')); return; }
+    let msg;
+    if(path.indexOf('cookies/import')>=0){
+      const n=d&&d.imported, dm=d&&d.domains;
+      if(!n||!dm){
+        msg='⚠️ 调试 Chrome 里没有抓到登录会话（0 条）。请先在调试 Chrome 打开目标网站、完成登录/滑块验证，再回来点本按钮导入';
+      }else{
+        msg='✅ 已导入 '+n+' 条 Cookie（覆盖 '+dm+' 个域名）——现在点「↻ 重跑此任务」即可，之后 HTTP/浏览器都会自动复用登录态';
+      }
+    }else{
+      msg=(d&&d.message)||'已启动调试 Chrome';
+    }
+    alert(msg);
   }catch(e){ alert('失败：'+e.message); }
 }
-// 从按钮的 data 属性读 api/url（HTML 属性已用 esc() 转义，避免 JS 字符串注入/换行破坏）
+// 从按钮的 data 属性读 path/url（HTML 属性已用 esc() 转义，避免 JS 字符串注入/换行破坏）
 function runSolutionActionFrom(btn){
-  const api=btn.getAttribute('data-sol-api');
+  const path=btn.getAttribute('data-sol-api');
   const url=btn.getAttribute('data-sol-url');
-  runSolutionAction(api,url);
+  runSolutionAction(path, url);
 }
 function renderResult(box,d){
+  if(d.status==='interrupted'){
+    if(box===($('#a_progress')||null)) setTaskStep(4); // 中断也属于"到结果阶段"
+
+    let h='<div class="banner warn">任务已中断 · 未得到最终结果</div>'
+      +'<div class="banner warn" style="margin-top:0"><div class="sub">'+esc((d.summary||(d.messages||[]).slice(-1)[0]||'服务重启或手动停止，运行记录已保留'))+'</div></div>';
+    if(d.messages&&d.messages.length) h+='<h4>执行过程（已结束）</h4><div class="terminal"><div class="term-head"><span class="tdot"></span><span>输出</span></div><pre>'+esc(d.messages.join('\n'))+'</pre></div>';
+    h+='<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="rerunJob(this,\''+esc(d.id)+'\')">↻ 重新运行</button></div>';
+    box.innerHTML=h; box.style.display='block';
+    return;
+  }
   let html='';
-  const zeroRows = !!(d.result && !d.result.total);
+  const zeroRows = !!(d.result && ('total' in d.result) && !d.result.total);
+  let rTotal=null; // null=结果无 total 键（历史/未知载荷）；数字=实际条数
   if(d.error){
     html='<div class="banner err">失败：'+esc(d.error)+'</div>'+renderSolution(d);
     if(d.messages&&d.messages.length) html+='<h4>执行过程（已结束）</h4><div class="terminal"><div class="term-head"><span class="tdot"></span><span>输出</span></div><pre>'+esc(d.messages.join('\n'))+'</pre></div>';
   }
   else {
-    const ok=!!(d.result&&d.result.total);
-    html+='<div class="banner '+(ok?'ok':'warn')+'">'+(ok?'任务结束 · 抓取成功':'任务结束 · 0 条')+'<div class="sub">'+esc(d.summary||'')+'</div></div>';
-    if(d.result) html+='<div class="stats"><div>条目<b>'+d.result.total+'</b></div><div>抓取<b>'+d.result.fetched+'</b> 页</div><div>错误<b>'+d.result.errors+'</b></div></div>';
+    const hasTotal=!!(d.result&&('total' in d.result));
+    rTotal=hasTotal?Math.max(0,Math.floor(Number(d.result.total)||0)):null;
+    const rErr=Math.max(0,Math.floor(Number(d.result&&d.result.errors)||0));
+    const ok=hasTotal&&rTotal>0&&rErr===0;
+    const bannerMsg=ok?'任务结束 · 抓取成功'
+      :(rTotal===null?'任务已结束 · 结果数据不可用（可能来自历史记录）'
+        :(rTotal>0?('任务结束 · '+rTotal+' 条，其中 '+rErr+' 条有问题——详见统计与日志'):'任务结束 · 0 条 — 这不算成功'));
+    html+='<div class="banner '+(ok?'ok':'warn')+'">'+bannerMsg+'<div class="sub">'+esc(d.summary||'')+'</div></div>';
+    if(d.result) html+='<div class="stats"><div>条目<b>'+esc(d.result.total ?? '—')+'</b></div><div>抓取<b>'+esc(d.result.fetched ?? '—')+'</b> 页</div><div>错误<b>'+esc(d.result.errors ?? '—')+'</b></div></div>';
     if(ok) html+='<div class="muted" style="font-size:12.5px;margin-top:8px">✅ 数据已保存到工具目录的 <b>outputs</b> 文件夹（JSON / CSV / Excel 三种格式，CSV 可直接用 Excel/WPS 打开）。想看图表？把 CSV 粘到最上方「📊 数据报告」生成可视化报告。</div>';
+    // 预览插槽：放在统计卡之后、长执行日志之前——数据是主角，不该被日志埋掉
+    if(!d.error && rTotal!==null && rTotal>0) html+='<div class="preview-slot"></div>';
     if(!ok){
-      // 0 条也展示失败引导（登录/验证码/选择器方案）
-      html+=renderSolution(d);
+      // 0 条也展示失败引导（登录/验证码/选择器方案）；结果数据缺失的历史任务只给日志不给“解决方案”
+      if(rTotal!==null) html+=renderSolution(d);
       if(d.messages&&d.messages.length) html+='<h4>执行过程（已结束）</h4><div class="terminal"><div class="term-head"><span class="tdot"></span><span>输出</span></div><pre>'+esc(d.messages.join('\n'))+'</pre></div>';
     }
     if(d.verify){
       html+='<h4>复核报告</h4>';
-      const okv=d.verify.ok;
-      html+='<div class="banner '+(okv?'ok':'warn')+'" style="padding:10px 12px;font-size:12.5px">'+(okv?'复核全部通过':'复核发现待改进项')+'</div>';
-      (d.verify.checks||[]).forEach(c=>{
-        const pass=c.pass!==false;
-        html+='<div class="check"><span class="mk '+(pass?'pass':'fail')+'">'+(pass?'✓':'✕')+'</span> '+esc(c.name)+'<span class="v">'+esc(c.value||'')+'</span></div>';
-      });
+      if(zeroRows && d.verify.message){
+        html+='<div class="muted" style="font-size:12.5px">'+esc(d.verify.message)+'</div>';
+      } else {
+        const okv=d.verify.ok;
+        html+='<div class="banner '+(okv?'ok':'warn')+'" style="padding:10px 12px;font-size:12.5px">'+(okv?'复核全部通过':'复核发现待改进项')+'</div>';
+        (d.verify.checks||[]).forEach(c=>{
+          const pass=c.pass!==false;
+          html+='<div class="check"><span class="mk '+(pass?'pass':'fail')+'">'+(pass?'✓':'✕')+'</span> '+esc(c.name)+'<span class="v">'+esc(c.value||'')+'</span></div>';
+        });
+      }
     }
     if(ok && d.messages&&d.messages.length) html+='<h4>执行过程（已结束）</h4><div class="terminal"><div class="term-head"><span class="tdot"></span><span>输出</span></div><pre>'+esc(d.messages.join('\n'))+'</pre></div>';
-    if(d.result&&d.result.files&&Object.keys(d.result.files).length) html+='<h4>导出文件</h4><pre>'+esc(JSON.stringify(d.result.files,null,2))+'</pre>';
+    if(d.result&&d.result.files&&Object.keys(d.result.files).length){
+      html+='<h4>导出文件</h4><div class="filelist">';
+      Object.values(d.result.files).forEach(f=>{
+        if(!f) return;
+        // 「打开所在文件夹」只在后端可定位的路径（工具 outputs 目录内）展示；
+        // 期刊等输出到自定义目录的文件给出一行说明，不渲染点了必失败的按钮
+        const canReveal=(f.startsWith('outputs/')||f.indexOf('/outputs/')>=0);
+        html+='<div class="file-row">'
+          +'<code class="fname">'+esc(f)+'</code>'
+          +'<button class="btn btn-ghost btn-sm" data-path="'+esc(f)+'" onclick="copyPath(this)">复制路径</button>'
+          +(canReveal
+            ?'<button class="btn btn-ghost btn-sm" data-path="'+esc(f)+'" onclick="revealPath(this)">📂 打开所在文件夹</button>'
+            :'<span class="muted" style="font-size:11px">在自定义目录，请按路径手动前往</span>')
+          +'</div>';
+      });
+      html+='</div>';
+    }
+
   }
   // 0 条 / 出错：提供 AI 一键诊断（小白按建议照做即可）
   if(d.error || zeroRows){
@@ -580,20 +849,99 @@ function renderResult(box,d){
       +'<div class="diag_out muted" style="font-size:12.5px;margin-top:10px"></div>'
       +'</div>';
   }
-  const rerunLabel = d.kind==='auto' ? '↻ 重跑此任务（复用已学配置）' : '↻ 重新抓取此网址';
+  const rerunLabel = d.kind==='auto' ? '↻ 重跑此任务（复用已学配置）'
+    : d.kind==='books' ? '↻ 重新采集书目'
+    : d.kind==='journal' ? '↻ 重新下载期刊'
+    : '↻ 重新抓取此网址';
   // 注意：solution 卡片（renderSolution）内已包含"打开调试 Chrome"动作按钮，这里不再重复渲染
   html+='<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">'
     +'<button class="btn" onclick="rerunJob(this,\''+d.id+'\')">'+rerunLabel+'</button>'
+    +((zeroRows && d.kind==='auto') ? '<button class="btn btn-ghost" onclick="focusDescription()">✍️ 修改任务描述</button>' : '')
     +'</div>';
   box.innerHTML=html; box.style.display='block';
+  if(box===($('#a_progress')||null)) setTaskStep(4); // 步骤条只描述一句话任务流程（极速模式 1/2 已标完成）
+  // 数据预览：成功（含部分成功）时直接在页面里展示抓到的数据，小白不用会找文件
+  if(!d.error && rTotal!==null && rTotal>0 && d.result && d.result.files){
+    loadPreview(box, d.result.files, box.querySelector('.preview-slot'));
+  }
   // 失败/0 条时自动触发一次 AI 诊断（无需点击；用户也可手动再点）
-  if((d.error || zeroRows) && box.querySelector('.diag_wrap')){
+  // autoDiagnosed 保证同一任务只自动诊断一次——历史回看反复点开不重复烧 LLM
+  if((d.error || zeroRows) && box.querySelector('.diag_wrap') && !autoDiagnosed.has(d.id)){
+    autoDiagnosed.add(d.id);
     const _jid = d.id, _box = box;
     setTimeout(()=>{
       const _b = _box.querySelector('.diag_wrap button');
       if(_b) diagnoseJob(_b, _jid);
     }, 1200);
   }
+}
+const autoDiagnosed=new Set(); // jobId -> 已自动诊断过
+// ===== 数据预览：直接在页面里看抓到了什么（不用会找文件/开 Excel） =====
+async function loadPreview(box, files, slot){
+  const target=files.json||files.csv;
+  if(!target) return;
+  const host=document.createElement('div');
+  host.className='preview-host';
+  host.innerHTML='<h4>👇 你抓到的数据（预览加载中…）</h4>';
+  (slot||box).appendChild(host);
+  let d=null;
+  try{
+    d=await api('/api/preview?file='+encodeURIComponent(target)+'&rows=20');
+  }catch(e){ host.remove(); return; }
+  if(!d||d.error||d.ok===false){ host.remove(); return; }
+  const cols=d.columns||[];
+  if(d.empty||!(d.rows||[]).length){
+    host.innerHTML='<h4>👇 你抓到的数据</h4><div class="banner warn" style="padding:9px 12px;font-size:12.5px">文件里目前是 0 条数据（原因见上方诊断与解决方案）</div>';
+    return;
+  }
+  let h='<h4>👇 你抓到的数据（前 '+d.rows.length+' 条，共 '+esc(d.total)+' 条）</h4>'
+    +'<div class="preview-wrap"><table><thead><tr>'
+    +cols.map(c=>'<th>'+esc(c)+'</th>').join('')
+    +'</tr></thead><tbody>';
+  d.rows.forEach(r=>{
+    h+='<tr>'+cols.map(c=>'<td>'+esc(r[c])+'</td>').join('')+'</tr>';
+  });
+  h+='</tbody></table></div>';
+  if(d.truncated_cols>0) h+='<div class="muted" style="font-size:11.5px;margin-top:4px">…另有 '+esc(d.truncated_cols)+' 列未显示，完整数据在导出文件里</div>';
+  h+='<div class="muted" style="font-size:11.5px;margin-top:4px">表格可以左右滑动；想看全部数据，用下方「导出文件」里的按钮。</div>';
+  host.innerHTML=h;
+}
+// 复制路径（优先现代剪贴板 API；share 模式等非安全上下文回退 execCommand）
+async function copyPath(btn){
+  const p=btn.getAttribute('data-path')||'';
+  if(!p || btn.disabled) return; // 防重入：连点不重复触发/不破坏恢复文案
+  const old=btn.dataset.defaultText||btn.textContent;
+  btn.disabled=true;
+  let ok=false;
+  try{
+    if(navigator.clipboard&&window.isSecureContext){
+      await navigator.clipboard.writeText(p); ok=true;
+    }else{ throw new Error('fallback'); }
+  }catch(e){
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=p; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select();
+      ok=document.execCommand('copy');
+      ta.remove();
+    }catch(e2){ ok=false; }
+  }
+  btn.textContent=ok?'✅ 已复制':'❌ 复制失败';
+  setTimeout(()=>{ btn.textContent=old; btn.disabled=false; },1600);
+}
+// 在系统文件管理器里定位导出文件（服务器本机模式）
+async function revealPath(btn){
+  const p=btn.getAttribute('data-path')||'';
+  if(!p || btn.disabled) return;
+  const old=btn.dataset.defaultText||btn.textContent;
+  btn.disabled=true;
+  btn.textContent='⏳ 定位中…';
+  try{
+    const d=await api('/api/reveal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});
+    if(d&&d.ok){ btn.textContent='✅ 已打开'; }
+    else{ btn.textContent='❌ '+(d&&d.error?String(d.error).slice(0,40):'失败'); alert(d&&d.error?('打开失败：'+d.error):'打开失败'); }
+  }catch(e){ btn.textContent='❌ 失败'; }
+  setTimeout(()=>{ btn.textContent=old; btn.disabled=false; },2200);
 }
 async function diagnoseJob(btn, jobId){
   const wrap = btn ? btn.closest('.diag_wrap') : null;
@@ -623,26 +971,36 @@ async function diagnoseJob(btn, jobId){
   out.innerHTML=h;
   out.dataset.state='done';
 }
-function startJob(path,payload,btn,box){
+function startJob(path,payload,btn,box,onStarted){
+  if(box===($('#a_progress')||null)) setTaskStep(3); // 步骤条只描述一句话任务流程
   btn.disabled=true; btn.textContent='运行中…';
+  lockAutoButtons(true); // 运行期间两个 auto 入口互斥，防止计划卡与进度卡互相覆盖
   api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(d=>{
-      if(d.error){ box.innerHTML='<pre class="err">'+esc(d.error)+'</pre>'; box.style.display='block'; btn.disabled=false; btn.textContent='重新开始'; return; }
+      if(d.error){ box.innerHTML='<pre class="err">'+esc(d.error)+'</pre>'; box.style.display='block'; btn.disabled=false; btn.textContent='重新开始'; lockAutoButtons(false); return; }
       currentJob=d.job;
+      if(d.job) jobBtns.set(d.job, btn); // 完成时精准恢复这个按钮
+      if(onStarted&&d.job) onStarted(d.job);
       clearJobTimer(d.job);
-      timers.set(d.job, setInterval(()=>pollJob(d.job,box),1000));
+      const _fn=setInterval(()=>pollJob(d.job,box),1000);
+      timers.set(d.job, {fn:_fn, box:box}); // 记录 box：历史回看时可复用而不是冻结原卡
     })
     .catch(e=>{
       box.innerHTML='<pre class="err">'+esc(e.message||e)+'</pre>'; box.style.display='block';
       btn.disabled=false; btn.textContent='重新开始';
+      lockAutoButtons(false);
     });
+}
+// 一句话任务两个入口（直达/看计划）互斥锁：run 或 plan 期间都禁用，结束由 resetStartButtons/planAuto 恢复
+function lockAutoButtons(lock){
+  [$('#a_btn_direct'),$('#a_btn')].forEach(b=>{ if(b) b.disabled=!!lock; });
 }
 let lastPlan=null;
 async function planAuto(){
   if(lastPlan && lastPlan._submitted){ lastPlan._submitted=false; }
   const desc=$('#a_desc').value.trim(); if(!desc){alert('请先描述任务');return;}
-  const btn=$('#a_btn'); btn.disabled=true; btn.textContent='AI 正在生成计划…';
-  const payload={description:desc,
+  const btn=$('#a_btn'); btn.disabled=true; btn.textContent='AI 正在生成计划…'; lockAutoButtons(true); setTaskStep(2);
+  const payload={description:withBrowserHint(desc),
     limit:$('#a_limit').value||null,
     proxy:$('#a_proxy').value.trim(),
     cookie:$('#a_cookie').value.trim()};
@@ -650,15 +1008,15 @@ async function planAuto(){
   try{
     d=await api('/api/auto/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   }catch(e){
-    btn.disabled=false; btn.textContent='生成执行计划';
+    btn.disabled=false; btn.textContent=btn.dataset.defaultText||btn.textContent; lockAutoButtons(false); // 计划生成完解除互斥：用户可确认执行，也可改用一步直达
     const box=$('#a_progress'); box.style.display='block';
     box.innerHTML='<div class="banner err">计划生成失败：'+esc(e.message||e)+'</div>';
     return;
   }
-  btn.disabled=false; btn.textContent='生成执行计划';
+  btn.disabled=false; btn.textContent=btn.dataset.defaultText||btn.textContent; lockAutoButtons(false); // 计划生成完解除互斥：用户可确认执行，也可改用一步直达
   const box=$('#a_progress'); box.style.display='block';
-  if(d.error){ box.innerHTML='<div class="banner err">计划生成失败：'+esc(d.error)+'</div>'; return; }
-  lastPlan=d;
+  if(d.error){ setTaskStep(1); box.innerHTML='<div class="banner err">计划生成失败：'+esc(d.error)+'</div>'; return; }
+  lastPlan=d; setTaskStep(2);
   let html='<div class="card">'
     +'<div class="card-title"><span class="idx">PLAN</span><h2>AI 的任务理解与技术路线</h2><span class="hint">请确认</span></div>'
     +'<div id="a_warns"></div>'
@@ -707,6 +1065,7 @@ async function confirmAuto(){
     try{ cfg=JSON.parse(editEl.value); }
     catch(e){ alert('配置 JSON 解析失败，请检查格式：'+e); lastPlan._submitted=false; return; }
   }
+  setTaskStep(3);
   const payload={description:d.description,
     config:cfg, name:d.name, task_dir:d.task_dir,
     limit:$('#a_limit').value||null,
@@ -728,6 +1087,9 @@ async function startPrecise(){
   if(!url){ alert('没有可用的入口 URL，请先在配置里填写 start_urls 再试'); return; }
   const box=$('#a_progress');
   const btn=document.getElementById('a_precise_btn') || $('#a_btn');
+  // 立即销毁计划卡（含确认按钮）并封死 confirmAuto 兜底，防止 ~1s 轮询窗口内双跑
+  box.innerHTML='<div class="card"><h4>已开始一键精配…</h4></div>';
+  if(d) d._submitted=true;
   startJob('/api/precise/start',
     {description:d.description, url, config:d.config},
     btn, box);
@@ -759,9 +1121,72 @@ async function startJournal(){
     out:$('#j_out').value.trim(),
     workers:parseInt($('#j_workers').value)||8,
     with_meta:$('#j_meta').checked};
-  startJob('/api/journal/start',payload,$('#j_btn'),$('#j_progress'));
+  startJob('/api/journal/start',payload,$('#j_btn'),$('#j_progress'),
+    (jobId)=>{ journalPayloads.set(jobId,payload); });
   $('#j_progress').innerHTML='<div class="card"><h4>已提交，开始下载…</h4></div>';
   $('#j_progress').style.display='block';
+}
+// ===== 📚 图书目录 =====
+const bookPayloads=new Map(); // jobId -> 提交时的 spec payload（供“重新采集书目”按任务精准重放）
+const journalPayloads=new Map(); // jobId -> 提交参数（期刊任务精准重放）
+async function fillBookExample(){
+  const box=$('#bk_check');
+  box.textContent='示例加载中…';
+  const d=await api('/api/books/example');
+  if(d.error||!d.spec){ box.innerHTML='<span class="err">'+esc(d.error||'示例读取失败')+'</span>'; return; }
+  $('#bk_spec').value=d.spec;
+  let n='';
+  try{ n='（'+JSON.parse(d.spec).books.length+' 本书）'; }catch(e){}
+  box.innerHTML='<span class="ok">已填入示例'+n+'，改成你的书单即可</span>';
+}
+function fmtBookSpec(){
+  const box=$('#bk_check'), ta=$('#bk_spec'), v=ta.value.trim();
+  if(!v){ box.textContent='请先粘贴或填入 spec'; return; }
+  if(v.endsWith('.json')){ box.textContent='.json 路径无需格式化，直接开始采集'; return; }
+  try{ ta.value=JSON.stringify(JSON.parse(v),null,2); box.innerHTML='<span class="ok">JSON 已格式化</span>'; }
+  catch(e){ box.innerHTML='<span class="err">JSON 有误：'+esc(String(e.message||e))+'</span>'; }
+}
+function validateBookSpec(silent){
+  const v=$('#bk_spec').value.trim(), box=$('#bk_check');
+  if(!v){ if(!silent) box.textContent='尚未填写 spec（可点「填入示例」）'; return false; }
+  if(v.endsWith('.json')) return true; // 文件路径模式由后端校验
+  try{
+    const s=JSON.parse(v);
+    if(!s || !Array.isArray(s.books)){ box.innerHTML='<span class="err">spec 需要 {"books":[…]} 结构</span>'; return false; }
+    for(let i=0;i<s.books.length;i++){
+      const b=s.books[i]||{};
+      if(!String(b.isbn||'').replace(/[-\s]/g,'')){
+        box.innerHTML='<span class="err">第 '+(i+1)+' 本缺少 ISBN（目录以 ISBN 为主键）</span>'; return false;
+      }
+    }
+    box.innerHTML='<span class="ok">JSON 合法 · '+s.books.length+' 本书（ISBN 校验位在开始采集时核对）</span>';
+    return true;
+  }catch(e){
+    box.innerHTML='<span class="err">JSON 有误：'+esc(String(e.message||e))+'</span>';
+    return false;
+  }
+}
+let lastBooksPayload=null;
+async function startBooks(){
+  const v=$('#bk_spec').value.trim();
+  if(!v){
+    $('#bk_check').innerHTML='<span class="err">尚未填写 spec（可点「填入示例」）</span>';
+    alert('请先粘贴书籍清单 JSON，或点「填入示例」');
+    return;
+  }
+  if(!validateBookSpec(false)) return; // 具体错误已显示在 bk_check
+  const ivRaw=parseFloat($('#bk_interval').value);
+  const payload={spec:v,
+    out:$('#bk_out').value.trim()||'outputs/book_catalog',
+    covers:$('#bk_covers').checked,
+    // Number.isFinite 同时拦下 NaN（非法输入回落 1 秒）；显式 0 保留
+    interval:Number.isFinite(ivRaw)?Math.min(Math.max(ivRaw,0),10):1};
+  lastBooksPayload=payload;
+  startJob('/api/books/start',payload,$('#bk_btn'),$('#bk_progress'),
+    (jobId)=>{ bookPayloads.set(jobId,payload); });
+  const p=$('#bk_progress');
+  p.innerHTML='<div class="card"><h4>已提交，开始采集书目…</h4></div>';
+  p.style.display='block';
 }
 function intentBlock(cfg){
   if(!cfg || !cfg.intent) return '';
@@ -779,36 +1204,91 @@ function todayHint(){
   const t0=Math.floor(d.getTime()/1000), t1=t0+86400;
   return '今天 00:00 = '+t0+'，明天 00:00 = '+t1;
 }
-const STATUS={running:['running','进行中'],done:['ok','成功'],error:['fail','失败']};
+const STATUS={running:['running','进行中'],queued:['queued','排队中'],done:['ok','完成'],error:['err','失败'],interrupted:['interrupted','已中断']};
 async function loadRecent(){
   try{
     const d=await api('/api/jobs');
     const ul=$('#recent'); ul.innerHTML='';
-    if(!d.length){ ul.innerHTML='<li class="empty">暂无任务记录</li>'; return; }
+    if(!d.length){ ul.innerHTML='<li class="empty">还没有任务 —— 到「01 一句话任务」写下你要什么，点「🚀 开始任务」试试</li>'; return; }
     d.forEach(j=>{
       const li=document.createElement('li');
       const st=STATUS[j.status]||['',''];
-      const kn=j.kind==='auto'?'一句话':j.kind==='journal'?'期刊':j.kind==='precise'?'精配':'贴网页';
-      li.innerHTML='<span class="dot '+st[0]+'"></span><span class="kind">'+kn+'</span><span class="title">'+esc(j.title||'')+'</span><span class="meta">'+esc((j.summary||j.status||'').slice(0,80))+'</span>';
-      li.onclick=()=>{ const box=document.createElement('div'); box.style.display='block';
-        document.querySelector('#tab-auto').appendChild(box);
-        pollJob(j.id,box); };
+      const kn=j.kind==='auto'?'一句话':j.kind==='journal'?'期刊':j.kind==='precise'?'精配':j.kind==='books'?'图书':'贴网页';
+      const stLabel=st[1]?st[1]+' · ':'';
+      li.innerHTML='<span class="dot '+st[0]+'"></span><span class="kind">'+kn+'</span><span class="title">'+esc(j.title||'')+'</span><span class="meta">'+esc((stLabel+(j.summary||'')).slice(0,90))+'</span>';
+      li.onclick=()=>{
+        const tabName=(j.kind==='paste'?'paste':j.kind==='journal'?'journal':j.kind==='books'?'books':'auto');
+        const tabBtn=document.querySelector('[data-tab="'+tabName+'"]');
+        if(tabBtn) tabBtn.click();
+        const host=document.querySelector('#tab-'+tabName)||document.querySelector('#tab-auto');
+        // 同页签先移除上一张历史回看卡（连同其轮询定时器），避免越点越堆/孤儿轮询
+        host.querySelectorAll('.history-box').forEach(x=>{
+          if(x.dataset.job) clearJobTimer(x.dataset.job);
+          x.remove();
+        });
+        const box=document.createElement('div'); box.style.display='block'; box.className='history-box'; box.dataset.job=j.id;
+        host.appendChild(box);
+        if(j.status==='running'){
+          const alive=timers.get(j.id);
+          if(alive && alive.box && document.body.contains(alive.box)){
+            // 该任务的进度卡还在原页签实时刷新：滚过去即可，不建副本（副本会冻结原卡）
+            alive.box.scrollIntoView({behavior:'smooth', block:'center'});
+            return;
+          }
+          // 原卡已不在（服务重启/被清理）：历史卡接手持续刷新
+          clearJobTimer(j.id);
+          const _fn=setInterval(()=>pollJob(j.id,box),1000);
+          timers.set(j.id, {fn:_fn, box:box});
+        }
+        pollJob(j.id,box);
+      };
       ul.appendChild(li);
     });
   }catch(e){}
 }
 
 async function rerunJob(btn, jobId){
+  btn.disabled=true;
   try{
     const d=await api('/api/job?job='+jobId);
     let path, payload;
     if(d.kind==='auto'){ path='/api/auto/start'; payload={description:(d.description||''), limit:null, rounds:2}; }
-    else if(d.kind==='paste'){ path='/api/paste/start'; payload={url:(d.title||''), mode:'auto'}; }
-    else if(d.kind==='precise'){ path='/api/precise/start'; payload={description:(d.description||''), url:(d.title||'').replace(/^一键精配：/,'')}; }
+    else if(d.kind==='paste'){ path='/api/paste/start'; payload={url:(d.description||d.title||''), mode:'auto'}; }
+    else if(d.kind==='precise'){ path='/api/precise/start'; payload={description:(d.description||''), url:(d.url||d.title||'').replace(/^一键精配：/,'')}; }
+    else if(d.kind==='journal'){
+      const saved=journalPayloads.get(jobId);
+      if(!saved){ alert('本页未保留该期刊任务的参数：请回到「期刊下载」标签重新提交'); return; }
+      path='/api/journal/start'; payload=saved;
+    }
+    else if(d.kind==='books'){
+      // 注意：lastBooksPayload 是顶层 let 绑定（不在 window 上），必须用裸标识符引用
+      const saved=bookPayloads.get(jobId)||lastBooksPayload;
+      if(!saved){
+        alert('本页未保留该任务的书籍清单：请在「📚 图书目录」标签重新粘贴 spec（或点「填入示例」）再跑');
+        return;
+      }
+      path='/api/books/start'; payload=saved;
+    }
     else { alert('该类型暂不支持重跑'); return; }
     const r=await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    if(r.error){ alert('重跑失败：'+r.error); return; }
-    const box=btn.closest('.card')||document.body;
+    if(r.error){ alert('重跑失败：'+r.error); btn.disabled=false; btn.textContent=btn.dataset.defaultText||btn.textContent; return; }
+    // 定位渲染容器：优先历史卡，否则用对应页签的进度容器（绝不写 body）
+    let box=btn.closest('.history-box');
+    if(!box){
+      const tabMap={auto:'a_progress',paste:'p_progress',journal:'j_progress',books:'bk_progress'};
+      const tabBtn=document.querySelector(`[data-tab="${tabMap[payload._kind||'auto']}"]`);
+      if(tabBtn) tabBtn.click();
+      const host=document.querySelector(`#tab-${tabMap[payload._kind||'auto']}`)||document.querySelector('#tab-auto');
+      box=document.createElement('div'); box.className='history-box'; box.dataset.job=r.job;
+      host.appendChild(box);
+    }
+    box.innerHTML='<div class="card"><h4>已提交重跑…</h4></div>';
+    box.style.display='block';
+    btn.disabled=true; btn.textContent='重跑中…';
+    jobBtns.set(r.job, btn);
+    clearJobTimer(r.job);
+    const _fn=setInterval(()=>pollJob(r.job,box),1000);
+    timers.set(r.job, {fn:_fn, box:box});
     pollJob(r.job, box);
   }catch(e){ alert('重跑失败：'+e.message); }
 }
@@ -817,12 +1297,24 @@ async function startBatch(btn){
   if(!urls.length){ alert('请至少输入一个网址'); return; }
   const box=document.getElementById('b_res');
   btn.disabled=true; btn.textContent='批量运行中…';
+  const _restore=()=>{ btn.disabled=false; btn.textContent=btn.dataset.defaultText||btn.textContent; };
   try{
     const d=await api('/api/paste/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls:urls, browser:document.getElementById('b_browser').checked})});
-    if(d.error){ box.innerHTML='<pre class="err">'+esc(d.error)+'</pre>'; }
-    else { box.innerHTML=''; pollJob(d.job, box); }
-  }catch(e){ box.innerHTML='<pre class="err">'+esc(e.message)+'</pre>'; }
-  btn.disabled=false; btn.textContent='📚 批量抓取';
+    if(d.error){
+      box.innerHTML='<pre class="err">'+esc(d.error)+'</pre>';
+      _restore();
+    } else {
+      box.innerHTML='';
+      if(d.job) jobBtns.set(d.job, btn); // 完成时精准恢复；运行期间保持禁用防叠加并发
+      clearJobTimer(d.job);
+      const _fn=setInterval(()=>pollJob(d.job, box),1000); // 运行中持续刷新，不能停在首帧
+      timers.set(d.job, {fn:_fn, box:box});
+      pollJob(d.job, box);
+    }
+  }catch(e){
+    box.innerHTML='<pre class="err">'+esc(e.message)+'</pre>';
+    _restore();
+  }
 }
 async function addSchedule(){
   const desc=document.getElementById('a_desc').value.trim();
@@ -894,7 +1386,7 @@ async function importCookies(){
       alert('❌ 导入失败：' + ((d&&d.error)||'未知') + '\n提示：请先双击工具目录「启动调试Chrome.command」并登录目标网站。');
     }
   }catch(e){ alert('❌ 导入失败：'+e.message); }
-  if(el){ el.textContent='🍪 导入会话'; }
+  if(el){ el.textContent=el.dataset.defaultText||'🍪 导入会话'; }
 }
 // 代码变更检测：每 20s 对比服务端代码指纹，变了提示一键重启（避免"你跑过但我这边是旧代码"）
 async function checkCodeChanged(){
@@ -908,7 +1400,14 @@ async function checkCodeChanged(){
 async function restartServer(){
   if(!confirm('重启服务会中断正在运行的任务，确认重启？')) return;
   const el=$('#updatePill'); if(el){ el.textContent='⏳ 重启中…'; }
-  try{ await api('/api/restart',{method:'POST',body:'{}'}); }catch(e){}
+  let d=null;
+  try{ d=await api('/api/restart',{method:'POST',body:'{}'}); }catch(e){}
+  if(d && d.ok===false){
+    // 重启没发生：如实报错并停止，否则 reload 回到旧进程陷入"更新"循环
+    if(el){ el.textContent='❌ 重启失败'; }
+    alert('重启失败：'+(d.message||d.error||'未知原因')+'\n可手动停止服务后重新启动（python3 -m universal_scraper.cli webui）');
+    return;
+  }
   setTimeout(()=>{ location.reload(); }, 3500);
 }
 setInterval(checkCodeChanged, 20000);
@@ -980,6 +1479,9 @@ document.querySelectorAll('.seg button').forEach(b=>{
   if(b.dataset.tab==='settings') b.addEventListener('click', ()=>setTimeout(loadSettings, 50));
 });
 
+updatePasteModeHint();
+// 📚 图书目录 spec：边输入边校验（静默模式，不出错不打扰）
+document.getElementById('bk_spec').addEventListener('input', ()=>validateBookSpec(true));
 async function genReport(){
   const name = (document.getElementById('rp_name').value||'report1').replace(/[^A-Za-z0-9_-]/g,'')||'report1';
   const group = document.getElementById('rp_group').value.trim();
@@ -989,9 +1491,8 @@ async function genReport(){
   if(!content.trim()){ st.textContent='请先粘贴 CSV'; return; }
   st.textContent='生成中…';
   try{
-    const r = await fetch('/api/report', {method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token': (window.AUTH_TOKEN||'')},
+    const d = await api('/api/report',{method:'POST',headers:{'Content-Type':'application/json'},
       body: JSON.stringify({name, group, content})});
-    const d = await r.json();
     if(d.ok){
       st.textContent='✅ 完成';
       res.innerHTML = `<p style="font-size:12.5px">${d.stats.rows} 行 / ${d.stats.cols} 列 / ${d.stats.numeric} 数值列 / ${d.stats.groups} 组 &nbsp; <a href="${d.report}" target="_blank" style="color:var(--teal)">打开报告 →</a></p>`;

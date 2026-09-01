@@ -6,7 +6,7 @@ from __future__ import annotations
 import csv, re, io, html as _h
 from pathlib import Path
 
-def _num(v):
+def _num(v: object) -> float | None:
     """解析数值；支持中文单位（万/亿）、区间值（'4-5万'→45000）、后缀说明。"""
     if v is None: return None
     s = str(v).strip().replace(",", "")
@@ -155,9 +155,9 @@ svg text{{font-size:11px}}
         maxc = max(counts) or 1
         parts.append(f"<h3>{_h.escape(s['col'])}</h3><svg width='900' height='{40+len(counts)*22}'>")
         for i, c in enumerate(counts):
-            h = max(3, int(c/maxc*160))
-            parts.append(f"<rect x='50' y='{i*22+20+160-h}' width='40' height='{h}' fill='#4361ee'/>")
-            parts.append(f"<text x='95' y='{i*22+34+160-h}'>{c}</text>")
+            bar_h = max(3, int(c/maxc*160))
+            parts.append(f"<rect x='50' y='{i*22+20+160-bar_h}' width='40' height='{bar_h}' fill='#4361ee'/>")
+            parts.append(f"<text x='95' y='{i*22+34+160-bar_h}'>{c}</text>")
             parts.append(f"<text x='5' y='{i*22+34}'>{lo+i*width:.0f}</text>")
         parts.append("</svg>")
     parts.append("</body></html>")

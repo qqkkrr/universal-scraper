@@ -26,6 +26,19 @@ def _get_key() -> str:
     return ""
 
 
+
+
+def _llm_url_guard(url: str) -> str:
+    """LLM 端点出站守卫：仅 http/https（拒绝 file:/ftp: 等伪协议读取本地资源）。
+    信任边界：base_url 为用户在本机/设置页显式配置的推理端点（含本地 Ollama 等私有
+    端点，属产品特性），故不阻断私网/环回地址；但协议白名单与主机非空校验强制执行。"""
+    from urllib.parse import urlsplit as _split
+    sp = _split(url or "")
+    if (sp.scheme or "").lower() not in ("http", "https") or not sp.hostname:
+        raise ValueError(f"LLM 端点仅支持 http/https，已拒绝: {str(url)[:60]!r}")
+    return url
+
+
 class LLMClient:
     """主决策模型（纯文本）：配置生成/自修复/抽取，走 LLM_MODEL（默认千问）。
     视觉模型（可选）：看截图/图片验证码，走 VISION_MODEL（如 qwen-vl-max / gpt-4o）。
@@ -55,6 +68,10 @@ class LLMClient:
                 self.base_url.rstrip("/") + "/chat/completions", data=body,
                 headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"})
             try:
+                # scheme 守卫：仅 http/https。信任边界说明——base_url 是用户本机
+                # 配置（含本地 Ollama 等私有端点，属产品特性），故不做私网 IP 过滤，
+                # 仅拒绝 file:/ftp: 等伪协议
+                _llm_url_guard(req.full_url)
                 with urllib.request.urlopen(req, timeout=self.timeout) as r:
                     data = json.load(r)
                 return data["choices"][0]["message"]["content"]
@@ -92,6 +109,7 @@ class LLMClient:
                 headers={"Authorization": "Bearer " + self.vision_api_key,
                          "Content-Type": "application/json"})
             try:
+                _llm_url_guard(req.full_url)
                 with urllib.request.urlopen(req, timeout=to) as r:
                     data = json.load(r)
                 return data["choices"][0]["message"]["content"]

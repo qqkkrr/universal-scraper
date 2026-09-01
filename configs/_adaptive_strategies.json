@@ -1,0 +1,10 @@
+{
+ "api.bilibili.com": {
+  "best_strategy": "http",
+  "updated": "2026-08-29 21:56"
+ },
+ "wcjs.sbj.cnipa.gov.cn": {
+  "best_strategy": "browser_headless",
+  "updated": "2026-08-29 21:59"
+ }
+}

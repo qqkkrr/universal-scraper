@@ -7,9 +7,7 @@ import re
 import threading
 from urllib.parse import urljoin
 
-from typing import Any, Dict, List, Optional
-
-from .selectors import _lxml_html_tostring
+from typing import Dict, List, Optional
 
 
 def _doc(html_text: str):

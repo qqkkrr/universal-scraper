@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 from typing import Dict, Optional

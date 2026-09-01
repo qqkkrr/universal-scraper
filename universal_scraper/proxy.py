@@ -27,7 +27,7 @@ class ProxyPool:
         self._dead_until: dict = {}          # proxy -> 冷却截止时间
         self._fail_streak: dict = {}         # proxy -> 连续失败次数
         self._last_fail: Optional[str] = None
-        self._lock = threading.Lock()        # 多 worker 并发调用（SessionPool 回调）
+        self._lock = threading.RLock()        # 多 worker 并发调用（SessionPool 回调）
 
     def next(self) -> Optional[str]:
         """取下一个可用代理；全部冷却中返回 None（调用方直连）。线程安全。"""

@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import json
 import re
 import signal
 import time
@@ -15,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .core import HttpClient, export_rows, log, die
+from .core import export_rows, log, die
 from .selectors import jpath, apply_extractor, regex_extract_all
 from .fetchers import HttpFetcher, BrowserScriptFetcher, BrowserFetcher, _resolve_template
 from .log import Logger
@@ -171,7 +170,6 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
         fetch_detail_row(http, r, detail)
         return r
 
-    results = []
     if concurrency <= 1:
         for i, r in enumerate(todo, 1):
             try:

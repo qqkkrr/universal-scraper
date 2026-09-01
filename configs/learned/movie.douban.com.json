@@ -1,0 +1,107 @@
+{
+ "host": "movie.douban.com",
+ "learned_at": 1786430110.856092,
+ "from_description": "豆瓣“2025国庆档”片单，在2025年9月28日抓取所有影片名称、上映日期、类型、想看人数。",
+ "config": {
+  "start_urls": [
+   "https://movie.douban.com/coming"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/coming",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "ul.movie-list li",
+    "fields": {
+     "title": "div.info a.title::text",
+     "type": "div.meta::text",
+     "wish_count": "span.action-btn::text",
+     "link": "div.info a.title::attr(href)"
+    },
+    "extract_links": {
+     "allow": "^\\/coming\\?start=\\d+",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "ul.movie-list li",
+    "fields": {
+     "title": "div.info a.title::text",
+     "type": "div.meta::text",
+     "wish_count": "span.action-btn::text",
+     "link": "div.info a.title::attr(href)"
+    },
+    "extract_links": {
+     "allow": "^\\/coming\\?start=\\d+",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://movie.douban.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "release_date",
+     "type": "css_attr",
+     "selector": "span[property='v:initialReleaseDate']::attr(content)"
+    }
+   ],
+   "filters": [
+    {
+     "type": "parse_date",
+     "field": "release_date",
+     "out": "ts"
+    },
+    {
+     "type": "filter",
+     "field": "ts",
+     "op": "between",
+     "min": 1759161600,
+     "max": 1759852800
+    }
+   ],
+   "concurrency": 2,
+   "interval": 1.0
+  },
+  "queue": {
+   "max_depth": 2,
+   "max_requests": 100,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 1.0,
+   "max_retries": 3
+  }
+ }
+}

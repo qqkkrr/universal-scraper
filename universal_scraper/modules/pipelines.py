@@ -168,7 +168,11 @@ class Pipeline(BasePipeline):
                     continue
                 if k in self.vars.get("_seen", set()):
                     return None
-                self.vars.setdefault("_seen", set()).add(k)
+                _prev = self.vars.get("_seen")
+                if not isinstance(_prev, set):
+                    _prev = set()  # vars 同键可能被其他步骤写为 str 等类型，重置为 set
+                    self.vars["_seen"] = _prev
+                _prev.add(k)
             elif t == "dedup_content":
                 # 便捷别名：{"type":"dedup_content","fields":["title","body"]}
                 k = content_hash(item, step.get("fields"))
@@ -266,7 +270,7 @@ class Pipeline(BasePipeline):
                     fname = step.get("name_template", "").format(**{k: str(v)[:60] for k, v in item.items()}) if step.get("name_template") else ""
                     if not fname:
                         import hashlib as _h
-                        fname = _h.md5(u.encode()).hexdigest()[:16] + ext
+                        fname = _h.md5(u.encode(), usedforsecurity=False).hexdigest()[:16] + ext
                     fname = re.sub(r'[\\/:*?"<>|\r\n]+', "_", fname)
                     fp = _d / fname
                     min_size = int(step.get("min_size", 20))

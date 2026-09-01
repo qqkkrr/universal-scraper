@@ -1,0 +1,78 @@
+{
+ "host": "hub.docker.com",
+ "learned_at": 1787413310.251426,
+ "from_description": "抓取Docker Hub hub.docker.com 官方python镜像的标签列表，取最新 20 个tag",
+ "config": {
+  "start_urls": [
+   "https://hub.docker.com/v2/repositories/library/python/tags/?page_size=20&ordering=-last_updated"
+  ],
+  "source": {
+   "type": "http",
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/v2/repositories/library/python/tags",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "json_paged",
+    "records_path": "results",
+    "strategy": "page_param",
+    "page_param": "page",
+    "page_size": 20,
+    "max_pages": 1,
+    "fields": {
+     "tag": {
+      "from": "name"
+     },
+     "last_updated": {
+      "from": "last_updated"
+     }
+    }
+   },
+   "default": {
+    "type": "json_paged",
+    "records_path": "results",
+    "strategy": "page_param",
+    "page_param": "page",
+    "page_size": 20,
+    "max_pages": 1,
+    "fields": {
+     "tag": {
+      "from": "name"
+     },
+     "last_updated": {
+      "from": "last_updated"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "tag",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 5,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

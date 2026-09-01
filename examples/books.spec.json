@@ -1,0 +1,21 @@
+{
+  "name": "工业设计书籍示例",
+  "books": [
+    {
+      "group": "原研哉《设计中的设计》",
+      "title": "设计中的设计 | 全本",
+      "isbn": "9787563394180",
+      "douban_subject_id": "4230237",
+      "language": "中文",
+      "edition": "广西师范大学出版社·全本（2010）"
+    },
+    {
+      "group": "Rob Thompson《Manufacturing Processes for Design Professionals》",
+      "title": "Manufacturing Processes for Design Professionals",
+      "isbn": "9780500513750",
+      "douban_subject_id": "2348273",
+      "language": "英文原版",
+      "edition": "Thames & Hudson 精装原版（2007）"
+    }
+  ]
+}

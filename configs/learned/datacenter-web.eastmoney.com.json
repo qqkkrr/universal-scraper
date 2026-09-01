@@ -1,0 +1,136 @@
+{
+ "host": "datacenter-web.eastmoney.com",
+ "learned_at": 1786431137.627729,
+ "from_description": "东方财富“龙虎榜”，在2025年9月每个交易日收盘后30分钟抓取上榜股票及买卖前五营业部（使用“每个交易日”）。",
+ "config": {
+  "start_urls": [
+   "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_BILLBOARD_DAILYDETAILS&columns=ALL&pageNumber=1&pageSize=500&sortColumns=TRADE_DATE,SECURITY_CODE&sortTypes=-1,1&filter=(TRADE_DATE%3E%3D%272025-09-01%27)(TRADE_DATE%3C%3D%272025-09-30%27)",
+   "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_BILLBOARD_TRADEALL&columns=ALL&pageNumber=1&pageSize=500&sortColumns=TRADE_DATE,SECURITY_CODE&sortTypes=1,1&filter=(TRADE_DATE%3E%3D%272025-09-01%27)(TRADE_DATE%3C%3D%272025-09-30%27)"
+  ],
+  "source": {
+   "type": "http"
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "RPT_BILLBOARD_TRADEALL",
+    "parser": "billboard"
+   }
+  ],
+  "parsers": {
+   "billboard": {
+    "type": "json_paged",
+    "records_path": "result.data",
+    "strategy": "page_param",
+    "page_param": "pageNumber",
+    "page_size": 500,
+    "max_pages": 50,
+    "fields": {
+     "trade_date": {
+      "from": "TRADE_DATE"
+     },
+     "security_code": {
+      "from": "SECURITY_CODE"
+     },
+     "security_name": {
+      "from": "SECURITY_NAME_ABBR"
+     },
+     "reason": {
+      "from": "EXPLANATION"
+     },
+     "operatedept_name": {
+      "from": "OPERATEDEPT_NAME"
+     },
+     "operatedept_rank": {
+      "from": "OPERATEDEPT_RANK"
+     },
+     "buy_amt": {
+      "from": "BUY"
+     },
+     "sell_amt": {
+      "from": "SELL"
+     },
+     "dept_net_amt": {
+      "from": "NET"
+     },
+     "stock_net_amt": {
+      "from": "BILLBOARD_NET_AMT"
+     },
+     "close_price": {
+      "from": "CLOSE_PRICE"
+     },
+     "change_rate": {
+      "from": "CHANGE_RATE"
+     }
+    }
+   },
+   "default": {
+    "type": "json_paged",
+    "records_path": "result.data",
+    "strategy": "page_param",
+    "page_param": "pageNumber",
+    "page_size": 500,
+    "max_pages": 50,
+    "fields": {
+     "trade_date": {
+      "from": "TRADE_DATE"
+     },
+     "security_code": {
+      "from": "SECURITY_CODE"
+     },
+     "security_name": {
+      "from": "SECURITY_NAME_ABBR"
+     },
+     "reason": {
+      "from": "EXPLANATION"
+     },
+     "operatedept_name": {
+      "from": "OPERATEDEPT_NAME"
+     },
+     "operatedept_rank": {
+      "from": "OPERATEDEPT_RANK"
+     },
+     "buy_amt": {
+      "from": "BUY"
+     },
+     "sell_amt": {
+      "from": "SELL"
+     },
+     "dept_net_amt": {
+      "from": "NET"
+     },
+     "stock_net_amt": {
+      "from": "BILLBOARD_NET_AMT"
+     },
+     "close_price": {
+      "from": "CLOSE_PRICE"
+     },
+     "change_rate": {
+      "from": "CHANGE_RATE"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "operatedept_name",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "trade_date|security_code|operatedept_name|buy_amt|sell_amt"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 50,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 3
+  }
+ }
+}

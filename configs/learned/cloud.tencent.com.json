@@ -1,0 +1,82 @@
+{
+ "host": "cloud.tencent.com",
+ "learned_at": 1787499704.110104,
+ "from_description": "抓取腾讯云开发者社区 cloud.tencent.com/developer 热榜文章标题、作者、阅读数，前 20 条",
+ "config": {
+  "start_urls": [
+   "https://cloud.tencent.com/developer/rank",
+   "https://cloud.tencent.com/developer/hot"
+  ],
+  "source": {
+   "type": "http",
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Referer": "https://cloud.tencent.com/developer"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/developer/hot",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": ".article-list .item, .article-item, .hot-item, .J-article-list .item, .hot-list li",
+    "fields": {
+     "title": {
+      "css": ".title::text, a.title::text, h3::text, .article-title::text, a:first-of-type::text"
+     },
+     "author": {
+      "css": ".author::text, .author-name::text, .name::text"
+     },
+     "views": {
+      "css": ".views::text, .read-num::text, .view-count::text"
+     }
+    },
+    "extract_links": {}
+   },
+   "default": {
+    "type": "html",
+    "row_css": ".article-list .item, .article-item, .hot-item, .J-article-list .item, .hot-list li",
+    "fields": {
+     "title": {
+      "css": ".title::text, a.title::text, h3::text, .article-title::text, a:first-of-type::text"
+     },
+     "author": {
+      "css": ".author::text, .author-name::text, .name::text"
+     },
+     "views": {
+      "css": ".views::text, .read-num::text, .view-count::text"
+     }
+    },
+    "extract_links": {}
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "title"
+   }
+  ],
+  "detail": {
+   "enabled": false
+  },
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 5,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

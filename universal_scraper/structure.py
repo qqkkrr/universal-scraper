@@ -11,7 +11,7 @@ import json
 import re
 from collections import Counter
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from .log import Logger
 

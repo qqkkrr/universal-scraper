@@ -42,6 +42,22 @@ KNOWN_JOURNALS: Dict[str, Dict[str, str]] = {
         "issn": "1004-0560",
         "note": "CSSCI/北大核心，2024 起免费全文",
     },
+    "kygl": {
+        "name": "科研管理",
+        "base": "https://www.kygl.net.cn",
+        "ctx": "/CN",
+        "issn": "1000-2995",
+        "note": "CSSCI/国家自然科学基金委管理科学部认定期刊，官方 magtech 站点；2026 年期次可访问，需验证免费全文 PDF",
+    },
+    "kygl_cast": {
+        "name": "科研管理（中国科协期刊集群）",
+        "base": "https://castjournals.cast.org.cn/joweb/kygl",
+        "ctx": "/CN",
+        "issn": "1000-2995",
+        "mode": "cast",
+        "journal_id": "1263530790265569318",
+        "note": "CAST 集群官方镜像，文章 PDF 直链无需登录；当前已上线 2026 年 47 卷 3 期",
+    },
     # 模板：同结构期刊照抄即可
     # "example": {"name": "某某学报", "base": "https://xxx.magtech.com.cn",
     #             "ctx": "/CN", "issn": "xxxx-xxxx", "note": ""},
@@ -81,10 +97,33 @@ def list_issues(site: Dict[str, str], since_year: int = 2024) -> List[Dict[str, 
     for _k in ("base", "ctx"):
         if not site.get(_k):
             raise ValueError(f"站点配置缺少字段 '{_k}'（需要 base/ctx）: {site}")
+    issues: List[Dict[str, str]] = []
+    if site.get("mode") == "cast":
+        status, raw = _http_get(f"{site['base']}{site['ctx']}/allvolumes")
+        text = raw.decode("utf-8", "ignore")
+        seen_cast = set()
+        for m in re.finditer(
+            r'href="https://castjournals\.cast\.org\.cn/joweb/kygl/CN/(\d{4})/(\d+)/(\d+)"',
+            text,
+        ):
+            year, vol, issue = int(m.group(1)), m.group(2), m.group(3)
+            if year < since_year:
+                continue
+            key = (year, vol, issue)
+            if key in seen_cast:
+                continue
+            seen_cast.add(key)
+            issues.append({
+                "year": str(year), "vol": vol, "issue": issue,
+                "url": f"{site['base']}{site['ctx']}/Y{year}/V{vol}/I{issue}",
+                "label": f"{year}年 第{issue}期(卷{vol})",
+            })
+        issues.sort(key=lambda x: (int(x["year"]), int(x["vol"]), int(x["issue"])))
+        return issues
+
     url = f"{site['base']}{site['ctx']}/article/showOldVolumnList.do"
     status, raw = _http_get(url)
     text = raw.decode("utf-8", "ignore")
-    issues: List[Dict[str, str]] = []
     seen = set()
     for m in re.finditer(r'href="([^"]*?/Y(\d{4})/V(\d+)/I(\d+))[^"]*"[^>]*>(?:<[^>]+>)*\s*([^<]{0,40})?', text):
         link, year, vol, issue = m.group(1), int(m.group(2)), m.group(3), m.group(4)
@@ -105,8 +144,34 @@ def list_issues(site: Dict[str, str], since_year: int = 2024) -> List[Dict[str, 
 # ---------------------------------------------------------------------------
 # 2) 单期文章列表解析（期次页直接含 articleId）
 # ---------------------------------------------------------------------------
-def parse_issue_html(text: str, issue: Dict[str, str]) -> List[Dict[str, Any]]:
+def parse_issue_html(text: str, issue: Dict[str, str],
+                     site: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
     arts: List[Dict[str, Any]] = []
+    if site and site.get("mode") == "cast":
+        cast_base = f"{site['base']}{site['ctx']}"
+        cast_pat = (
+            r'<div class="j-title-1">\s*<a href="[^"]*?/CN/(\d+)">(.*?)</a>'
+            r'(.*?)(?=<div class="j-title-1">|<div class="articlesectionlisting">|\Z)'
+        )
+        for m in re.finditer(cast_pat, text, re.S):
+            art_id = m.group(1)
+            title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+            if not title:
+                continue
+            block = m.group(3)
+            author_m = re.search(r'class="j-author"[^>]*>(.*?)</div>', block, re.S)
+            author = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", author_m.group(1))).strip() if author_m else ""
+            doi_m = re.search(r'doi:\s*(10\.19571/j\.cnki\.1000-2995\.\d{4}\.\d{2}\.\d+)', block)
+            vol_m = re.search(r'class="j-volumn"[^>]*>(.*?)</span>', block, re.S)
+            vol_txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", vol_m.group(1))).strip() if vol_m else ""
+            arts.append({
+                "id": art_id, "title": title, "authors": author,
+                "doi": doi_m.group(1) if doi_m else "",
+                "url": f"{cast_base}/{art_id}", "vol_pages": vol_txt,
+                "year": issue.get("year", ""), "vol": issue.get("vol", ""),
+                "issue": issue.get("issue", ""), "issue_label": issue.get("label", ""),
+            })
+        return arts
     for m in re.finditer(r'<li\s+id="art(\d+)"[^>]*>(.*?)</li>', text, re.S):
         art_id = m.group(1)
         block = m.group(2)
@@ -170,6 +235,8 @@ def fetch_article_meta(art: Dict[str, Any], site: Dict[str, str]) -> Dict[str, A
 # 4) 换 PDF 直链 + 下载
 # ---------------------------------------------------------------------------
 def get_pdf_url(site: Dict[str, str], art: Dict[str, Any]) -> Optional[str]:
+    if site.get("mode") == "cast":
+        return f"{site['base']}{site['ctx']}/PDF/{art['id']}"
     api = f"{site['base']}{site['ctx']}/article/showArticleFile.do?{int(time.time()*1000)}"
     status, raw = _http_post(api, {"attachType": "PDF", "id": art["id"], "json": "true"},
                              referer=art["url"])
@@ -211,7 +278,11 @@ def download_pdf(site: Dict[str, str], art: Dict[str, Any], out_dir: Path,
                 last_err = f"下载异常 HTTP {status}"
                 time.sleep(min_interval * 2 * attempt)
                 continue
-            out.write_bytes(raw)
+            # 原子写：tmp + replace 防截断 PDF 被断点续传误判为已完成
+            _tmp_out = out.with_suffix(".pdf.tmp")
+            _tmp_out.write_bytes(raw)
+            import os as _os
+            _os.replace(_tmp_out, out)
             return {"ok": True, "file": str(out), "size_kb": len(raw) // 1024, "skipped": False}
         except Exception as e:
             last_err = f"{type(e).__name__}: {e}"
@@ -393,7 +464,7 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
 def _fetch_issue(site: Dict[str, str], issue: Dict[str, str]) -> List[Dict[str, Any]]:
     status, raw = _http_get(issue["url"], referer=site["base"] + site["ctx"] + "/")
     text = raw.decode("utf-8", "ignore")
-    arts = parse_issue_html(text, issue)
+    arts = parse_issue_html(text, issue, site=site)
     if not arts:
         raise RuntimeError(f"期次页无文章（HTTP {status}）")
     return arts

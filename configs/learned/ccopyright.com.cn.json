@@ -1,0 +1,104 @@
+{
+ "host": "ccopyright.com.cn",
+ "learned_at": 1787500475.87407,
+ "from_description": "抓取中国版权保护中心 www.ccopyright.com.cn 作品登记公告中软件著作权的软件全称、权利人，前 20 条",
+ "config": {
+  "start_urls": [
+   "http://www.ccopyright.com.cn/",
+   "http://www.ccopyright.com.cn/index.php?optionid=1158"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "optionid=1158",
+    "parser": "list"
+   },
+   {
+    "match": "contains",
+    "pattern": "ccopyright.com.cn",
+    "parser": "home"
+   }
+  ],
+  "parsers": {
+   "home": {
+    "type": "html",
+    "fields": {},
+    "extract_links": {
+     "allow": "optionid=1158|optionid=1159|notice|announce|gonggao|作品登记公告",
+     "same_domain": true
+    }
+   },
+   "list": {
+    "type": "html",
+    "row_css": "table tr:not(:first-child)",
+    "fields": {
+     "software_name": {
+      "css": "td:nth-child(2)::text"
+     },
+     "owner": {
+      "css": "td:nth-child(3)::text"
+     },
+     "reg_number": {
+      "css": "td:nth-child(4)::text"
+     },
+     "announce_date": {
+      "css": "td:nth-child(6)::text"
+     }
+    },
+    "extract_links": {}
+   },
+   "default": {
+    "type": "html",
+    "row_css": "table tr:not(:first-child)",
+    "fields": {
+     "software_name": {
+      "css": "td:nth-child(2)::text"
+     },
+     "owner": {
+      "css": "td:nth-child(3)::text"
+     },
+     "reg_number": {
+      "css": "td:nth-child(4)::text"
+     },
+     "announce_date": {
+      "css": "td:nth-child(6)::text"
+     }
+    },
+    "extract_links": {}
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "software_name",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "owner",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": false
+  },
+  "queue": {
+   "max_depth": 2,
+   "max_requests": 30,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

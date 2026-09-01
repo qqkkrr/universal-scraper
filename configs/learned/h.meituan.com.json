@@ -1,0 +1,114 @@
+{
+ "host": "h.meituan.com",
+ "learned_at": 1786432625.726948,
+ "from_description": "美团“武汉江汉路”附近3公里内火锅店，在2025年9月5日按好评排序抓取前100家评分、人均、推荐菜Top3。",
+ "config": {
+  "start_urls": [
+   "https://wh.meituan.com/s/%E7%81%AB%E9%94%85/?lng=114.2838&lat=30.5802&range=3000&sort=rating"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 8,
+   "scroll_wait_ms": 800,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/s/",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": ".poi-item, .poi-list > div, .shop-list li, .list-item, ul.shops-list > li, .search-result-poi-item",
+    "fields": {
+     "title": {
+      "css": ".title::text, .poi-name::text, .name::text, .shop-name::text, a:first-of-type::text"
+     },
+     "score": {
+      "css": ".score::text, .star-score::text, .rating::text, .num::text"
+     },
+     "avg_price": {
+      "css": ".avg-price::text, .price::text, .per-price::text, .cost::text"
+     },
+     "link": {
+      "css": "a.title::attr(href), .title a::attr(href), a:first-of-type::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "/(s|search)/",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": ".poi-item, .poi-list > div, .shop-list li, .list-item, ul.shops-list > li, .search-result-poi-item",
+    "fields": {
+     "title": {
+      "css": ".title::text, .poi-name::text, .name::text, .shop-name::text, a:first-of-type::text"
+     },
+     "score": {
+      "css": ".score::text, .star-score::text, .rating::text, .num::text"
+     },
+     "avg_price": {
+      "css": ".avg-price::text, .price::text, .per-price::text, .cost::text"
+     },
+     "link": {
+      "css": "a.title::attr(href), .title a::attr(href), a:first-of-type::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "/(s|search)/",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "link",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://wh.meituan.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "recommend_dishes",
+     "type": "css_text",
+     "selector": ".recommend-list .dish-name::text, .dish-list li .name::text, .recommend-dish .dish-name::text, .food-list li::text"
+    }
+   ],
+   "filters": [],
+   "concurrency": 2,
+   "interval": 0.6
+  },
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 300,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 1.2,
+   "max_retries": 3
+  }
+ }
+}

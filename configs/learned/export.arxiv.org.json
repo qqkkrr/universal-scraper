@@ -1,0 +1,85 @@
+{
+ "host": "export.arxiv.org",
+ "learned_at": 1786433926.914432,
+ "from_description": "arXiv“cs.AI”分类下，在2025年9月5日抓取当日新提交论文的标题、作者、摘要，推送到AI研讨群。",
+ "config": {
+  "start_urls": [
+   "http://export.arxiv.org/api/query?search_query=cat:cs.AI+AND+submittedDate:%5B202509050000+TO+202509052359%5D&start=0&max_results=2000&sortBy=submittedDate&sortOrder=descending"
+  ],
+  "source": {
+   "type": "http"
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "export.arxiv.org/api/query",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "entry",
+    "fields": {
+     "title": {
+      "css": "entry > title::text"
+     },
+     "authors": {
+      "xpath": "./author/name/text()"
+     },
+     "summary": {
+      "css": "entry > summary::text"
+     },
+     "published": {
+      "css": "entry > published::text"
+     },
+     "link": {
+      "css": "entry > id::text"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "entry",
+    "fields": {
+     "title": {
+      "css": "entry > title::text"
+     },
+     "authors": {
+      "xpath": "./author/name/text()"
+     },
+     "summary": {
+      "css": "entry > summary::text"
+     },
+     "published": {
+      "css": "entry > published::text"
+     },
+     "link": {
+      "css": "entry > id::text"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 1,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1,
+   "max_retries": 2
+  }
+ }
+}

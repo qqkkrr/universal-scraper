@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -333,7 +332,7 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
     from .pdf_table import is_pdf_url, download_pdf
     if is_pdf_url(url):
         if log:
-            log(f"📄 识别到 PDF 直链，下载探测…")
+            log("📄 识别到 PDF 直链，下载探测…")
         try:
             fp = download_pdf(url, timeout=40)
             size = fp.stat().st_size
@@ -440,7 +439,7 @@ def generate_precise(description: str, url: str, config: Optional[Dict[str, Any]
         return {"ok": False, "host": host, "kind": tactic, "name": f"auto_precise_{sanitize_host(host)}",
                 "rows": [], "files": {}, "error": "需要登录/验证码", "detail": "请人工登录后重跑任务"}
 
-    # 阶段 3：生成战术参数 + 注册 + 试跑
+    # 阶段 3：生成战术参数，先试跑、通过后才落盘注册（防毒配置：失败配置绝不能进注册表）
     params = dict(decision.get("params") or {})
     params.setdefault("host", host)
     params.setdefault("entry", params.get("entry") or url)
@@ -452,27 +451,40 @@ def generate_precise(description: str, url: str, config: Optional[Dict[str, Any]
             "entry": params.get("entry"), "tactic": tactic, "params": params,
             "description": description}
     meta_path = CONFIG_DIR / f"auto_precise_{sanitize_host(host)}.json"
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    from . import sites as _sites
-    _sites._register_tactic_precise(meta)
-    _lg(f"✅ 精配已保存: {meta_path.name}（战术={tactic}）")
+    _wrote_meta = False
 
-    # 试跑（失败自动修复）
     try:
-        runner = {"cookie_click": _tactic_cookie_click_probe,
-                  "pdf_attach": _tactic_pdf_probe,
-                  "image_ocr": _tactic_image_probe,
-                  "html_engine": _tactic_engine_probe}[tactic]
-        rows, files, detail = _repair_probe(meta, url, limit, runner, _lg)
+        if tactic == "html_engine":
+            # 常规页面走 engine 任务包；_tactic_engine_probe 内部只会注册可执行的 engine 配置。
+            rows, files, detail = _tactic_engine_probe(meta, url, limit, _lg)
+            if not rows:
+                raise RuntimeError("engine 试跑 0 条")
+        else:
+            runner = {"cookie_click": _tactic_cookie_click_probe,
+                      "pdf_attach": _tactic_pdf_probe,
+                      "image_ocr": _tactic_image_probe}[tactic]
+            rows, files, detail = _repair_probe(meta, url, limit, runner, _lg)
+            # 试跑成功后保存/注册；失败则保持无配置，下次自动精配重试。
+            from . import sites as _sites
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            _wrote_meta = True
+            _sites._register_tactic_precise(meta)
+            _lg(f"✅ 精配已保存: {meta_path.name}（战术={tactic}）")
         _lg(f"✅ 试跑成功：{len(rows)} 条")
         # rows 返回完整数据（自动精配要拿全量；之前只给 3 行样例会让质量闸门误判"数量不足"）
         return {"ok": True, "host": host, "kind": f"tactic:{tactic}", "name": meta["name"],
                 "rows": rows, "sample": rows[:3], "files": files, "error": "", "detail": detail}
     except Exception as e:
+        # 只清理本次失败尝试写入的元信息；不删除此前已存在的成功配置。
+        if _wrote_meta:
+            try:
+                meta_path.unlink(missing_ok=True)
+            except Exception:
+                pass
         _lg(f"❌ 试跑失败：{type(e).__name__}: {e}")
         return {"ok": False, "host": host, "kind": f"tactic:{tactic}", "name": meta["name"],
                 "rows": [], "files": {}, "error": str(e),
-                "detail": f"战术[{tactic}]试跑失败，配置已保存可重试"}
+                "detail": f"战术[{tactic}]试跑失败，未保存/已清理配置，下次可重试"}
 
 
 def _export_files(base: str) -> Dict[str, str]:
@@ -600,6 +612,25 @@ def _entry_candidates(description: str, url: str, log=None) -> Dict[str, Any]:
     ok = probe.get("http_status") == 200 and (int(d.get("textLen") or 0) >= 300 or d.get("bigImages") or d.get("pdfLinks"))
     if ok:
         return probe
+    # 确定性兜底①：域名根（原路径 404/改版时，根首页几乎总是活的，且不依赖 LLM 猜）
+    try:
+        from urllib.parse import urlparse
+        _parsed = urlparse(url if "//" in url else "https://" + url)
+        _host = _parsed.netloc
+        for _root in (f"https://{_host}/", f"http://{_host}/"):
+            if _root.rstrip("/") == url.rstrip("/"):
+                continue
+            if log:
+                log(f"🔍 尝试域名根入口: {_root}")
+            _pr = _probe_advanced(_root, log=log)
+            _dd = _pr.get("detect") or {}
+            if _pr.get("http_status") == 200 and (int(_dd.get("textLen") or 0) >= 300
+                                                  or _dd.get("bigImages") or _dd.get("pdfLinks")):
+                if log:
+                    log(f"✅ 域名根入口可用: {_root}")
+                return _pr
+    except Exception:
+        pass
     if log:
         log("🔄 原入口不可用，AI 正在推断候选入口…")
     from .llm import LLMClient

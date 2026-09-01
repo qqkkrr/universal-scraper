@@ -15,12 +15,14 @@ import re
 import threading
 import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .log import Logger
+from .log import Logger, logger
 from .selectors import jpath, apply_extractor
+
+
+_map_record_warned = set()   # 已告警过的坏模板 (字段名, template)——每个只 WARN 一次
 
 
 def map_record(raw: dict, fields: dict) -> dict:
@@ -39,7 +41,13 @@ def map_record(raw: dict, fields: dict) -> dict:
             elif "template" in spec:
                 try:
                     out[name] = spec["template"].format(**{k: (v if v is not None else "") for k, v in raw.items()})
-                except Exception:
+                except Exception as e:
+                    # 模板渲染失败不能静默置空（配置错误会被伪装成"数据缺失"）；
+                    # 每个坏模板只告警一次（每条记录都会走这里，重复告警会刷屏）
+                    _key = (name, spec["template"])
+                    if _key not in _map_record_warned:
+                        _map_record_warned.add(_key)
+                        logger.warn(f"模板渲染失败，字段置空（字段={name}，template={spec['template']!r}）：{e}")
                     out[name] = ""
             elif "concat" in spec:
                 out[name] = "".join(str(jpath(raw, pth, "")) for pth in spec["concat"])
@@ -47,9 +55,8 @@ def map_record(raw: dict, fields: dict) -> dict:
                 out[name] = jpath(raw, spec.get("path", ""), None)
     return out
 from .queue import RequestQueue
-from .protocols import ParseContext, Request, Response, RateLimitedError
+from .protocols import ParseContext, Request, RateLimitedError
 from .task import Task
-from .config import ConfigError
 
 
 def resolve_tpl(value: Any, vars: Dict[str, str]) -> Any:
@@ -63,6 +70,9 @@ def resolve_tpl(value: Any, vars: Dict[str, str]) -> Any:
     return value
 
 
+_bad_pattern_warned = set()   # 已告警过的坏正则 pattern——每个只 WARN 一次
+
+
 def _match_rule(rule: Dict[str, Any], url: str) -> bool:
     m = rule.get("match", "regex")
     pat = rule.get("pattern") or "/"  # AI 可能写 null/空：None in url 会 TypeError
@@ -71,7 +81,11 @@ def _match_rule(rule: Dict[str, Any], url: str) -> bool:
     if m == "regex":
         try:
             return re.search(pat, url) is not None
-        except re.error:
+        except re.error as e:
+            # 坏正则永远 False（路由静默失效）→ 至少让配置错误可诊断（每个 pattern 只告警一次）
+            if pat not in _bad_pattern_warned:
+                _bad_pattern_warned.add(pat)
+                logger.warn(f"坏正则，规则恒不命中（match=regex, pattern={pat!r}）：{e}")
             return False
     if m == "startswith":
         return url.startswith(pat)
@@ -121,12 +135,13 @@ class EngineV3:
             _su0 = (self.config.get("start_urls") or [""])[0]
             _domain = ""
             if "//" in str(_su0):
-                _domain = str(_su0).split("//")[-1].split("/")[0].lower().lstrip("www.")
+                from .cookies import _norm_domain
+                _domain = _norm_domain(str(_su0).split("//")[-1].split("/")[0])
             if _domain:
                 _cm = (anti.get("cookie_mode") or "temp").lower()
                 anti["cookie_domain"] = _domain
                 self._cookie_domain = _domain
-                from .cookies import acquire_for_task, cookie_header
+                from .cookies import acquire_for_task
                 _acq = acquire_for_task(_domain, port=int(anti.get("cookie_port") or 9222),
                                         mode=_cm, log=log_cb)
                 self._cookie_acquired = _acq
@@ -137,11 +152,9 @@ class EngineV3:
                             log_cb(f"🍪 已复用 {_domain} 的会话（{_n} 条 cookie，自动注入）")
                         else:
                             log_cb(f"🍪 已从调试 Chrome 自动获取 {_domain} 会话（{_n} 条，任务结束自动删除）")
-                    _src = self.config.get("source") or {}
-                    if (_src.get("type") or "http") == "http":
-                        _hdrs = _src.setdefault("headers", {})
-                        if not _hdrs.get("Cookie"):
-                            _hdrs["Cookie"] = cookie_header(_domain)
+                    # 存档会话由 HttpFetcher 播种进会话 jar（域名限定+按名合并），
+                    # 不再静态注入 source.headers——静态头会永久压死服务端下发的
+                    # 新 Cookie，长任务中途换令牌时反而掉登录。
         except Exception:
             pass
         self.anti = anti
@@ -281,6 +294,11 @@ class EngineV3:
             for mw in self.middlewares:
                 req = mw.on_request(req, self.ctx) or req
             resp = self.fetcher.fetch(req)
+            # 浏览器渲染空页面（status=0 且无内容）：进入错误统计+重试路径，
+            # 不把"渲染失败"混入成功抓取（此前伪造 200 导致 0 条被当成正常）
+            if getattr(resp, "status", 0) == 0 and not (getattr(resp, "text", "") or "").strip() \
+                    and not (getattr(resp, "body", b"") or b"").strip(b"\n\r\t "):
+                raise RuntimeError(f"浏览器渲染空页面: {req.url}")
             for mw in self.middlewares:
                 resp = mw.on_response(resp, self.ctx) or resp
             # 路由
@@ -310,7 +328,6 @@ class EngineV3:
             if len(resp.text or "") > 2000:
                 try:
                     _root = Path(self.task.root)
-                    _is_list = len((resp.text or "")) > 0 and "/page/" not in (resp.url or "") and not self._last_page_saved
                     if not self._last_page_saved:
                         (_root / "last_page.html").write_text(resp.text, encoding="utf-8")
                         self._last_page_saved = True
@@ -348,16 +365,24 @@ class EngineV3:
                 if len(self._pre_filter_items) < 500:
                     self._pre_filter_items.append(item)
                 item = self.pipeline.process(item)
+                k = ""  # 必须初始化：未启用增量去重时 _seen_store 为 None，下面的 if k 分支不会执行
                 if item is not None and self._seen_store is not None:
                     from .storage import record_key
                     k = record_key(item, self._inc_key)
                     if k and self._seen_store.is_seen(k):
                         continue
-                    if k:
-                        self._seen_store.mark(k)
+                    # 注意：mark 延迟到 storage.write 成功后——磁盘满/写入异常时
+                    # 不能标记已见（否则重试后 is_seen 命中→数据永久丢失）
                 if item is not None:
                     # storage.write 挪到锁外：sqlite/multi 每 item 提交不应阻塞所有 worker
-                    self.storage.write(item)
+                    try:
+                        self.storage.write(item)
+                    except OSError as e:
+                        # 磁盘满等 IO 错误：致命（重试后 is_seen 会吞数据）
+                        self.logger.error(f"存储写入失败（可能磁盘满）: {e}")
+                        raise
+                    if k and self._seen_store is not None:
+                        self._seen_store.mark(k)  # 写成功才标记已见
                     with self._lock:
                         self.stats["items"] += 1
                         if len(self._all_items) < self._spool_threshold:
@@ -430,6 +455,14 @@ class EngineV3:
                     if release_temp(self._cookie_domain, self._cookie_acquired):
                         if self._log_cb:
                             self._log_cb(f"🍪 任务结束，已自动删除临时会话（{self._cookie_domain}）")
+                    elif (self._cookie_acquired.get("mode") == "temp"
+                          and self._cookie_acquired.get("source") == "imported"):
+                        # 该删而没删成：隐私删除失败必须可感知（登录态残留本地存档）
+                        _msg = (f"⚠️ 临时会话 cookie 删除失败（{self._cookie_domain}），"
+                                f"本次导入的登录态可能残留在本地存档，请手动检查 outputs/.cookies/")
+                        self.logger.warn(_msg)
+                        if self._log_cb:
+                            self._log_cb(_msg)
                 except Exception:
                     pass
 
@@ -634,8 +667,12 @@ class EngineV3:
         """周期保存未完成队列（SIGKILL 也只丢最近 N 条）。"""
         try:
             with self._lock:
-                pending = [r.url for r in self.queue._q]
-            self.pending_file.write_text(json.dumps(pending, ensure_ascii=False), encoding="utf-8")
+                pending = self.queue.snapshot_urls()  # 持锁快照，防与 worker pop 竞态
+                # 原子替换：多 worker 并发时不写坏断点文件（损坏即静默丢未完成队列）
+                _tmp = self.pending_file.with_suffix(".json.tmp")
+                _tmp.write_text(json.dumps(pending, ensure_ascii=False), encoding="utf-8")
+                import os as _os
+                _os.replace(_tmp, self.pending_file)
         except Exception:
             pass
 
@@ -717,6 +754,7 @@ class EngineV3:
                 if _sp.exists():
                     rows = [json.loads(l) for l in
                             _sp.read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+                    self._spool_total_hint = len(rows)  # 供写回时防子集覆盖全量
             except Exception as e:
                 self.logger.warn(f"详情：spool 读取失败（{e}），退回内存数据")
         if not rows:
@@ -771,7 +809,9 @@ class EngineV3:
             if not u or "javascript:" in u or u.startswith(("mailto:", "tel:", "data:", "#", "about:")):
                 continue
             if not u.startswith(("http://", "https://")):
-                if u.startswith("/") and _base.startswith(("http://", "https://")):
+                # urljoin 支持无斜杠相对路径（detail/x.html、show.php?id=1 等），
+                # 只要有 _base 就能正确补全——此前丢弃这些链接导致详情字段静默缺失
+                if _base.startswith(("http://", "https://")):
                     from urllib.parse import urljoin
                     u = urljoin(_base, u)
                 else:
@@ -874,11 +914,21 @@ class EngineV3:
         try:
             store_cfg = self.config.get("storage", {}) or {}
             if store_cfg.get("type", "jsonl") in ("jsonl", "multi"):
-                _sd = store_cfg.get("dir", "items")
-                _dir = Path(_sd) if Path(str(_sd)).is_absolute() else self.out_dir / str(_sd)
-                _sp = _dir / f"{self.storage_name}.jsonl"
-                _sp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
-                               encoding="utf-8")
+                # spooling 且本次 rows 来自内存子集（spool 读回失败退回）时，
+                # 禁止用子集覆盖全量磁盘文件——那会销毁已落盘的记录
+                if self._spooling and len(rows) < getattr(self, "_spool_total_hint", 0):
+                    self.logger.warn(f"详情：spool 读取不完整（{len(rows)} < 磁盘全量），"
+                                     "跳过 storage 写回以防覆盖")
+                elif self._spooling:
+                    # 覆写后文件内容已含全量合并结果：重置 spool_start 防止
+                    # _finalize 按旧偏移读回时错位丢行
+                    self._spool_start = 0
+                else:
+                    _sd = store_cfg.get("dir", "items")
+                    _dir = Path(_sd) if Path(str(_sd)).is_absolute() else self.out_dir / str(_sd)
+                    _sp = _dir / f"{self.storage_name}.jsonl"
+                    _sp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+                                   encoding="utf-8")
         except Exception as e:
             self.logger.warn(f"详情：storage 写回失败（{e}）")
         with self._lock:
@@ -924,14 +974,19 @@ class EngineV3:
         if self.resume and prev_json.exists():
             try:
                 old = json.loads(prev_json.read_text(encoding="utf-8"))
-                if isinstance(old, list):
-                    seen = {r.get("_url") for r in rows if r.get("_url")}
-                    for r in old:
-                        if r.get("_url") and r["_url"] not in seen:
-                            rows.append(r)
-                    self.logger.info(f"导出合并历史 {len(old)} 条 -> 共 {len(rows)} 条")
-            except Exception:
-                pass
+                if not isinstance(old, list):
+                    raise ValueError("历史导出不是 JSON 数组")
+                seen = {r.get("_url") for r in rows if r.get("_url")}
+                for r in old:
+                    if r.get("_url") and r["_url"] not in seen:
+                        rows.append(r)
+                self.logger.info(f"导出合并历史 {len(old)} 条 -> 共 {len(rows)} 条")
+            except Exception as e:
+                # 历史导出读不出来（损坏/格式变）时绝不能只用本次记录覆盖旧导出：
+                # 改写 <base>.new.*，旧导出原样保留
+                self.logger.warn(f"resume 合并失败：读 {prev_json.name} 异常（{e}），"
+                                 f"本次导出改写为 {base}.new.*（不覆盖旧导出）")
+                base = f"{base}.new"
         if rows:
             paths = export_rows(rows, self.out_dir, base)
             self.logger.info("导出: " + ", ".join(f"{k}={v.name}" for k, v in paths.items()))

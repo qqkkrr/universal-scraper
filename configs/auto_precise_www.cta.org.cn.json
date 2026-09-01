@@ -1,0 +1,12 @@
+{
+  "host": "www.cta.org.cn",
+  "kind": "tactic:image_ocr",
+  "name": "auto_precise_www.cta.org.cn",
+  "entry": "https://www.cta.org.cn/a/cont-16876.html",
+  "tactic": "image_ocr",
+  "params": {
+    "entry": "https://www.cta.org.cn/a/cont-16876.html",
+    "host": "www.cta.org.cn",
+    "seed": "https://www.cta.org.cn/"
+  }
+}

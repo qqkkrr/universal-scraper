@@ -1,0 +1,115 @@
+{
+ "host": "taptap.cn",
+ "learned_at": 1786435250.036114,
+ "from_description": "TapTap“Android游戏热玩榜”，在2025年8月15日抓取前50游戏名称、评分、开发商、安装人数区间。",
+ "config": {
+  "start_urls": [
+   "https://www.taptap.cn/top/board"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "webapiv2/top/v1/board",
+    "parser": "board_json"
+   },
+   {
+    "match": "contains",
+    "pattern": "/top/board",
+    "parser": "html_list"
+   }
+  ],
+  "parsers": {
+   "board_json": {
+    "type": "json",
+    "records_path": "data.list",
+    "fields": {
+     "rank": {
+      "from": "top"
+     },
+     "name": {
+      "from": "app.title"
+     },
+     "rating": {
+      "from": "app.rating"
+     },
+     "developer": {
+      "from": "app.developer"
+     },
+     "install_range": {
+      "from": "app.stat.install_count"
+     }
+    }
+   },
+   "html_list": {
+    "type": "html",
+    "row_css": ".taptap-top-card, .top-card, .board-card, .top-list .card",
+    "fields": {
+     "rank": {
+      "css": ".rank, .index::text"
+     },
+     "name": {
+      "css": ".app-name, .game-name::text"
+     },
+     "rating": {
+      "css": ".rating, .score::text"
+     },
+     "developer": {
+      "css": ".developer::text"
+     },
+     "install_range": {
+      "css": ".install-count, .stat::text"
+     }
+    }
+   },
+   "default": {
+    "type": "json",
+    "records_path": "data.list",
+    "fields": {
+     "rank": {
+      "from": "top"
+     },
+     "name": {
+      "from": "app.title"
+     },
+     "rating": {
+      "from": "app.rating"
+     },
+     "developer": {
+      "from": "app.developer"
+     },
+     "install_range": {
+      "from": "app.stat.install_count"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "name",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "name"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 20,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 1.0,
+   "max_retries": 3
+  }
+ }
+}

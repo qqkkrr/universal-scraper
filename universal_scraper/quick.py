@@ -107,7 +107,7 @@ def save_result(result: Dict[str, Any], out: Optional[str] = None,
     else:
         import hashlib
         ext = ".json" if as_json else ".md"
-        h = hashlib.md5(str(result.get("url", "")).encode()).hexdigest()[:12]
+        h = hashlib.md5(str(result.get("url", "")).encode(), usedforsecurity=False).hexdigest()[:12]
         fp = Path(f"outputs/fetch_{h}{ext}")
     fp.parent.mkdir(parents=True, exist_ok=True)
     if as_json:
@@ -136,7 +136,7 @@ def crawl_url(url: str, depth: int = 2, max_pages: int = 100, allow: Optional[st
     from pathlib import Path
     from urllib.parse import urlparse
 
-    h = hashlib.md5(url.encode()).hexdigest()[:10]
+    h = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()[:10]
     work = Path("outputs/.crawl_tmp")
     tdir = work / f"crawl_{h}"
     shutil.rmtree(tdir, ignore_errors=True)

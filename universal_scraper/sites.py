@@ -9,11 +9,18 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import bisect
 import json
 import re
 import urllib.parse
 from typing import Any, Callable, Dict, List, Optional
+
+from .book_catalog import parse_dangdang_search as _parse_dangdang_search
+from .book_catalog import parse_douban_book_buylinks as _parse_douban_book_buylinks
+from .book_catalog import parse_douban_book_detail as _parse_douban_book_detail
+from .book_catalog import parse_douban_book_search as _parse_douban_book_search
 
 # ---------------------------------------------------------------------------
 # 高频网站表（中文互联网高频数据源）
@@ -21,12 +28,20 @@ from typing import Any, Callable, Dict, List, Optional
 HIGH_FREQUENCY_SITES = [
     {"name": "大众点评", "domain": "dianping.com", "module": "dianping", "status": "✅ 已精配",
      "desc": "美食/商家列表（Cookie 直抓 SSR）", "difficulty": "高反爬·需登录 Cookie"},
-    {"name": "京东", "domain": "jd.com", "module": "jd", "status": "🔧 浏览器模式·需登录调优",
-     "desc": "商品/店铺/评论（浏览器+扫码登录，须有 pt_key/pt_pin）",
-     "difficulty": "高·强风控+需登录",
-     "url_tips": "店铺页: https://mall.jd.com/index-<店铺ID>.html；商品页: https://item.jd.com/<skuID>.html；不要用 <店铺名>sp.jd.com"},
-    {"name": "豆瓣", "domain": "douban.com", "module": "douban", "status": "🔄 待精配",
+    {"name": "京东", "domain": "item.jd.com", "module": "jd", "status": "✅ 聚合价方案（不绕过登录）",
+     "desc": "商品详情/搜索当前会跳登录墙；价格采用豆瓣在哪儿买公开聚合价+联盟跳转",
+     "difficulty": "高·强风控+需登录；不逆向h5st/不获取登录态",
+     "url_tips": "商品页: https://item.jd.com/<skuID>.html；在哪儿买聚合: https://book.douban.com/subject/<id>/buylinks"},
+    {"name": "当当网", "domain": "search.dangdang.com", "module": "dangdang_search", "status": "✅ 已精配",
+     "desc": "图书 ISBN 搜索：实时价/划线价/商品链接（HTTP SSR）",
+     "difficulty": "低·公开搜索页",
+     "url_tips": "搜索: https://search.dangdang.com/?key=<ISBN>"},
+    {"name": "豆瓣", "domain": "douban.com", "module": "douban", "status": "✅ 已精配",
      "desc": "电影/图书/小组", "difficulty": "中·有反爬但 SSR"},
+    {"name": "豆瓣读书", "domain": "book.douban.com", "module": "douban_book", "status": "✅ 已精配",
+     "desc": "书目详情/ISBN搜索/在哪儿买（京东/当当聚合价）",
+     "difficulty": "中·有反爬但 SSR；需限速",
+     "url_tips": "详情: /subject/<id>/；在哪儿买: /subject/<id>/buylinks；搜索: /subject_search?cat=1001&search_text=<ISBN>"},
     {"name": "B站", "domain": "bilibili.com", "module": "bilibili", "status": "🔄 待精配",
      "desc": "视频搜索/信息", "difficulty": "中·有风控"},
     {"name": "知乎", "domain": "zhihu.com", "module": "zhihu", "status": "🔧 浏览器模式·需登录调优",
@@ -52,6 +67,9 @@ HIGH_FREQUENCY_SITES = [
     {"name": "沈阳体育学院学报", "domain": "stxb.magtech.com.cn", "module": "sytyxb", "status": "✅ 已精配",
      "desc": "期刊全文/PDF（magtech 系统，2024 起免费）", "difficulty": "低·公开全文",
      "url_tips": "期次: /CN/Y<年>/V<卷>/I<期>；文章: /CN/<DOI>；PDF 由 showArticleFile.do 换取直链"},
+    {"name": "科研管理", "domain": "kygl.net.cn", "module": "kygl", "status": "✅ 已精配",
+     "desc": "期刊目录/文章/官方MAG XML全文（2026 全部期次）", "difficulty": "中·PDF需权限，XML公开",
+     "url_tips": "期次: /CN/Y<年>/V<卷>/I<期>；文章: /CN/<DOI>；全文 XML: /article/2026/.../<id>/<file>.mag.xml"},
     {"name": "全国公共资源交易平台", "domain": "ggzy.gov.cn", "module": "ggzy", "status": "✅ 已精配",
      "desc": "招标/中标公告搜索（真实浏览器过WAF，历史交易dealList）", "difficulty": "中高·WAF+可能验证码",
      "url_tips": "搜索入口: https://www.ggzy.gov.cn/history/dealList.html?keyword=<关键词>&begin=YYYY-MM-DD&end=YYYY-MM-DD&stages=0001,0002（0001=招标公告, 0002=中标公告）；详情页 /deal/html/a/xxx.html 正文在 /deal/html/b/xxx.html"},
@@ -101,7 +119,7 @@ _DESC_ROUTE = [
     ("stackoverflow", ("stack overflow", "stackoverflow", "stackoverflow.com", "stack exchange"), "https://api.stackexchange.com/2.3/questions?tagged={TAG}&fromdate=EPOCH24H&sort=creation&order=desc&site=stackoverflow&pagesize=20&filter=default"),
     ("arxiv", ("arxiv", "论文预印本", "每日论文"), ""),
     ("leetcode", ("leetcode", "力扣", "题库"), ""),
-    ("douban", ("豆瓣", "豆瓣电影", "豆瓣读书"), ""),
+    ("douban", ("豆瓣", "豆瓣电影", "豆瓣读书", "图书目录", "书目", "书籍目录", "ISBN"), ""),
     ("bilibili", ("b站", "bilibili", "哔哩哔哩", "视频搜索"), ""),
     ("dianping", ("大众点评", "点评", "美食商家"), ""),
     ("douyin", ("抖音", "douyin", "短视频"), ""),
@@ -186,8 +204,9 @@ def list_sites() -> List[Dict[str, str]]:
     out = []
     # module 字段 → SITES 注册键
     mapping = {"baidu_search": "baidu", "dianping": "dianping",
-               "douban": "douban", "bilibili": "bilibili", "github": "github",
-               "weather": "weather"}
+               "douban": "douban", "douban_book": "douban_book_detail",
+               "dangdang_search": "dangdang_search", "bilibili": "bilibili",
+               "github": "github", "weather": "weather", "netease_news": "netease"}
     for s in HIGH_FREQUENCY_SITES:
         key = mapping.get(s["module"], s["module"])
         reg = SITES.get(key)
@@ -313,15 +332,23 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
         name = out_name or f"site_{site}_{host}"
         out_dir = _P("outputs"); out_dir.mkdir(exist_ok=True)
         fp = out_dir / f"{name}.json"
-        fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 只报真实导出成功的文件：写入失败不伪装成功（参考 quick.py 同类做法）
+        files: Dict[str, str] = {}
+        _warns: List[str] = []
+        try:
+            fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+            files["json"] = f"outputs/{name}.json"
+        except Exception as _e:
+            _warns.append(f"JSON 导出失败: {_e}")
         try:
             import csv
             with open(out_dir / f"{name}.csv", "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.DictWriter(f, fieldnames=[k for k in rows[0] if k != "_site"])
                 w.writeheader()
                 w.writerows([{k: v for k, v in r.items() if k != "_site"} for r in rows])
-        except Exception:
-            pass
+            files["csv"] = f"outputs/{name}.csv"
+        except Exception as _e:
+            _warns.append(f"CSV 导出失败: {_e}")
         try:
             from openpyxl import Workbook
             wb = Workbook(); ws = wb.active
@@ -330,10 +357,13 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
             for r in rows:
                 ws.append([r.get(k, "") for k in keys])
             wb.save(out_dir / f"{name}.xlsx")
-        except Exception:
-            pass
-        files = {"json": f"outputs/{name}.json", "csv": f"outputs/{name}.csv", "xlsx": f"outputs/{name}.xlsx"}
-        return {"total": len(rows), "rows": rows, "files": files, "error": "", "site": site}
+            files["xlsx"] = f"outputs/{name}.xlsx"
+        except Exception as _e:
+            _warns.append(f"XLSX 导出失败: {_e}")
+        ret = {"total": len(rows), "rows": rows, "files": files, "error": "", "site": site}
+        if _warns:
+            ret["warning"] = "；".join(_warns)
+        return ret
     fetch = s.get("fetch") or fetch_html
     try:
         res = fetch(url, cookie=cookie, proxy=proxy)
@@ -355,15 +385,23 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
     name = out_name or f"site_{site}_{host}"
     out_dir = _P("outputs"); out_dir.mkdir(exist_ok=True)
     fp = out_dir / f"{name}.json"
-    fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 只报真实导出成功的文件：写入失败不伪装成功（参考 quick.py 同类做法）
+    files: Dict[str, str] = {}
+    _warns: List[str] = []
+    try:
+        fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        files["json"] = f"outputs/{name}.json"
+    except Exception as _e:
+        _warns.append(f"JSON 导出失败: {_e}")
     try:
         import csv
         with open(out_dir / f"{name}.csv", "w", newline="", encoding="utf-8-sig") as f:
             w = csv.DictWriter(f, fieldnames=[k for k in rows[0] if k != "_site"])
             w.writeheader()
             w.writerows([{k: v for k, v in r.items() if k != "_site"} for r in rows])
-    except Exception:
-        pass
+        files["csv"] = f"outputs/{name}.csv"
+    except Exception as _e:
+        _warns.append(f"CSV 导出失败: {_e}")
     try:
         from openpyxl import Workbook
         wb = Workbook(); ws = wb.active
@@ -372,10 +410,13 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
         for r in rows:
             ws.append([r.get(k, "") for k in keys])
         wb.save(out_dir / f"{name}.xlsx")
-    except Exception:
-        pass
-    files = {"json": f"outputs/{name}.json", "csv": f"outputs/{name}.csv", "xlsx": f"outputs/{name}.xlsx"}
-    return {"total": len(rows), "rows": rows, "files": files, "error": "", "site": site}
+        files["xlsx"] = f"outputs/{name}.xlsx"
+    except Exception as _e:
+        _warns.append(f"XLSX 导出失败: {_e}")
+    ret = {"total": len(rows), "rows": rows, "files": files, "error": "", "site": site}
+    if _warns:
+        ret["warning"] = "；".join(_warns)
+    return ret
 
 
 if __name__ == "__main__":
@@ -431,10 +472,39 @@ def parse_douban(html: str, url: str) -> List[Dict[str, Any]]:
 
 
 def match_douban(url: str) -> bool:
+    if "book.douban.com" in url and any(k in url for k in ("/subject/", "/subject_search", "/buylinks")):
+        return False
     return "douban.com" in url and any(k in url for k in ("movie", "book", "group", "/subject/", "search"))
 
 
 register("douban", match_douban, parse_douban, desc="豆瓣：电影/图书榜单与搜索")
+
+
+# ---------- 豆瓣读书（书目详情/搜索/在哪儿买） ----------
+def match_douban_book_detail(url: str) -> bool:
+    return "book.douban.com/subject/" in url and "/buylinks" not in url
+
+
+def match_douban_book_search(url: str) -> bool:
+    return "book.douban.com/subject_search" in url
+
+
+def match_douban_book_buylinks(url: str) -> bool:
+    return "book.douban.com/subject/" in url and "/buylinks" in url
+
+
+def match_dangdang_search(url: str) -> bool:
+    return "search.dangdang.com" in url and "key=" in url
+
+
+register("douban_book_detail", match_douban_book_detail, _parse_douban_book_detail,
+         desc="豆瓣读书：书目详情（评分/ISBN/出版社/简介/封面）")
+register("douban_book_search", match_douban_book_search, _parse_douban_book_search,
+         desc="豆瓣读书：ISBN/书名搜索")
+register("douban_book_buylinks", match_douban_book_buylinks, _parse_douban_book_buylinks,
+         desc="豆瓣读书：在哪儿买（京东/当当公开聚合价）")
+register("dangdang_search", match_dangdang_search, _parse_dangdang_search,
+         desc="当当：图书 ISBN 搜索（实时价/链接）")
 
 
 # ---------- GitHub（REST API JSON） ----------
@@ -685,6 +755,24 @@ def _sytyxb_parse(html, url):
 
 register("sytyxb", match_sytyxb, _sytyxb_parse, fetch=fetch_html,
          desc="沈阳体育学院学报：期次/文章/PDF（magtech 期刊系统）")
+
+
+
+def match_kygl(url: str) -> bool:
+    return "kygl.net.cn" in url and ("/CN/Y20" in url or "showOldVolumn" in url or "/CN/10.19571/" in url or "/article/2026/1000-2995/" in url)
+
+
+def _kygl_parse(html, url):
+    from .journals import parse_issue_html
+    m = re.search(r"/CN/Y(\d{4})/V(\d+)/I(\d+)", url)
+    issue = {"year": m.group(1), "vol": m.group(2), "issue": m.group(3),
+             "label": f"{m.group(1)}年 第{m.group(3)}期"} if m else {}
+    site = {"base": "https://www.kygl.net.cn", "ctx": "/CN"}
+    return parse_issue_html(html, issue, site=site)
+
+
+register("kygl", match_kygl, _kygl_parse, fetch=fetch_html,
+         desc="科研管理：期次/文章/全部全文（magtech 期刊系统，官方 MAG XML 公开）")
 
 
 # ---------------------------------------------------------------------------
@@ -986,7 +1074,7 @@ def browser_fetch(url, cookie="", proxy=None):
                "--storageState", str(root / "outputs" / ".session" / "session.json")]
         env = {**os.environ, "NODE_PATH": npath}
         try:
-            p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=120)
+            subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=120)
         except Exception as e:
             return {"ok": False, "status": 0, "html": "", "final_url": url, "error": str(e)}
         files = sorted(out.glob("*.html"))
@@ -1687,7 +1775,6 @@ def match_miit(url: str) -> bool:
         "appqhyhqyzxzzxd" in u or "jgsj/xgj" in u or "zwgk/zcwj/wjfb/tz" in u)
 
 
-import sys, re, bisect
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer, LTTextLine, LTRect, LTLine, LTChar
 
@@ -2088,10 +2175,22 @@ def _register_image_precise(meta: Dict[str, Any]):
 
 
 def _register_tactic_precise(meta: Dict[str, Any]):
-    """注册战术型精配：meta 含 host/tactic/params（entry/seed/item_css/url_template/fields/img_src_hint）。"""
+    """注册战术型精配：meta 含 host/tactic/params（entry/seed/item_css/url_template/fields/img_src_hint）。
+
+    html_engine 不是 run 型战术（它应由 _register_engine_config 注册成 engine 任务包）。
+    历史遗留的 tactic:html_engine 配置属于毒配置：忽略并删除，避免 run_site 误报“未支持的战术”。
+    """
     host = (meta.get("host") or "").lower().strip()
     tactic = meta.get("tactic") or "html_engine"
     if not host:
+        return
+    if tactic not in ("cookie_click", "pdf_attach", "image_ocr"):
+        try:
+            _base = re.sub(r"[^0-9A-Za-z_.-]", "_", host).strip("_")
+            _cfg = Path(__file__).resolve().parent.parent / "configs" / f"auto_precise_{_base}.json"
+            _cfg.unlink(missing_ok=True)
+        except Exception:
+            pass
         return
     name = f"auto_precise_{re.sub(r'[^0-9A-Za-z_.-]', '_', host).strip('_')}"
 
@@ -2502,7 +2601,7 @@ def _eq_run(url: str, cookie: str = "", proxy: Optional[str] = None,
     # 绘制震级-经纬度分布图
     try:
         _draw_eq_map(rows, proxy=proxy)
-    except Exception as e:
+    except Exception:
         pass
     return rows
 
@@ -2546,7 +2645,7 @@ def _draw_eq_map(rows: List[Dict[str, Any]], proxy: Optional[str] = None) -> Non
     ax.set_xlabel("经度"); ax.set_ylabel("纬度")
     ax.set_title(f"中国及周边地震分布（最近24小时，{len(pts)} 条）", fontsize=14)
     ax.grid(True, linestyle="--", alpha=0.3)
-    cb = fig.colorbar(sc, ax=ax, label="震源深度 (km)")
+    fig.colorbar(sc, ax=ax, label="震源深度 (km)")
     # 标注 ≥5 级
     for p, m, t, place in zip(pts, mag, [x[4] for x in pts], [x[5] for x in pts]):
         if m >= 5:
@@ -2578,12 +2677,11 @@ def match_tax(url: str) -> bool:
 
 def _tax_run(url: str, cookie: str = "", proxy: Optional[str] = None,
              limit: int = 0) -> List[Dict[str, Any]]:
-    from urllib.parse import urlparse, parse_qs, urlencode
+    from urllib.parse import urlparse, parse_qs
     import requests as _req
     q = parse_qs(urlparse(url).query)
     word = (q.get("searchWord") or [""])[0].strip() or "增值税"
     column = (q.get("column") or [""])[0].strip() or "政策法规"
-    page = int((q.get("pageNum") or [""])[0] or 0)
     strict = (q.get("strict") or ["1"])[0] != "0"  # 默认标题必须含关键词
     form = {
         "siteCode": "bm29000002",

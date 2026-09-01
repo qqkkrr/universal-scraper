@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List
 
 
 class Checkpoint:
@@ -27,7 +27,11 @@ class Checkpoint:
         kept = rows[-self.MAX_ROWS:] if len(rows) > self.MAX_ROWS else rows
         self.data.update({"done": done, "total": total, "rows": kept,
                           "rows_truncated": len(rows) > self.MAX_ROWS})
-        self.path.write_text(json.dumps(self.data, ensure_ascii=False, default=str), encoding="utf-8")
+        # 原子写：断电/崩溃不损坏检查点（损坏后 resume 静默丢全部历史行）
+        _tmp = self.path.with_suffix(".json.tmp")
+        _tmp.write_text(json.dumps(self.data, ensure_ascii=False, default=str), encoding="utf-8")
+        import os as _os
+        _os.replace(_tmp, self.path)
 
     def load_rows(self) -> List[Dict[str, Any]]:
         return self.data.get("rows", [])
@@ -77,9 +81,9 @@ class SeenStore:
         try:
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write("\n".join(self._pending) + "\n")
+            self._pending = []  # 写成功才清空；失败保留待下次 flush（防增量去重跨运行失效）
         except Exception:
-            pass
-        self._pending = []
+            pass  # 保 _pending 供下次重试
 
     def __len__(self) -> int:
         return len(self._seen)
@@ -94,5 +98,6 @@ def record_key(record: Dict[str, Any], keys) -> str:
             return ""
     parts = []
     for k in (keys if isinstance(keys, list) else [keys]):
-        parts.append(str(record.get(k) or ""))
+        # 换行/回车会破坏 JSONL 行对齐（跨重启去重失效），在源头清洗
+        parts.append(str(record.get(k) or "").replace("\n", " ").replace("\r", " "))
     return "|".join(parts)

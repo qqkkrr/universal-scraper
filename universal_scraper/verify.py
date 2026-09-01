@@ -152,8 +152,8 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
                     match = title[:12] in body
                 # 判定分级：4xx/5xx（确定性死链）=失败；超时/连接错误(0)=警告（网络隔离/反爬，不等于数据错）；
                 #           可达但标题不匹配=警告（JS渲染/PDF/动态标题常见）
-                good = reachable or st == 0
-                warn = (not good) or (reachable and match is False)
+                good = reachable
+                warn = (st == 0) or (not good) or (reachable and match is False)
                 if good and not warn:
                     ok += 1
                 checked.append({"url": u[:80], "reachable": reachable,

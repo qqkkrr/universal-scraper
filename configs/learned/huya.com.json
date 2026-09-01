@@ -1,0 +1,104 @@
+{
+ "host": "huya.com",
+ "learned_at": 1786435024.9157062,
+ "from_description": "虎牙直播“王者荣耀”分类，在2025年8月20日20:00抓取人气前50房间的标题、主播名、热度。",
+ "config": {
+  "start_urls": [
+   "https://www.huya.com/g/wzry"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+   },
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/g/wzry",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "li.game-live-item",
+    "fields": {
+     "title": {
+      "css": "a.title::text"
+     },
+     "anchor": {
+      "css": "i.nick::text"
+     },
+     "hot": {
+      "css": "i[class*='num']::text"
+     },
+     "link": {
+      "css": "a.title::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/g/wzry$|/g/wzry\\?page=\\d+$/?$",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "li.game-live-item",
+    "fields": {
+     "title": {
+      "css": "a.title::text"
+     },
+     "anchor": {
+      "css": "i.nick::text"
+     },
+     "hot": {
+      "css": "i[class*='num']::text"
+     },
+     "link": {
+      "css": "a.title::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/g/wzry$|/g/wzry\\?page=\\d+$/?$",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "anchor",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "hot",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 2,
+   "max_requests": 20,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.8,
+   "max_retries": 3
+  }
+ }
+}

@@ -1,0 +1,169 @@
+{
+ "host": "zxgk.court.gov.cn",
+ "learned_at": 1786434820.618171,
+ "from_description": "中国执行信息公开网，在2025年7月1日、10月1日分别输入目标企业名单，抓取失信被执行人信息。",
+ "config": {
+  "start_urls": [
+   "https://zxgk.court.gov.cn/shixin/"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "shixin",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "#resultList tbody tr, .resultList tbody tr, .result-list tbody tr, .list tbody tr",
+    "fields": {
+     "被执行企业名称": {
+      "css": "td:nth-of-type(1) a:first-of-type::text"
+     },
+     "执行法院": {
+      "css": "td:nth-of-type(2)::text"
+     },
+     "立案时间": {
+      "css": "td:nth-of-type(3)::text"
+     },
+     "案号": {
+      "css": "td:nth-of-type(4)::text"
+     },
+     "履行情况": {
+      "css": "td:nth-of-type(5)::text"
+     },
+     "失信行为具体情形": {
+      "css": "td:nth-of-type(6)::text"
+     },
+     "发布时间": {
+      "css": "td:nth-of-type(7)::text"
+     },
+     "link": {
+      "css": "td:nth-of-type(1) a:first-of-type::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/detail|page=\\d+",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "#resultList tbody tr, .resultList tbody tr, .result-list tbody tr, .list tbody tr",
+    "fields": {
+     "被执行企业名称": {
+      "css": "td:nth-of-type(1) a:first-of-type::text"
+     },
+     "执行法院": {
+      "css": "td:nth-of-type(2)::text"
+     },
+     "立案时间": {
+      "css": "td:nth-of-type(3)::text"
+     },
+     "案号": {
+      "css": "td:nth-of-type(4)::text"
+     },
+     "履行情况": {
+      "css": "td:nth-of-type(5)::text"
+     },
+     "失信行为具体情形": {
+      "css": "td:nth-of-type(6)::text"
+     },
+     "发布时间": {
+      "css": "td:nth-of-type(7)::text"
+     },
+     "link": {
+      "css": "td:nth-of-type(1) a:first-of-type::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/detail|page=\\d+",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "被执行企业名称",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "案号"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://zxgk.court.gov.cn/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "法定代表人",
+     "type": "css_text",
+     "selector": "xpath:.//td[contains(text(),'法定代表人')]/following-sibling::td[1]//text()"
+    },
+    {
+     "name": "执行法院",
+     "type": "css_text",
+     "selector": "xpath:.//td[contains(text(),'执行法院')]/following-sibling::td[1]//text()"
+    },
+    {
+     "name": "立案时间",
+     "type": "css_text",
+     "selector": "xpath:.//td[contains(text(),'立案时间')]/following-sibling::td[1]//text()"
+    },
+    {
+     "name": "案号",
+     "type": "css_text",
+     "selector": "xpath:.//td[contains(text(),'案号')]/following-sibling::td[1]//text()"
+    },
+    {
+     "name": "履行情况",
+     "type": "css_text",
+     "selector": "xpath:.//td[contains(text(),'履行情况')]/following-sibling::td[1]//text()"
+    },
+    {
+     "name": "失信行为具体情形",
+     "type": "css_text",
+     "selector": "xpath:.//td[contains(text(),'失信被执行人行为具体情形')]/following-sibling::td[1]//text()"
+    },
+    {
+     "name": "发布时间",
+     "type": "css_text",
+     "selector": "xpath:.//td[contains(text(),'发布时间')]/following-sibling::td[1]//text()"
+    }
+   ],
+   "filters": [
+    {
+     "type": "parse_date",
+     "field": "发布时间",
+     "out": "publish_ts"
+    }
+   ],
+   "concurrency": 1,
+   "interval": 1
+  },
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 500,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1,
+   "max_retries": 3
+  }
+ }
+}

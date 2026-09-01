@@ -181,12 +181,19 @@ def main() -> int:
     st_p.add_argument("--cookie", default="", help="Cookie（配合 --run）")
     st_p.add_argument("--limit", type=int, default=20, help="条数上限")
 
+    bk_p = sub.add_parser("books", help="📚 图书目录采集（豆瓣详情+京东/当当比价，不下载正文）")
+    bk_p.add_argument("--spec", required=True, help="spec JSON 路径，如 examples/books.spec.json")
+    bk_p.add_argument("--out", default="outputs/book_catalog", help="输出目录（默认 outputs/book_catalog）")
+    bk_p.add_argument("--no-covers", action="store_true", help="不下载公开封面")
+    bk_p.add_argument("--interval", type=float, default=1.0, help="每个 HTTP 请求间隔秒数（默认 1.0）")
+
     jp = sub.add_parser("journal", help="📚 期刊论文批量下载（magtech 系统，沈阳体育学院学报已精配）")
     jp.add_argument("--site", default="sytyxb", help="期刊站点（默认 sytyxb=沈阳体育学院学报）")
     jp.add_argument("--since", type=int, default=2024, help="起始年份（默认 2024）")
     jp.add_argument("--out", default="", help="输出目录（默认 outputs/journal_<site>）")
     jp.add_argument("--workers", type=int, default=6, help="并发数")
     jp.add_argument("--no-meta", action="store_true", help="跳过摘要/关键词拉取（更快）")
+    jp.add_argument("--fulltext", action="store_true", help="科研管理模式：官方 PDF 受限时追加公开 MAG XML 全文 PDF")
 
     pr_p = sub.add_parser("proxy", help="🔄 免费代理池自动构建（抓取+验证+入库）")
     rp_p = sub.add_parser("report", help="📊 爬取CSV → 自动可视化报告（概览/统计/分组/分布图）")
@@ -197,7 +204,7 @@ def main() -> int:
     pr_p.add_argument("--out", default="outputs/proxies.txt", help="输出文件")
     pr_p.add_argument("--workers", type=int, default=30)
 
-    doc_p = sub.add_parser("doctor", help="🩺 自检：依赖/Node/浏览器/端口/仓库/输出目录")
+    sub.add_parser("doctor", help="🩺 自检：依赖/Node/浏览器/端口/仓库/输出目录")
 
     llm_p = sub.add_parser("llm", help="🤖 显示/切换 AI 模型配置（主模型 + 视觉模型）")
     llm_p.add_argument("--model", default="", help="切换主模型，如 qwen-max / deepseek-chat")
@@ -219,7 +226,7 @@ def main() -> int:
     dp_p.add_argument("--proxy", default="", help="可选：住宅代理 http://user:pass@host:port")
     dp_p.add_argument("--out", default="", help="导出文件名前缀")
 
-    ip_p = sub.add_parser("ip", help="🌐 查看当前出口 IP 与运营商（换网络后确认）")
+    sub.add_parser("ip", help="🌐 查看当前出口 IP 与运营商（换网络后确认）")
 
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
     vp.add_argument("--file", required=True, help="结果 JSON 文件，如 outputs/xxx.json")
@@ -247,7 +254,7 @@ def main() -> int:
         from .task_bundle import scaffold_task
         out = scaffold_task(args.name, Path(args.out))
         print(f"✅ 任务包已生成: {out}")
-        print(f"   下一步: 改 config.json 的 start_urls/rules/parsers，或写 modules/parser.py")
+        print("   下一步: 改 config.json 的 start_urls/rules/parsers，或写 modules/parser.py")
         print(f"   运行:   python3 -m universal_scraper.cli run --task {out}")
         return 0
 
@@ -281,7 +288,6 @@ def main() -> int:
 
     if args.cmd == "monitor":
         from .engine_v3 import run_task
-        import hashlib
         import time
         key_field = args.key
         diff_fields = args.diff_fields.split(",") if args.diff_fields else None
@@ -379,13 +385,28 @@ def main() -> int:
             print(f"  {s['status']} {s['name']:<6} {s['domain']:<22} {s['desc']}  [{s['difficulty']}]")
         return 0
 
+    if args.cmd == "books":
+        from .book_catalog import build_catalog
+        spec_path = Path(args.spec)
+        if not spec_path.exists():
+            print(f"❌ spec 文件不存在: {spec_path}", file=sys.stderr)
+            return 1
+        try:
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+            result = build_catalog(spec, args.out, download_covers=not args.no_covers,
+                                   min_interval=args.interval)
+        except Exception as e:
+            print(f"❌ books 执行失败: {type(e).__name__}: {e}", file=sys.stderr)
+            return 1
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result.get("status") != "INVALID_SPEC" else 1
+
     if args.cmd == "doctor":
-        from .doctor import run as doctor_run, main as doctor_main
+        from .doctor import main as doctor_main
         return doctor_main()
 
     if args.cmd == "llm":
         from .llm import LLMClient
-        import os as _os
         from pathlib import Path as _P
         _zs = _P.home() / ".zshenv"
         _lines = _zs.read_text().splitlines() if _zs.exists() else []
@@ -442,7 +463,6 @@ def main() -> int:
         return 0
 
     if args.cmd == "cookies":
-        from .core import smart_decode  # noqa
         import json as _json
         from pathlib import Path as _P
         sf = _P(args.session)
@@ -481,6 +501,17 @@ def main() -> int:
         if summary.get("error"):
             print(f"❌ {summary['error']}", file=sys.stderr)
             return 1
+        if args.fulltext:
+            import os, subprocess
+            script = _P(__file__).resolve().parent.parent / "scripts" / "kygl_fulltext_download.py"
+            env = os.environ.copy()
+            if args.out:
+                env["KYGL_OUT"] = str(_P(args.out).expanduser().resolve())
+            print("🧩 追加官方 MAG XML 全文 PDF（官方 PDF 受权限限制时）...", file=sys.stderr)
+            r = subprocess.run([sys.executable, str(script)], env=env, cwd=str(_P(__file__).resolve().parent.parent))
+            if r.returncode != 0:
+                print("❌ 全文 PDF 追加失败", file=sys.stderr)
+                return r.returncode
         return 0
 
     if args.cmd == "dianping":

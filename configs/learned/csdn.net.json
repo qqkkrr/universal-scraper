@@ -1,0 +1,119 @@
+{
+ "host": "csdn.net",
+ "learned_at": 1786430892.673686,
+ "from_description": "CSDN“架构”分类下24小时热门文章，在2025年8月22日10:00抓取标题、作者、阅读量、收藏数。",
+ "config": {
+  "start_urls": [
+   "https://www.csdn.net/nav/arch"
+  ],
+  "source": {
+   "type": "browser",
+   "headless": true,
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+   },
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "csdn.net/nav/arch",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": ".list_item, .feedlist .list_item, .article-list .list_item",
+    "fields": {
+     "title": {
+      "css": "h3 a::text, .title a::text, a[href*='/article/details/']::text"
+     },
+     "author": {
+      "css": ".nickname::text, .name::text, .user-name::text, .author-name::text"
+     },
+     "read_num": {
+      "css": ".read-num::text, .view-count::text, .num-read::text"
+     },
+     "link": {
+      "css": "a[href*='/article/details/']::attr(href), h3 a::attr(href), .title a::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^https://www.csdn.net/nav/arch(\\?.*)?$",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": ".list_item, .feedlist .list_item, .article-list .list_item",
+    "fields": {
+     "title": {
+      "css": "h3 a::text, .title a::text, a[href*='/article/details/']::text"
+     },
+     "author": {
+      "css": ".nickname::text, .name::text, .user-name::text, .author-name::text"
+     },
+     "read_num": {
+      "css": ".read-num::text, .view-count::text, .num-read::text"
+     },
+     "link": {
+      "css": "a[href*='/article/details/']::attr(href), h3 a::attr(href), .title a::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^https://www.csdn.net/nav/arch(\\?.*)?$",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://"
+    }
+   ],
+   "extract": [
+    {
+     "name": "collect_num",
+     "type": "css_text",
+     "selector": ".tool-box .btn-collect .num::text, .tool-collect .num::text, .tool-item-collect .num::text, .btn-collect .collect-count::text"
+    }
+   ],
+   "filters": [
+    {
+     "type": "filter",
+     "field": "collect_num",
+     "op": "non_empty"
+    }
+   ],
+   "concurrency": 2,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 20,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

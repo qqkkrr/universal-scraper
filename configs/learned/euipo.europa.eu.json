@@ -1,0 +1,143 @@
+{
+ "host": "euipo.europa.eu",
+ "learned_at": 1787826725.994941,
+ "from_description": "2025年9月20日，欧盟知识产权局“EUIPO”抓取某商标的异议、无效程序记录。",
+ "config": {
+  "start_urls": [
+   "https://euipo.europa.eu/eSearch/#basic/cases",
+   "https://www.tmdn.org/tmview/"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 3,
+   "scroll_wait_ms": 1000,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/eSearch/",
+    "parser": "list"
+   },
+   {
+    "match": "contains",
+    "pattern": "tmview",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": ".search-results table tbody tr, .results-table tbody tr, .case-results tbody tr, .trademark-result, .case-result, .result-item",
+    "fields": {
+     "title": {
+      "css": "td:first-of-type a::text, .trademark-name::text, .case-title a::text"
+     },
+     "application_no": {
+      "css": "td:nth-child(2)::text, .application-no::text, .case-number::text"
+     },
+     "status": {
+      "css": "td:last-child::text, .status::text, .case-status::text"
+     },
+     "link": {
+      "css": "td:first-of-type a:first-of-type::attr(href), .trademark-name a::attr(href), .case-title a::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "detail|case|tmview|page",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": ".search-results table tbody tr, .results-table tbody tr, .case-results tbody tr, .trademark-result, .case-result, .result-item",
+    "fields": {
+     "title": {
+      "css": "td:first-of-type a::text, .trademark-name::text, .case-title a::text"
+     },
+     "application_no": {
+      "css": "td:nth-child(2)::text, .application-no::text, .case-number::text"
+     },
+     "status": {
+      "css": "td:last-child::text, .status::text, .case-status::text"
+     },
+     "link": {
+      "css": "td:first-of-type a:first-of-type::attr(href), .trademark-name a::attr(href), .case-title a::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "detail|case|tmview|page",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "link",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://euipo.europa.eu/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "proceedings_text",
+     "type": "css_text",
+     "selector": ".legal-status-events, .legal-status, .proceedings, .opposition-events, .invalidity-events, .case-events, .events-table"
+    },
+    {
+     "name": "event_date",
+     "type": "css_text",
+     "selector": ".legal-status-event .date::text, .event-date::text, .proceedings .date::text, .events-table td:nth-last-child(1)::text"
+    },
+    {
+     "name": "parties",
+     "type": "css_text",
+     "selector": ".opponent::text, .proprietor::text, .case-parties::text, .parties::text"
+    }
+   ],
+   "filters": [
+    {
+     "type": "parse_date",
+     "field": "event_date",
+     "out": "ts"
+    },
+    {
+     "type": "filter",
+     "field": "ts",
+     "op": "between",
+     "min": 1758297600,
+     "max": 1758384000
+    }
+   ],
+   "concurrency": 1,
+   "interval": 1.5
+  },
+  "queue": {
+   "max_depth": 2,
+   "max_requests": 60,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1.5,
+   "max_retries": 3
+  }
+ }
+}

@@ -1,0 +1,98 @@
+{
+ "host": "leetcode.cn",
+ "learned_at": 1786433628.732137,
+ "from_description": "LeetCode中国“热题100”题目列表，在2025年8月15日抓取所有题目名称、难度、通过率、标签。",
+ "config": {
+  "start_urls": [
+   "https://leetcode.cn/problem-list/2ckc81c/"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/problem-list/",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "div[role='row']",
+    "fields": {
+     "title": {
+      "css": "a[href*='/problems/']:first-of-type::text"
+     },
+     "difficulty": {
+      "xpath": ".//*[contains(text(),'简单') or contains(text(),'中等') or contains(text(),'困难')]/text()"
+     },
+     "acceptance": {
+      "xpath": ".//*[contains(text(),'%')]/text()"
+     },
+     "link": {
+      "css": "a[href*='/problems/']:first-of-type::attr(href)"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "div[role='row']",
+    "fields": {
+     "title": {
+      "css": "a[href*='/problems/']:first-of-type::text"
+     },
+     "difficulty": {
+      "xpath": ".//*[contains(text(),'简单') or contains(text(),'中等') or contains(text(),'困难')]/text()"
+     },
+     "acceptance": {
+      "xpath": ".//*[contains(text(),'%')]/text()"
+     },
+     "link": {
+      "css": "a[href*='/problems/']:first-of-type::attr(href)"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://leetcode.cn/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "tags",
+     "type": "css_text",
+     "selector": "a[href*='/tag/']::text"
+    }
+   ],
+   "concurrency": 2,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 200,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

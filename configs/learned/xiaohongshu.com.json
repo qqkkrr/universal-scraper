@@ -1,0 +1,131 @@
+{
+ "host": "xiaohongshu.com",
+ "learned_at": 1786430619.6043,
+ "from_description": "小红书“#早八通勤穿搭”话题，在2025年9月1日抓取最热门的150篇笔记标题、互动数、提及品牌。",
+ "config": {
+  "start_urls": [
+   "https://www.xiaohongshu.com/search_result?keyword=%23%E6%97%A9%E5%85%AB%E9%80%9A%E5%8B%A4%E7%A9%BF%E6%90%AD"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 12,
+   "scroll_wait_ms": 1500,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "search_result",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "div.note-item, section.note-item",
+    "fields": {
+     "title": {
+      "css": "a.title::text"
+     },
+     "likes": {
+      "css": "span.count::text"
+     },
+     "link": {
+      "css": "a[href*='/explore/']:first-of-type::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/explore/",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "div.note-item, section.note-item",
+    "fields": {
+     "title": {
+      "css": "a.title::text"
+     },
+     "likes": {
+      "css": "span.count::text"
+     },
+     "link": {
+      "css": "a[href*='/explore/']:first-of-type::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/explore/",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "link",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://www.xiaohongshu.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "publish_time",
+     "type": "css_text",
+     "selector": "span.date::text"
+    },
+    {
+     "name": "content",
+     "type": "css_text",
+     "selector": "#detail-desc::text"
+    },
+    {
+     "name": "brand",
+     "type": "css_text",
+     "selector": "#detail-desc a::text"
+    }
+   ],
+   "filters": [
+    {
+     "type": "parse_date",
+     "field": "publish_time",
+     "out": "ts"
+    },
+    {
+     "type": "filter",
+     "field": "ts",
+     "op": "between",
+     "min": 1756656000,
+     "max": 1756742400
+    }
+   ],
+   "concurrency": 2,
+   "interval": 1.5
+  },
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 300,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1.5,
+   "max_retries": 3
+  }
+ }
+}

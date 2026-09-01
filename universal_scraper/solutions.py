@@ -37,6 +37,9 @@ def classify_failure(error_text: str = "", messages: Optional[list] = None,
     # 3) 验证码 / 滑块（比“登录”更具体，优先）
     if re.search(r"验证码|滑块|拖动|安全验证|点选验证|captcha|扫码|完成验证", txt, re.I):
         return "captcha"
+    # 4.4) 页面有响应但没有正文 / 表格 / 链接
+    if re.search(r"页面无正文|无正文|没有正文|正文.*为空|无内容|页面.*空|未发现表格|未发现链接", txt, re.I):
+        return "no_content"
     # 4) 登录 / 登录墙
     if re.search(r"登录|请先登录|需要登录|登录墙|session|会话已过期|账号", txt, re.I):
         return "login_required"
@@ -145,6 +148,17 @@ SOLUTIONS: Dict[str, Dict[str, Any]] = {
         ],
         "resources": "无需付费",
     },
+    "no_content": {
+        "title": "📄 页面没有可抓取的正文/表格/链接",
+        "reason": "HTTP 请求成功，但网页里没有可提取内容（常见：需要 JS 渲染、该栏目确实暂无数据、或入口是错误页面）。",
+        "steps": [
+            "先勾选「浏览器渲染」，重跑一次（很多页面数据由 JavaScript 动态生成）",
+            "确认入口是目标列表/内容页，不是首页导航或错误页",
+            "查看网页实际内容：若是「暂无数据/查询无结果」，说明该条件确实没有数据，请按要求改时间/关键词",
+            "仍不行就把页面 URL 和运行日志发我，我判断是动态接口、选择器还是入口问题",
+        ],
+        "resources": "无需付费",
+    },
     "unknown": {
         "title": "❓ 无法自动判断原因",
         "reason": "错误类型未识别，需要人工看一下。",
@@ -196,6 +210,11 @@ def attach_solution(job: Dict[str, Any], error_text: str = "") -> None:
             sol["action"] = {"label": "🚀 打开调试 Chrome 并登录/过验证",
                              "api": "/api/chrome/start", "url": _url,
                              "tip": "点击后 Chrome 会打开目标网站，完成登录/滑块/过盾后回到这里重跑任务（工具会自动复用会话）"}
+            # 第二步闭环：过完验证/登录后，一键把调试 Chrome 的会话导入工具存档，
+            # 之后 HTTP/浏览器两条路线都会自动复用（"登录一次，以后全自动"）
+            sol["action2"] = {"label": "🍪 登录/过验证后：一键导入会话",
+                              "api": "/api/cookies/import",
+                              "tip": "上一步完成后点这里导入登录会话；导入成功后回来点「↻ 重跑」即可"}
         job["solution"] = sol
     except Exception:
         pass

@@ -1,0 +1,98 @@
+{
+ "host": "cninfo.com.cn",
+ "learned_at": 1786432109.6292942,
+ "from_description": "巨潮资讯网“美的集团”公告，在2025年8月1日至12月31日期间，每当检测到标题含“回购”，即抓取公告摘要。",
+ "config": {
+  "start_urls": [
+   "http://www.cninfo.com.cn/new/fulltextSearch/full?searchkey=%E7%BE%8E%E7%9A%84%E9%9B%86%E5%9B%A2%20%E5%9B%9E%E8%B4%AD&sdate=2025-08-01&edate=2025-12-31&isfulltext=false&sortName=pubdate&sortType=desc&pageNum=1&pageSize=30"
+  ],
+  "source": {
+   "type": "http",
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Referer": "http://www.cninfo.com.cn/new/fulltextSearch"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/new/fulltextSearch/full",
+    "parser": "announcements"
+   }
+  ],
+  "parsers": {
+   "announcements": {
+    "type": "json_paged",
+    "records_path": "records",
+    "strategy": "page_param",
+    "page_param": "pageNum",
+    "page_size": 30,
+    "max_pages": 10,
+    "fields": {
+     "title": {
+      "from": "title"
+     },
+     "summary": {
+      "from": "summary"
+     },
+     "publish_time": {
+      "from": "time"
+     },
+     "stock_code": {
+      "from": "secCode"
+     },
+     "link": {
+      "from": "adjunctUrl"
+     }
+    }
+   },
+   "default": {
+    "type": "json_paged",
+    "records_path": "records",
+    "strategy": "page_param",
+    "page_param": "pageNum",
+    "page_size": 30,
+    "max_pages": 10,
+    "fields": {
+     "title": {
+      "from": "title"
+     },
+     "summary": {
+      "from": "summary"
+     },
+     "publish_time": {
+      "from": "time"
+     },
+     "stock_code": {
+      "from": "secCode"
+     },
+     "link": {
+      "from": "adjunctUrl"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "contains",
+    "value": "回购"
+   },
+   {
+    "type": "dedup",
+    "key": "title"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 10,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1,
+   "max_retries": 2
+  }
+ }
+}

@@ -1,0 +1,110 @@
+{
+ "host": "xueqiu.com",
+ "learned_at": 1786431760.724886,
+ "from_description": "雪球“悬赏话题”列表，在2025年8月25日抓取所有待回答话题的标题、赏金、关注数。",
+ "config": {
+  "start_urls": [
+   "https://xueqiu.com/ask"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 5,
+   "scroll_wait_ms": 800,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/ask",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "article[class*='ask'], [class*='QuestionItem'], [class*='question-item'], [class*='reward-item'], [class*='AskItem'], [class*='ask-item'], div[class*='topic']",
+    "fields": {
+     "title": {
+      "css": "a[href*='/status']:first-of-type::text, a[href*='ask']:first-of-type::text, [class*='title'] a:first-of-type::text, [class*='content'] a:first-of-type::text"
+     },
+     "bounty": {
+      "css": "[class*='reward']::text, [class*='bounty']::text, [class*='bonus']::text, [class*='money']::text"
+     },
+     "followers": {
+      "css": "[class*='follow']::text, [class*='attention']::text, [class*='concern']::text, [class*='focus']::text"
+     },
+     "link": {
+      "css": "a:first-of-type::attr(href)"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "article[class*='ask'], [class*='QuestionItem'], [class*='question-item'], [class*='reward-item'], [class*='AskItem'], [class*='ask-item'], div[class*='topic']",
+    "fields": {
+     "title": {
+      "css": "a[href*='/status']:first-of-type::text, a[href*='ask']:first-of-type::text, [class*='title'] a:first-of-type::text, [class*='content'] a:first-of-type::text"
+     },
+     "bounty": {
+      "css": "[class*='reward']::text, [class*='bounty']::text, [class*='bonus']::text, [class*='money']::text"
+     },
+     "followers": {
+      "css": "[class*='follow']::text, [class*='attention']::text, [class*='concern']::text, [class*='focus']::text"
+     },
+     "link": {
+      "css": "a:first-of-type::attr(href)"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "link",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://xueqiu.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "bounty",
+     "type": "css_text",
+     "selector": "[class*='reward']::text, [class*='bounty']::text, [class*='bonus']::text, [class*='money']::text"
+    },
+    {
+     "name": "followers",
+     "type": "css_text",
+     "selector": "[class*='follow']::text, [class*='attention']::text, [class*='concern']::text"
+    },
+    {
+     "name": "status",
+     "type": "css_text",
+     "selector": "[class*='close']::text, [class*='status']::text"
+    }
+   ],
+   "concurrency": 1,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 80,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 0.8,
+   "max_retries": 3
+  }
+ }
+}

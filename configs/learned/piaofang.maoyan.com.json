@@ -1,0 +1,90 @@
+{
+ "host": "piaofang.maoyan.com",
+ "learned_at": 1786434767.546391,
+ "from_description": "猫眼专业版“实时票房”，在2025年10月1日20:00抓取当天票房前10影片名称、综合票房、上座率。",
+ "config": {
+  "start_urls": [
+   "https://piaofang.maoyan.com/dashboard?date=2025-10-01"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/dashboard",
+    "parser": "boxoffice"
+   }
+  ],
+  "parsers": {
+   "boxoffice": {
+    "type": "html",
+    "row_css": ".rank-item, .movie-list li, .movie-row, table tbody tr, .rank-list li",
+    "fields": {
+     "rank": {
+      "css": ".rank-index::text, .rank-num::text, .num::text, td:first-child::text"
+     },
+     "movie_name": {
+      "css": ".movie-name::text, .movie-info p::text, .name::text, td:nth-child(2) a:first-of-type::text"
+     },
+     "box_office": {
+      "css": ".box-office::text, .boxoffice::text, .piaofang::text, td:nth-child(3)::text"
+     },
+     "seat_rate": {
+      "css": ".seat-rate::text, .seatrate::text, td:nth-child(5)::text"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": ".rank-item, .movie-list li, .movie-row, table tbody tr, .rank-list li",
+    "fields": {
+     "rank": {
+      "css": ".rank-index::text, .rank-num::text, .num::text, td:first-child::text"
+     },
+     "movie_name": {
+      "css": ".movie-name::text, .movie-info p::text, .name::text, td:nth-child(2) a:first-of-type::text"
+     },
+     "box_office": {
+      "css": ".box-office::text, .boxoffice::text, .piaofang::text, td:nth-child(3)::text"
+     },
+     "seat_rate": {
+      "css": ".seat-rate::text, .seatrate::text, td:nth-child(5)::text"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "movie_name",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "rank",
+    "op": "between",
+    "min": 1,
+    "max": 10
+   },
+   {
+    "type": "dedup",
+    "key": "movie_name"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 10,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1,
+   "max_retries": 3
+  }
+ }
+}

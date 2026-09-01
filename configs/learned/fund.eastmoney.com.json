@@ -1,0 +1,104 @@
+{
+ "host": "fund.eastmoney.com",
+ "learned_at": 1786431467.481245,
+ "from_description": "天天基金网“混合型基金”近一年收益排行，在2025年10月8日抓取前50基金代码、名称、经理、重仓行业。",
+ "config": {
+  "start_urls": [
+   "https://fund.eastmoney.com/data/fundranking.html",
+   "https://fund.eastmoney.com/data/rankhandler.aspx?op=ph&dt=kf&ft=all&sc=6yzf&st=desc&pi=1&pn=50&dx=1"
+  ],
+  "source": {
+   "type": "http",
+   "headers": {
+    "Referer": "https://fund.eastmoney.com/data/fundranking.html"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "fundranking",
+    "parser": "list"
+   },
+   {
+    "match": "contains",
+    "pattern": "/",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "#tablebody tr",
+    "fields": {
+     "fund_code": {
+      "css": "td:nth-child(2) a::text"
+     },
+     "fund_name": {
+      "css": "td:nth-child(3) a::text"
+     },
+     "link": {
+      "css": "td:nth-child(2) a::attr(href)"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "#tablebody tr",
+    "fields": {
+     "fund_code": {
+      "css": "td:nth-child(2) a::text"
+     },
+     "fund_name": {
+      "css": "td:nth-child(3) a::text"
+     },
+     "link": {
+      "css": "td:nth-child(2) a::attr(href)"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "fund_code",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "fund_code"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://fund.eastmoney.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "manager",
+     "type": "css_text",
+     "selector": ".fund_manager a::text, .fundManager a::text, .fund-manager a::text"
+    },
+    {
+     "name": "industry",
+     "type": "css_text",
+     "selector": ".industry tbody tr:first-child td:first-child::text, .industry_table tr:first-child td:first-child::text, .position_industry .industry:first-child::text"
+    }
+   ],
+   "concurrency": 2,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 50,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

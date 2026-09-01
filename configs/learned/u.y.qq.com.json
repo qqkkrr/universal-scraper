@@ -1,0 +1,77 @@
+{
+ "host": "u.y.qq.com",
+ "learned_at": 1786435204.2565498,
+ "from_description": "QQ音乐“内地榜”2025年第35周榜单更新后，于8月31日抓取前100歌曲名称、歌手、播放指数。",
+ "config": {
+  "start_urls": [
+   "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=%7B%22comm%22%3A%7B%22ct%22%3A24%2C%22cv%22%3A0%7D%2C%22toplist%22%3A%7B%22module%22%3A%22musicToplist.ToplistInfoServer%22%2C%22method%22%3A%22GetDetail%22%2C%22param%22%3A%7B%22topId%22%3A4%2C%22offset%22%3A0%2C%22num%22%3A100%7D%7D%7D"
+  ],
+  "source": {
+   "type": "http",
+   "headers": {
+    "Referer": "https://y.qq.com/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "musicu.fcg",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "json",
+    "records_path": "data.toplist.data.song",
+    "fields": {
+     "song_name": {
+      "from": "name"
+     },
+     "singer": {
+      "from": "singer.0.name"
+     },
+     "play_index": {
+      "from": "score"
+     }
+    }
+   },
+   "default": {
+    "type": "json",
+    "records_path": "data.toplist.data.song",
+    "fields": {
+     "song_name": {
+      "from": "name"
+     },
+     "singer": {
+      "from": "singer.0.name"
+     },
+     "play_index": {
+      "from": "score"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "song_name",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 1,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1.0,
+   "max_retries": 3
+  }
+ }
+}

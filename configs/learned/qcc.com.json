@@ -1,0 +1,111 @@
+{
+ "host": "qcc.com",
+ "learned_at": 1786437701.054234,
+ "from_description": "企查查“A股上市公司”列表，在2025年7月1日抓取所有上市公司的注册资本、成立日期、注册地址。",
+ "config": {
+  "start_urls": [
+   "https://www.qcc.com/web/search?key=A%E8%82%A1&p=1"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 2,
+   "scroll_wait_ms": 500,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/web/search",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "div.search-item, div.result-item",
+    "fields": {
+     "title": {
+      "css": "a[href*='/firm/']::text"
+     },
+     "link": {
+      "css": "a[href*='/firm/']::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/web/search\\?.*p=\\d+$",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "div.search-item, div.result-item",
+    "fields": {
+     "title": {
+      "css": "a[href*='/firm/']::text"
+     },
+     "link": {
+      "css": "a[href*='/firm/']::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/web/search\\?.*p=\\d+$",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "link",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://www.qcc.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "reg_capital",
+     "type": "css_text",
+     "selector": "xpath:(//td[contains(text(),'注册资本')]/following-sibling::td[1] | //span[contains(text(),'注册资本')]/following-sibling::span[1])[1]"
+    },
+    {
+     "name": "established_date",
+     "type": "css_text",
+     "selector": "xpath:(//td[contains(text(),'成立日期')]/following-sibling::td[1] | //span[contains(text(),'成立日期')]/following-sibling::span[1])[1]"
+    },
+    {
+     "name": "address",
+     "type": "css_text",
+     "selector": "xpath:(//td[contains(text(),'注册地址')]/following-sibling::td[1] | //span[contains(text(),'注册地址')]/following-sibling::span[1])[1]"
+    }
+   ],
+   "concurrency": 2,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 100000,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 3
+  }
+ }
+}

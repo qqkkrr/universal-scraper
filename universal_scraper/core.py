@@ -11,18 +11,17 @@
 """
 from __future__ import annotations
 
+from typing import NoReturn
+
 import csv
 import gzip
 import base64
 import hashlib
 import threading
 import zlib
-import io
 import json
-import os
 import random
 import re
-import socket
 import sys
 import time
 import urllib.error
@@ -30,7 +29,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------- 常量
 CACHE_DEFAULT_TTL = 86400.0      # HTTP 响应缓存默认有效期（秒，24h）
@@ -73,6 +72,8 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
         return ""
     if isinstance(raw, str):
         return raw  # 已解码的字符串直接返回（防调用方误传 str 崩溃）
+    if raw.isascii():
+        return raw.decode("ascii")  # 纯 ASCII 快路径：任何编码下结果相同（JSON/API 大头）
     enc = "utf-8"
     explicit = False
     ct = (headers or {}).get("content-type", "") or (headers or {}).get("Content-Type", "")
@@ -129,6 +130,15 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
     if best_s is not None and best_err < max(1, decl_err // 2):
         return best_s
     return raw.decode(enc, "replace")
+
+
+def assert_http_url(url: str) -> str:
+    """出站 URL scheme 校验：仅允许 http/https（防 file:/ftp: 等伪协议读取本地资源）。
+    合法返回原 URL，否则抛 ValueError。"""
+    scheme = (urllib.parse.urlsplit(url or "").scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(f"仅支持 http/https 协议，已拒绝: {str(url)[:60]!r}")
+    return url
 
 
 def smart_decode(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
@@ -232,7 +242,13 @@ def jar_cookie_header(jar, url: str) -> str:
 
 def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optional[str] = None,
                timeout: int = 60) -> Optional[bytes]:
-    """下载原始字节（curl_cffi TLS 伪装优先，回退 urllib+gzip）。失败返回 None。"""
+    """下载原始字节（curl_cffi TLS 伪装优先，回退 urllib+gzip）。失败返回 None，
+    失败原因记录在 fetch_bytes.last_error（供调用方诊断，不再双重静默吞错）。"""
+    # 与 HttpClient 同一 SSRF 面：urllib 回退 opener 含 FileHandler，file:// 会读本地文件
+    if urllib.parse.urlsplit(url or "").scheme not in ("http", "https"):
+        fetch_bytes.last_error = f"拒绝非 http/https 协议: {url!r}"
+        return None
+    fetch_bytes.last_error = ""
     hdrs = {"User-Agent": random.choice(UA_POOL), "Accept-Language": "zh-CN,zh;q=0.9"}
     if headers:
         hdrs.update(headers)
@@ -244,9 +260,10 @@ def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optio
         r = cffi.get(url, **kw)
         if r.status_code < 400:
             return r.content or None
+        fetch_bytes.last_error = f"curl_cffi: HTTP {r.status_code}"
         return None
-    except Exception:
-        pass
+    except Exception as e:
+        fetch_bytes.last_error = f"curl_cffi: {type(e).__name__}: {e}"
     try:
         req = urllib.request.Request(url, headers=hdrs)
         opener = urllib.request.build_opener()
@@ -261,8 +278,12 @@ def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optio
                 except Exception:
                     pass
             return raw or None
-    except Exception:
+    except Exception as e:
+        fetch_bytes.last_error += f" | urllib: {type(e).__name__}: {e}"
         return None
+
+
+fetch_bytes.last_error = ""  # 每次调用重置；失败时记录最后一次错误（诊断用）
 
 
 @dataclass
@@ -326,7 +347,7 @@ class HttpClient:
 
     def _cache_key(self, url: str, body: bytes, method: str) -> str:
         raw = f"{method}|{url}|{body.decode('utf-8', 'replace')}"
-        return hashlib.md5(raw.encode()).hexdigest() + ".json"
+        return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest() + ".json"
 
     def _cache_encode(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """缓存编码：body bytes → base64（json 无法直接存 bytes）；raw_headers 不落盘。"""
@@ -394,7 +415,6 @@ class HttpClient:
                     pass
 
         result: Optional[Dict[str, Any]] = None
-        last_err = ""
         # 注意：不要用 socket.setdefaulttimeout 改进程级全局超时——多线程 worker
         # 会互相覆盖（竞态）。urllib opener.open(timeout=...) 已覆盖连接/TLS/读取。
         try:
@@ -407,6 +427,11 @@ class HttpClient:
 
     def _request_once(self, url, body_bytes, method, headers, use_cache,
                       allow_html_404=False, proxy=None, max_size=None):
+        # SSRF 面：urllib 默认 opener 含 FileHandler，file:// 会直接读本地文件。
+        # HttpClient 只做 HTTP 抓取，非 http/https 协议一律拒绝（不加私网 IP 过滤：
+        # 爬虫需要访问任意公网站点，且本地回环测试依赖 127.0.0.1）。
+        if urllib.parse.urlsplit(url or "").scheme not in ("http", "https"):
+            raise ValueError(f"HttpClient 仅支持 http/https 协议，已拒绝: {url!r}")
         last_err = ""
         last_headers: Dict[str, str] = {}
         last_status = 0
@@ -464,6 +489,13 @@ class HttpClient:
                 raw = e.read((max_size + 1) if max_size else None) if max_size else e.read()
                 if max_size and len(raw) > max_size:
                     raw = raw[:max_size]
+                # urllib 不自动解压 gzip：HTTPError 路径的 raw 仍是压缩字节，不解码全乱码
+                if raw[:2] == b"\x1f\x8b":
+                    import gzip as _gz
+                    try:
+                        raw = _gz.decompress(raw)[:max_size] if max_size else _gz.decompress(raw)
+                    except Exception:
+                        pass
                 status = e.code
                 # WAF/反爬常返回 404 的"假页面"，allow_html_404 表示接受这种 HTML 响应
                 if allow_html_404 and status == 404:
@@ -653,6 +685,7 @@ class RequestsClient:
         elif "User-Agent" not in h:
             h["User-Agent"] = DEFAULT_UA
 
+        last_err = "requests 请求失败"
         last_status = 0
         for attempt in range(1, self.max_retries + 1):
             self._throttle()
@@ -663,14 +696,14 @@ class RequestsClient:
                     kw["proxies"] = {"http": proxy, "https": proxy}
                 resp = self.session.request(method.upper(), url, **kw)
                 if resp.status_code == 429:
-                    _t = smart_decode(raw if 'raw' in dir() else resp.content, {k.lower(): v for k, v in resp.headers.items()})
+                    _t = smart_decode(resp.content, {k.lower(): v for k, v in resp.headers.items()})
                     return {"ok": False, "status": 429, "body": resp.content, "text": _t,
                             "json": None, "url": resp.url,
                             "headers": {k.lower(): v for k, v in resp.headers.items()},
                             "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None)}
                 if resp.status_code in (403, 500, 502, 503, 504):
-                    last_err = f"HTTP {resp.status_code}"
                     last_status = resp.status_code
+                    last_err = f"HTTP {resp.status_code}"
                     wait = self.backoff_base ** attempt + random.uniform(0, 1)
                     log(f"  请求失败 {resp.status_code}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
                     time.sleep(wait)
@@ -699,17 +732,20 @@ class RequestsClient:
                         parsed = json.loads(raw.decode("utf-8", "ignore"))
                     except Exception:
                         parsed = None
-                _text = smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()}) if max_size else (
-                    resp.text if resp.text else _decode_body(raw, {k.lower(): v for k, v in resp.headers.items()}))
+                # 无 charset 头时 resp.text 按 ISO-8859-1 解码 → 中文全乱码
+                # （"百度安全验证"曾被误判为页面结构变化）。一律走 smart_decode 从 raw 解。
+                _text = (smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()})
+                         if raw else (resp.text or ""))
                 return {"ok": True, "status": resp.status_code, "body": raw,
                         "text": _text, "json": parsed, "url": resp.url,
                         "headers": {k.lower(): v for k, v in resp.headers.items()},
                         "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None)}
             except Exception as e:
+                last_err = f"{type(e).__name__}: {e}"
                 wait = self.backoff_base ** attempt
                 log(f"  网络异常: {e}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
                 time.sleep(wait)
-        return {"ok": False, "status": last_status, "body": b"", "text": "requests 请求失败", "json": None, "url": url,
+        return {"ok": False, "status": last_status, "body": b"", "text": last_err, "json": None, "url": url,
                 "headers": {}}
 
     def get(self, url: str, **kw) -> Dict[str, Any]:
@@ -727,6 +763,14 @@ class RequestsClient:
 
 # ---------------------------------------------------------------- 高级 HTTP 后端（可选依赖）
 
+def _sanitize_headers(headers: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """🛡️ curl_cffi 对 None 值 header 会抛 TypeError（'in <string>' requires string）。
+    统一过滤 None 值并字符串化，避免配置里出现 None header 导致整请求崩溃。"""
+    if not headers:
+        return {}
+    return {k: str(v) for k, v in headers.items() if v is not None}
+
+
 class CurlCffiClient:
     """curl_cffi 后端：伪装浏览器 TLS/JA3/HTTP2 指纹（curl-impersonate）。
     未安装 curl_cffi 时导入即抛 ImportError，调用方回退 requests/urllib。
@@ -738,7 +782,7 @@ class CurlCffiClient:
                  proxy: Optional[str] = None, cookies: Optional[Dict[str, str]] = None,
                  extra_headers: Optional[Dict[str, str]] = None,
                  impersonate: str = "chrome", verify: bool = False):
-        import curl_cffi.requests  # noqa: F401  # 未安装则抛 ImportError
+        __import__("curl_cffi.requests")  # 可用性探测：未安装则抛 ImportError
         self.min_interval = min_interval
         self.max_retries = max_retries
         self.timeout = timeout
@@ -746,6 +790,7 @@ class CurlCffiClient:
         self.proxy = proxy
         self.impersonate = impersonate
         self.verify = verify
+        self.impersonate_pool = ["chrome", "safari17_0", "firefox133", "edge101"]  # impersonate="auto" 时轮换
         self._throttle_lock = threading.Lock()
         self.extra_headers = dict(extra_headers or {})
         self.cookies = dict(cookies or {})
@@ -768,6 +813,7 @@ class CurlCffiClient:
         h.update(self.extra_headers)
         if headers:
             h.update(headers)
+        h = _sanitize_headers(h)
         if not self.rotate_ua and "User-Agent" not in h:
             h["User-Agent"] = DEFAULT_UA
         proxy_use = proxy if proxy is not None else self.proxy
@@ -838,8 +884,10 @@ class CurlCffiClient:
                         parsed = json.loads(raw.decode("utf-8", "ignore"))
                     except Exception:
                         parsed = None
-                _text = smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()}) if max_size else (
-                    resp.text if resp.text else _decode_body(raw, {k.lower(): v for k, v in resp.headers.items()}))
+                # 无 charset 头时 resp.text 按 ISO-8859-1 解码 → 中文全乱码
+                # （"百度安全验证"曾被误判为页面结构变化）。一律走 smart_decode 从 raw 解。
+                _text = (smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()})
+                         if raw else (resp.text or ""))
                 return {"ok": True, "status": resp.status_code, "body": raw,
                         "text": _text,
                         "json": parsed,
@@ -884,16 +932,15 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
     if backend in ("auto", "curl_cffi"):
         try:
             return CurlCffiClient(impersonate=anti.get("impersonate", "chrome"), **common)
-        except Exception:
-            if backend == "curl_cffi":
-                log("curl_cffi 未安装，回退 requests", "WARN")
+        except Exception as _e:
+            # 降级必须可诊断（TLS 指纹伪装静默失效曾导致被反爬拦截却查不到原因）
+            log(f"⚠️ HTTP 后端降级: curl_cffi 不可用({_e})，改用 requests", "WARN")
     if backend in ("auto", "curl_cffi", "requests"):
         try:
-            import requests  # noqa: F401
+            __import__("requests")  # 可用性探测：未安装则抛 ImportError
             return RequestsClient(**common)
-        except Exception:
-            if backend == "requests":
-                log("requests 未安装，回退 urllib", "WARN")
+        except Exception as _e:
+            log(f"⚠️ HTTP 后端降级: requests 不可用({_e})，改用 urllib", "WARN")
     return HttpClient(min_interval=common["min_interval"], max_retries=common["max_retries"],
                       timeout=common["timeout"], rotate_ua=common["rotate_ua"],
                       proxy=common["proxy"], cookies=common["cookies"] or {},

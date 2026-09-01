@@ -1,0 +1,104 @@
+{
+ "host": "search.ccgp.gov.cn",
+ "learned_at": 1787413991.672469,
+ "from_description": "抓取中国政府采购网 www.ccgp.gov.cn 公开招标搜索'人工智能'的采购人、预算金额、开标时间，前 20 条",
+ "config": {
+  "start_urls": [
+   "http://search.ccgp.gov.cn/bxsearch?searchtype=1&page_index=1&kw=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD&bidType=0",
+   "http://search.ccgp.gov.cn/bxsearch?searchtype=1&page_index=2&kw=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD&bidType=0"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/bxsearch",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "ul.vT-srch-result-list-bid li",
+    "fields": {
+     "title": {
+      "css": "a:first-of-type::text"
+     },
+     "link": {
+      "css": "a:first-of-type::attr(href)"
+     },
+     "publish_time": {
+      "css": "span.col-srch-time::text"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "ul.vT-srch-result-list-bid li",
+    "fields": {
+     "title": {
+      "css": "a:first-of-type::text"
+     },
+     "link": {
+      "css": "a:first-of-type::attr(href)"
+     },
+     "publish_time": {
+      "css": "span.col-srch-time::text"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "http://www.ccgp.gov.cn/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "buyer",
+     "type": "css_text",
+     "selector": "xpath:normalize-space((//p[contains(.,'名 称：') or contains(.,'名称：')])[1])"
+    },
+    {
+     "name": "budget",
+     "type": "css_text",
+     "selector": "xpath:normalize-space((//p[contains(.,'预算金额')])[1])"
+    },
+    {
+     "name": "bid_open_time",
+     "type": "css_text",
+     "selector": "xpath:normalize-space((//p[contains(.,'开标时间')])[1])"
+    }
+   ],
+   "filters": [],
+   "concurrency": 2,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 2,
+   "max_requests": 50,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

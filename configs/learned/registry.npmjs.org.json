@@ -1,0 +1,88 @@
+{
+ "host": "registry.npmjs.org",
+ "learned_at": 1787413264.303911,
+ "from_description": "抓取NPM www.npmjs.com 最近更新的react相关包名称、版本，前 20 条",
+ "config": {
+  "start_urls": [
+   "https://registry.npmjs.org/-/v1/search?text=react&size=20&sort=updated",
+   "https://registry.npmjs.org/-/v1/search"
+  ],
+  "source": {
+   "type": "browser",
+   "headless": true,
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "headers": {
+    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+   },
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/-/v1/search",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "json",
+    "records_path": "objects",
+    "fields": {
+     "name": {
+      "from": "package.name"
+     },
+     "version": {
+      "from": "package.version"
+     },
+     "date": {
+      "from": "package.date"
+     }
+    }
+   },
+   "default": {
+    "type": "json",
+    "records_path": "objects",
+    "fields": {
+     "name": {
+      "from": "package.name"
+     },
+     "version": {
+      "from": "package.version"
+     },
+     "date": {
+      "from": "package.date"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "name",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "version",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "name"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 1,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

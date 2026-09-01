@@ -22,6 +22,11 @@ class RequestQueue:
         self.stats = {"enqueued": 0, "dequeued": 0, "skipped_dup": 0, "skipped_depth": 0}
         self._lock = threading.Lock()  # 多 worker 并发安全
 
+    def snapshot_urls(self):
+        """持锁拷贝当前队列 URL（供检查点保存；直接迭代 deque 会与 pop 竞态）。"""
+        with self._lock:
+            return [r.url for r in self._q]
+
     def enqueue(self, req: Request, min_interval: float = 1.0, max_depth: int = 10) -> bool:
         """入队；去重；超深度丢弃。返回是否真的入队。"""
         with self._lock:

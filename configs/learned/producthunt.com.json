@@ -1,0 +1,82 @@
+{
+ "host": "producthunt.com",
+ "learned_at": 1787443623.9603672,
+ "from_description": "抓取 Product Hunt www.producthunt.com 今天的热门产品名称、tagline、点赞数，前 20 个",
+ "config": {
+  "start_urls": [
+   "https://www.producthunt.com/"
+  ],
+  "source": {
+   "type": "browser",
+   "headless": true,
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "producthunt.com",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "[data-testid='post-item']",
+    "fields": {
+     "name": {
+      "css": "a[href^='/products/']:first-of-type::text"
+     },
+     "tagline": {
+      "css": "p::text"
+     },
+     "votes": {
+      "css": "[data-testid='vote-button'] span::text"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "[data-testid='post-item']",
+    "fields": {
+     "name": {
+      "css": "a[href^='/products/']:first-of-type::text"
+     },
+     "tagline": {
+      "css": "p::text"
+     },
+     "votes": {
+      "css": "[data-testid='vote-button'] span::text"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "name",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "votes",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 5,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1,
+   "max_retries": 2
+  }
+ }
+}

@@ -1,0 +1,113 @@
+{
+ "host": "jisilu.cn",
+ "learned_at": 1786431773.809081,
+ "from_description": "集思录“可转债等权指数”及所有转债数据，在2025年8月29日收盘后抓取现价、溢价率、到期收益。",
+ "config": {
+  "start_urls": [
+   "https://www.jisilu.cn/data/cbnew/"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "cbnew",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "table tbody tr",
+    "fields": {
+     "bond_name": {
+      "css": "td:nth-child(1) a:first-of-type::text"
+     },
+     "link": {
+      "css": "td:nth-child(1) a:first-of-type::attr(href)"
+     },
+     "price": {
+      "css": "td:nth-child(2)::text"
+     },
+     "premium_rt": {
+      "css": "td:nth-child(8)::text"
+     },
+     "ytm_rt": {
+      "css": "td:nth-child(9)::text"
+     },
+     "index_value": {
+      "css": ".index-value"
+     },
+     "data_time": {
+      "css": ".time"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "table tbody tr",
+    "fields": {
+     "bond_name": {
+      "css": "td:nth-child(1) a:first-of-type::text"
+     },
+     "link": {
+      "css": "td:nth-child(1) a:first-of-type::attr(href)"
+     },
+     "price": {
+      "css": "td:nth-child(2)::text"
+     },
+     "premium_rt": {
+      "css": "td:nth-child(8)::text"
+     },
+     "ytm_rt": {
+      "css": "td:nth-child(9)::text"
+     },
+     "index_value": {
+      "css": ".index-value"
+     },
+     "data_time": {
+      "css": ".time"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "bond_name",
+    "op": "non_empty"
+   },
+   {
+    "type": "parse_date",
+    "field": "data_time",
+    "out": "ts"
+   },
+   {
+    "type": "filter",
+    "field": "ts",
+    "op": "between",
+    "min": 1756396800,
+    "max": 1756483200
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": false
+  },
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 5,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

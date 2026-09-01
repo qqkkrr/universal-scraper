@@ -1,0 +1,97 @@
+{
+ "host": "music.163.com",
+ "learned_at": 1786435336.746936,
+ "from_description": "网易云音乐“官方歌单·七夕特辑”，在2025年8月16日抓取歌单中所有歌曲名称、歌手、评论数。",
+ "config": {
+  "start_urls": [
+   "https://music.163.com/#/search/m/?s=%E4%B8%83%E5%A4%95%E7%89%B9%E8%BE%91&type=1000"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 3,
+   "scroll_wait_ms": 800
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/playlist?id=",
+    "parser": "playlist"
+   },
+   {
+    "match": "contains",
+    "pattern": "/",
+    "parser": "playlist"
+   }
+  ],
+  "parsers": {
+   "playlist": {
+    "type": "html",
+    "row_css": "#song-list-pre-cache tbody tr",
+    "fields": {
+     "song": {
+      "css": "td.song-name a[href*='/song']::text"
+     },
+     "link": {
+      "css": "td.song-name a[href*='/song']::attr(href)"
+     },
+     "artist": {
+      "css": "td:nth-child(3) .text span::attr(title)"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "#song-list-pre-cache tbody tr",
+    "fields": {
+     "song": {
+      "css": "td.song-name a[href*='/song']::text"
+     },
+     "link": {
+      "css": "td.song-name a[href*='/song']::attr(href)"
+     },
+     "artist": {
+      "css": "td:nth-child(3) .text span::attr(title)"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "song",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://music.163.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "comment_count",
+     "type": "css_text",
+     "selector": ".u-btni-cmmt em::text"
+    }
+   ],
+   "concurrency": 2,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 200,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 1,
+   "max_retries": 3
+  }
+ }
+}

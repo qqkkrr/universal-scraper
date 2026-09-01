@@ -1,0 +1,91 @@
+{
+ "host": "developer.aliyun.com",
+ "learned_at": 1787413588.718036,
+ "from_description": "抓取阿里云开发者社区 developer.aliyun.com 问答板块关于云原生的问题标题、标签，前 20 条",
+ "config": {
+  "start_urls": [
+   "https://developer.aliyun.com/ask/"
+  ],
+  "source": {
+   "type": "http",
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Referer": "https://developer.aliyun.com/"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/ask",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": ".ask-list li, .question-list li, .qa-list li, .list li, li[class*='ask'], li[class*='question']",
+    "fields": {
+     "title": {
+      "css": "h3 a::text, h4 a::text, .title a::text, .question-title a::text"
+     },
+     "link": {
+      "css": "h3 a::attr(href), h4 a::attr(href), .title a::attr(href), .question-title a::attr(href)"
+     },
+     "tags": {
+      "css": ".tag::text, .tag-list a::text, a[href*='/tag/']::text"
+     }
+    },
+    "extract_links": {
+     "allow": "^/.*[?&]page=\\d+.*",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": ".ask-list li, .question-list li, .qa-list li, .list li, li[class*='ask'], li[class*='question']",
+    "fields": {
+     "title": {
+      "css": "h3 a::text, h4 a::text, .title a::text, .question-title a::text"
+     },
+     "link": {
+      "css": "h3 a::attr(href), h4 a::attr(href), .title a::attr(href), .question-title a::attr(href)"
+     },
+     "tags": {
+      "css": ".tag::text, .tag-list a::text, a[href*='/tag/']::text"
+     }
+    },
+    "extract_links": {
+     "allow": "^/.*[?&]page=\\d+.*",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "regex",
+    "pattern": "云原生|Kubernetes|K8s|ACK|ASK|容器|Docker|微服务|Serverless|服务网格|Istio|Helm|Deployment|Pod|Kube|Nacos|Ingress"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 60,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

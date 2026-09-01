@@ -9,7 +9,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,9 +22,16 @@ COOKIE_DIR = ROOT / "outputs" / ".cookies"
 _LOCK = threading.Lock()
 
 
+def _norm_domain(d: str) -> str:
+    """精确剥离开头的一个 www. 标签。此前用 lstrip 按字符集剥离，会把
+    weibo.com→eibo.com、wikipedia.org→ikipedia.org 等真实域名毁掉，
+    且 mangled 名可能与其它真实域撞档导致登录态跨站外发。"""
+    return re.sub(r"^www\.", "", (d or "").lower())
+
+
 def _domain_of(url: str) -> str:
     try:
-        return (urlparse(url).netloc or "").lower().lstrip("www.")
+        return _norm_domain(urlparse(url).netloc or "")
     except Exception:
         return ""
 
@@ -36,14 +45,28 @@ def _cookie_path(domain: str) -> Path:
     return COOKIE_DIR / f"{_safe_domain(domain)}.json"
 
 
+def _cookie_matches_archive(cdomain: str, domain: str) -> bool:
+    """cookie 自身域与归档域是否同一棵域树（RFC6265 域匹配的宽松版）：
+    归档域是 cookie 域的子域、cookie 域是归档域的子域、或完全相等。"""
+    d = str(cdomain or "").lower().lstrip(".")
+    a = str(domain or "").lower().lstrip(".")
+    if not d or not a:
+        return False
+    return d == a or a.endswith("." + d) or d.endswith("." + a)
+
+
 def save_cookies(domain: str, cookies: List[Dict[str, Any]]) -> bool:
-    """保存域名 cookie 数组（幂等，带时间戳）。返回是否保存。"""
+    """保存域名 cookie 数组（幂等，带时间戳）。返回是否保存。
+    只保留与归档域同域树的条目：浏览器 context 全量 cookie 中的第三方域
+    （统计/SSO 中间域等）不得混入——否则 HTTP 播种会把外源会话重放给目标站。"""
     if not domain or not cookies:
         return False
-    domain = domain.lower().lstrip("www.")
+    domain = _norm_domain(domain)
     clean = []
     for c in cookies:
         if not isinstance(c, dict) or not c.get("name") or not c.get("value"):
+            continue
+        if not _cookie_matches_archive(c.get("domain"), domain):
             continue
         clean.append({
             "name": c.get("name", ""),
@@ -62,26 +85,44 @@ def save_cookies(domain: str, cookies: List[Dict[str, Any]]) -> bool:
         return False
     with _LOCK:
         try:
-            _cookie_path(domain).write_text(json.dumps({
+            p = _cookie_path(domain)
+            # 原子写：临时文件 + os.replace，防跨进程并发写坏存档（截断 JSON 会被
+            # load_cookies 误判为 corrupt 而丢失登录态）
+            import uuid as _uuid
+            tmp = p.with_suffix(f".{__import__('os').getpid()}.{_uuid.uuid4().hex[:6]}.tmp")
+            tmp.write_text(json.dumps({
                 "domain": domain, "saved_at": __import__("time").time(),
                 "cookies": clean,
             }, ensure_ascii=False, indent=1), encoding="utf-8")
+            try:
+                import os as _os
+                _os.chmod(tmp, 0o600)  # 登录凭据明文：仅属主可读写（防同机其他用户读取）
+            except Exception:
+                pass  # 特殊文件系统 chmod 失败不阻断保存
+            os.replace(tmp, p)
             return True
         except Exception:
             return False
 
 
 def load_cookies(domain: str) -> List[Dict[str, Any]]:
-    """加载域名 cookie 数组；无则 []。"""
-    domain = (domain or "").lower().lstrip("www.")
+    """加载域名 cookie 数组；无则 []。存档损坏时隔离为 <path>.corrupt 并告警
+    （与"从没存过"区分：损坏说明曾存过但丢了，需要重新登录/导入）。"""
+    domain = _norm_domain(domain)
     with _LOCK:
-        try:
-            p = _cookie_path(domain)
-            if p.exists():
+        p = _cookie_path(domain)
+        if p.exists():
+            try:
                 d = json.loads(p.read_text(encoding="utf-8"))
                 return d.get("cookies", [])
-        except Exception:
-            pass
+            except Exception as e:
+                try:
+                    p.rename(p.with_name(p.name + ".corrupt"))
+                except Exception:
+                    pass
+                print(f"[WARN] ⚠️ Cookie 存档损坏，已隔离为 {p.name}.corrupt"
+                      f"（domain={domain}）：{e}；请重新登录/导入该域会话",
+                      file=sys.stderr, flush=True)
     return []
 
 
@@ -118,7 +159,6 @@ def acquire_for_task(domain: str, port: int = 9222, mode: str = "temp", log=None
         return {"mode": mode, "source": "reused", "count": len(load_cookies(domain))}
     # 无存档 → 自动从调试 Chrome 拉取（只拉目标域；Chrome 未运行则 none）
     try:
-        from urllib.parse import urlparse
         r = import_from_cdp_patchright(port=port, log=log)
         if r.get("ok") and has_cookies(domain):
             return {"mode": mode, "source": "imported", "count": len(load_cookies(domain))}
@@ -162,7 +202,7 @@ def list_saved() -> List[Dict[str, Any]]:
 
 
 def delete(domain: str) -> bool:
-    domain = (domain or "").lower().lstrip("www.")
+    domain = _norm_domain(domain)
     with _LOCK:
         try:
             p = _cookie_path(domain)
@@ -189,7 +229,7 @@ def import_from_cdp(port: int = 9222, log=None) -> Dict[str, Any]:
 
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=5) as r:
-            tabs = _json.loads(r.read().decode("utf-8"))
+            _json.loads(r.read().decode("utf-8"))
     except Exception as e:
         return {"ok": False, "error": f"调试 Chrome 未运行（{e}）"}
 

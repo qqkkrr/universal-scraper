@@ -1,0 +1,170 @@
+{
+ "host": "xiaoyuan.zhaopin.com",
+ "learned_at": 1786429407.217108,
+ "from_description": "智联招聘“校园招聘”频道，在2025年9月10日当天，抓取所有宣讲会的公司、学校、时间、场地信息。",
+ "config": {
+  "start_urls": [
+   "https://xiaoyuan.zhaopin.com/lecture"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/lecture",
+    "parser": "list"
+   },
+   {
+    "match": "contains",
+    "pattern": "/api",
+    "parser": "api"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "xpath://*[contains(@class,'nL_listName')]/ancestor::div[contains(@class,'clearfix')][1]",
+    "fields": {
+     "link": {
+      "css": "xpath:(self::a/@href | .//a[1]/@href | ancestor::a[1]/@href)"
+     },
+     "company": {
+      "css": "xpath:.//*[contains(@class,'nL_listName')][1]"
+     },
+     "school": {
+      "css": "xpath:.//*[contains(@class,'nL_text')][1]"
+     },
+     "time": {
+      "css": "xpath:.//*[contains(@class,'nL_text')][2]"
+     },
+     "venue": {
+      "css": "xpath:.//*[contains(@class,'nL_text')][3]"
+     }
+    },
+    "extract_links": {
+     "allow": "/lecture/|/Kongxuan|/detail",
+     "same_domain": true
+    }
+   },
+   "api": {
+    "type": "json",
+    "fields": {
+     "company": {
+      "from": "$..companyName"
+     },
+     "school": {
+      "from": "$..school"
+     },
+     "time": {
+      "from": "$..startTime"
+     },
+     "venue": {
+      "from": "$..address"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "xpath://*[contains(@class,'nL_listName')]/ancestor::div[contains(@class,'clearfix')][1]",
+    "fields": {
+     "link": {
+      "css": "xpath:(self::a/@href | .//a[1]/@href | ancestor::a[1]/@href)"
+     },
+     "company": {
+      "css": "xpath:.//*[contains(@class,'nL_listName')][1]"
+     },
+     "school": {
+      "css": "xpath:.//*[contains(@class,'nL_text')][1]"
+     },
+     "time": {
+      "css": "xpath:.//*[contains(@class,'nL_text')][2]"
+     },
+     "venue": {
+      "css": "xpath:.//*[contains(@class,'nL_text')][3]"
+     }
+    },
+    "extract_links": {
+     "allow": "/lecture/|/Kongxuan|/detail",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "company",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "time",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://xiaoyuan.zhaopin.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "company",
+     "type": "css_text",
+     "selector": "h1, .title, .company-name"
+    },
+    {
+     "name": "school",
+     "type": "css_text",
+     "selector": ".school, .university, .place, .info li"
+    },
+    {
+     "name": "time",
+     "type": "css_text",
+     "selector": ".time, .date, .info li, .lecture-time"
+    },
+    {
+     "name": "venue",
+     "type": "css_text",
+     "selector": ".place, .venue, .address, .info li"
+    }
+   ],
+   "filters": [
+    {
+     "type": "parse_date",
+     "field": "time",
+     "out": "ts"
+    },
+    {
+     "type": "filter",
+     "field": "ts",
+     "op": "between",
+     "min": 1757433600,
+     "max": 1757520000
+    }
+   ],
+   "concurrency": 1,
+   "interval": 1
+  },
+  "queue": {
+   "max_depth": 2,
+   "max_requests": 60,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1.5,
+   "max_retries": 3
+  }
+ }
+}

@@ -1,0 +1,15 @@
+{
+  "host": "www.ggzy.gov.cn",
+  "kind": "tactic:cookie_click",
+  "name": "auto_precise_www.ggzy.gov.cn",
+  "entry": "https://www.ggzy.gov.cn/history/dealList.html?keyword=%E6%9D%AD%E5%B7%9E%20%E5%9C%9F%E5%9C%B0%E5%87%BA%E8%AE%A9&begin=2025-01-01&end=2025-12-31&stages=0002&pageNum=1&pageSize=20",
+  "tactic": "cookie_click",
+  "params": {
+    "entry": "https://www.ggzy.gov.cn/history/dealList.html?keyword=%E6%9D%AD%E5%B7%9E%20%E5%9C%9F%E5%9C%B0%E5%87%BA%E8%AE%A9&begin=2025-01-01&end=2025-12-31&stages=0002&pageNum=1&pageSize=20",
+    "item_css": ".sch-item",
+    "host": "www.ggzy.gov.cn",
+    "seed": "https://www.ggzy.gov.cn/",
+    "url_template": ""
+  },
+  "description": "抓取全国公共资源交易平台 ggzy.gov.cn 杭州 2025 年土地出让成交结果公告的标题、日期、链接，前 20 条"
+}

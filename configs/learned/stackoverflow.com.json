@@ -1,0 +1,83 @@
+{
+ "host": "stackoverflow.com",
+ "learned_at": 1787413300.6435041,
+ "from_description": "抓取Stack Overflow stackoverflow.com 标签python的新问题的标题、标签、回答数，前 20 条",
+ "config": {
+  "start_urls": [
+   "https://stackoverflow.com/tags/python?tab=newest",
+   "https://stackoverflow.com/questions/tagged/python?sort=newest&pagesize=20"
+  ],
+  "source": {
+   "type": "http",
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/questions/tagged",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "div.s-post-summary",
+    "fields": {
+     "title": {
+      "css": "h3 a::text"
+     },
+     "link": {
+      "css": "h3 a::attr(href)"
+     },
+     "tags": {
+      "css": ".post-tag::text"
+     },
+     "answers": {
+      "css": "div.s-post-summary--stats-item:nth-of-type(2) .s-post-summary--stats-item-number::text"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "div.s-post-summary",
+    "fields": {
+     "title": {
+      "css": "h3 a::text"
+     },
+     "link": {
+      "css": "h3 a::attr(href)"
+     },
+     "tags": {
+      "css": ".post-tag::text"
+     },
+     "answers": {
+      "css": "div.s-post-summary--stats-item:nth-of-type(2) .s-post-summary--stats-item-number::text"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "title",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 1,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

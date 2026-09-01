@@ -1,0 +1,13 @@
+{
+  "host": "github.com",
+  "kind": "tactic:image_ocr",
+  "name": "auto_precise_github.com",
+  "entry": "https://github.com/topics/web-scraping",
+  "tactic": "image_ocr",
+  "params": {
+    "entry": "https://github.com/topics/web-scraping",
+    "host": "github.com",
+    "seed": "https://github.com/"
+  },
+  "description": "抓取 GitHub github.com/topics/web-scraping 主题下的仓库名称、简介、star数，前 20 个"
+}

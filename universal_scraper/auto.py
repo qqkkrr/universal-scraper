@@ -11,6 +11,8 @@
   API:  POST /api/auto  {"description": "..."}
 """
 from __future__ import annotations
+
+import time
 import os
 
 import hashlib
@@ -609,6 +611,21 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
 _PROBE_LOCK = threading.Lock()  # probe 缓存读写锁（多任务并发写同一缓存文件）
 
 
+def resolve_cdp_for_agent(source_cfg: dict) -> str:
+    """LLM 浏览器代理的 cdp 决策：配置显式指定优先；否则调试 Chrome（固定 9222）在线
+    就附着它——复用用户已登录/已过验证的真实会话，而不是 headless 全新环境再撞一次验证墙。"""
+    explicit = str((source_cfg or {}).get("cdp") or "").strip()
+    if explicit:
+        return explicit
+    try:
+        from .agent import debug_chrome_alive
+        if debug_chrome_alive():
+            return "http://127.0.0.1:9222"
+    except Exception:
+        pass
+    return ""
+
+
 _AUTH_HINTS = ("验证码", "滑动验证", "安全验证", "人机验证", "访问过于频繁",
               "验证中心", "spiderindefence", "verify.meituan.com",
               "请登录", "登录后", "请输入手机号", "微信扫码登录", "app 扫码登录")
@@ -831,7 +848,7 @@ def _llm_extract_from_evidence(description: str, cfg: dict, task_dir, log,
 def _save_llm_items(description: str, items: list, log) -> dict:
     """把 LLM 抽出的条目落盘 outputs/（与 auto 任务同名）。"""
     import hashlib
-    name = f"auto_{hashlib.md5(description.encode()).hexdigest()[:10]}"
+    name = f"auto_{hashlib.md5(description.encode(), usedforsecurity=False).hexdigest()[:10]}"
     items_dir = ROOT / "outputs" / "items"
     items_dir.mkdir(parents=True, exist_ok=True)
     (items_dir / f"{name}.jsonl").write_text(
@@ -870,10 +887,14 @@ def _try_precise_first(description: str, cfg: dict, limit, log, out_name: str = 
             timeout = int(_os.environ.get("US_PRECISE_TIMEOUT", "300"))
         box: Dict[str, Any] = {}
 
+        # 迟到的精配线程与通用引擎写同名导出会互相覆盖：用"可变 out_name 容器 +
+        # 超时到点改名"让线程在写盘时（run_site 结尾）拿到隔离名
+        _out_box = {"name": out_name or None}
+
         def _run():
             try:
                 box["r"] = run_site(su, cookie=_ch, proxy=_px or None,
-                                    limit=int(limit or 20), out_name=out_name or None)
+                                    limit=int(limit or 20), out_name=_out_box["name"])
             except Exception as e:
                 box["e"] = e
 
@@ -881,9 +902,13 @@ def _try_precise_first(description: str, cfg: dict, limit, log, out_name: str = 
         th.start()
         th.join(timeout)
         if th.is_alive():
-            log(f"⏱️ 直达精配[{site}]超过 {timeout}s 未完成（WAF 限流/卡住），放弃精配改用通用引擎")
+            _late = f"{out_name}_late_{int(time.time())}" if out_name else ""
+            _out_box["name"] = _late  # 线程内 run_site 在结尾才落盘，届时读到隔离名
+            log(f"⏱️ 直达精配[{site}]超过 {timeout}s 未完成（WAF 限流/卡住），放弃精配改用通用引擎"
+                f"（迟到的精配结果将写入 {_late}，不覆盖正式导出）")
             return {"total": 0, "rows": [], "files": {},
-                    "error": f"直达精配超时（>{timeout}s）", "site": site}
+                    "error": f"直达精配超时（>{timeout}s）", "site": site,
+                    "_late_precise_name": _late}
         if "e" in box:
             raise box["e"]
         dr = box.get("r") or {}
@@ -1054,8 +1079,11 @@ def _diagnose_failure(urls, result, log) -> str:
     _blk = (result or {}).get("block_stats") or {}
     if _blk.get("waf"):
         reasons.append("网站返回 WAF 滑块验证（CWAP/wzws-waf，跳 waf_slider_verify.html）——HTTP 模式无法直抓，工具已自动切换浏览器模式，请在弹出的浏览器中完成滑块拼图")
-    if result.get("errors", 0) > 0:
-        reasons.append(f"请求错误 {result['errors']} 次")
+    _errs = result.get("errors", 0)
+    if _errs > 0:
+        reasons.append(f"请求错误 {_errs} 次")
+    elif _errs < 0:
+        reasons.append("引擎线程异常终止（详见 error 字段）")
     if result.get("error"):
         reasons.append(str(result["error"])[:120])
     for u in (urls or [])[:1]:
@@ -1156,7 +1184,7 @@ def _llm_fallback_extract(description: str, cfg: dict, log,
     for it in items:
         it.setdefault("_url", url)
         it.setdefault("_parser", "llm_fallback")
-    name = f"auto_{hashlib.md5(description.encode()).hexdigest()[:10]}"
+    name = f"auto_{hashlib.md5(description.encode(), usedforsecurity=False).hexdigest()[:10]}"
     items_dir = ROOT / "outputs" / "items"
     items_dir.mkdir(parents=True, exist_ok=True)
     (items_dir / f"{name}.jsonl").write_text(
@@ -1376,7 +1404,7 @@ def _fix_dead_domains(cfg: dict, description: str = "", log=None) -> dict:
     if not all(st == "dead" for st in statuses):
         return cfg  # 有未知状态（超时等），不动，避免误杀
     # 全部死域名 → 搜索官方域名
-    cache_key = hashlib.md5((description or " ".join(hosts)).encode("utf-8")).hexdigest()
+    cache_key = hashlib.md5((description or " ".join(hosts)).encode("utf-8"), usedforsecurity=False).hexdigest()
     with _DNS_FIX_LOCK:
         if not _DNS_FIX_CACHE:
             _DNS_FIX_CACHE.update(_dns_cache_load())
@@ -1489,7 +1517,7 @@ def _build_config(description: str, proxy: Optional[str] = None,
         log = lambda m: None
     # 📄 本地文件输入：@/路径 或 @~/路径 → 自动读取文件内容注入
     description = _resolve_file_refs(description, log)
-    h = hashlib.md5(description.encode()).hexdigest()[:10]
+    h = hashlib.md5(description.encode(), usedforsecurity=False).hexdigest()[:10]
     name = f"auto_{h}"
     task_dir = ROOT / "tasks" / name
     (task_dir / "modules").mkdir(parents=True, exist_ok=True)
@@ -1572,7 +1600,8 @@ def _build_config(description: str, proxy: Optional[str] = None,
                        "dianping.com", "meituan.com", "lianjia.com", "ke.com", "anjuke.com",
                        "58.com", "5i5j.com", "tujia.com", "guazi.com", "wuba.com")
         _su0 = (cfg.get("start_urls") or [""])[0]
-        _h = _su0.split("//")[-1].split("/")[0].lower().lstrip("www.") if "//" in _su0 else ""
+        from .cookies import _norm_domain
+        _h = _norm_domain(_su0.split("//")[-1].split("/")[0]) if "//" in _su0 else ""
         if _h and any(_h.endswith(d) for d in _LOGIN_HINT):
             try:
                 from .cookies import has_cookies
@@ -1688,7 +1717,6 @@ def plan_task(description: str, limit: Optional[int] = None, proxy: Optional[str
         cfg, name, task_dir = _build_config(description, proxy=proxy, cookie=cookie, log=log)
         # 持久化配置：确认后执行可复用；排查/批量测试也读同一份，避免每次重新生成
         try:
-            from pathlib import Path as _PP
             (task_dir / "config.json").write_text(
                 json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
             (task_dir / "description.txt").write_text(description, encoding="utf-8")
@@ -1709,7 +1737,7 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
 
     返回 {}（未命中/失败，调用方继续 AI 流程）或完整 auto_task 结果。"""
     try:
-        from .sites import match_site_by_description, seed_url_for, run_site, SITES, match_site
+        from .sites import match_site_by_description, seed_url_for, run_site, SITES
         site = match_site_by_description(description)
         seed = ""
         if not site:
@@ -1732,7 +1760,7 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
         if not seed:
             return {}
         import hashlib as _hl
-        name = f"auto_{_hl.md5(description.encode()).hexdigest()[:10]}"
+        name = f"auto_{_hl.md5(description.encode(), usedforsecurity=False).hexdigest()[:10]}"
         log(f"🏆 任务描述直接命中精配[{site}]：跳过 AI 生成配置，秒级出结果…")
         try:
             dr = run_site(seed, cookie=cookie or "", proxy=proxy or None,
@@ -1807,7 +1835,8 @@ def _save_learned(cfg: dict, description: str, log=None) -> None:
         su = (cfg.get("start_urls") or [""])[0]
         if not su or "//" not in su:
             return
-        host = su.split("//")[-1].split("/")[0].lower().lstrip("www.")
+        from .cookies import _norm_domain
+        host = _norm_domain(su.split("//")[-1].split("/")[0])
         if not host:
             return
         safe = re.sub(r"[^0-9A-Za-z_.-]", "_", host)
@@ -1850,7 +1879,8 @@ def _try_learned_config(description: str, log=None) -> Optional[Dict[str, Any]]:
         # 1) 描述里显式 URL 的域名
         hosts = set()
         for m in re.finditer("https?://([^/\\s'\"]+)", description):
-            h = m.group(1).lower().lstrip("www.")
+            from .cookies import _norm_domain
+            h = _norm_domain(m.group(1))
             if h:
                 hosts.add(h)
         # 2) 描述关键词匹配已学域名（含 www. 前缀归一）
@@ -1884,6 +1914,105 @@ def _try_learned_config(description: str, log=None) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _maybe_import_session_on_auth_wall(cfg: dict, reason: str, log=None) -> str:
+    """0 条且诊断为登录/验证墙时：调试 Chrome 在线且该域无存档 → 自动导入一次会话，
+    让用户"直接点重跑"就能带上登录态（把上一步人工操作省掉）。失败静默不打扰。"""
+    import re as _re
+    if not _re.search(r"登录|验证|滑块|captcha", str(reason or ""), _re.I):
+        return reason
+    try:
+        from urllib.parse import urlparse as _up
+        from .cookies import has_cookies, import_from_cdp_patchright, _norm_domain
+        _u0 = str((cfg.get("start_urls") or [""])[0] or "")
+        # urlparse.hostname：自动剥端口/userinfo（split("//") 手法对 x.com:8443 会带端口，
+        # 使 has_cookies 永假、提示静默失效）
+        _dom = _norm_domain(_up(_u0).hostname or "") if "://" in _u0 else ""
+        if not _dom:
+            return reason
+
+        def _tree_hit():
+            # 域树回溯：子域入口（xueshu.baidu.com）的会话可能归档在父域（baidu.com）
+            if has_cookies(_dom):
+                return _dom
+            parts = _dom.split(".")
+            for i in range(1, len(parts) - 1):
+                p = ".".join(parts[i:])
+                if has_cookies(p):
+                    return p
+            return ""
+
+        if _tree_hit():
+            return reason
+        from .agent import debug_chrome_alive
+        if not debug_chrome_alive():
+            return reason
+        r_imp = import_from_cdp_patchright(log=log)
+        _hit = _tree_hit()
+        if r_imp.get("ok") and _hit:
+            _n_dom = len([d for d in (r_imp.get("domain_list") or []) if d])
+            msg = (f"🍪 已自动从调试 Chrome 导入登录会话（命中域 {_hit}，并存档 {_n_dom} 个域名）——"
+                   "直接点「重跑此任务」即可（HTTP/浏览器都会自动带上）")
+            if log:
+                log(msg)
+            return reason + "；已自动导入登录会话，请直接重跑"
+    except Exception:
+        pass
+    return reason
+
+
+def url_variants(url: str, max_n: int = 6) -> list:
+    """入口 URL 变体（对标 Crawlee URL normalization）：小白常贴错协议/www/
+    尾斜杠，或站点实际是移动版——按序生成可达性候选，预检失败时逐一尝试。
+    顺序：原始（去 fragment）→ 剥跟踪参数 → 协议互换 → 加/去 www → m. 移动版。"""
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    try:
+        sp = urlsplit(str(url or "").strip())
+    except Exception:
+        return [url] if url else []
+    if sp.scheme not in ("http", "https") or not sp.netloc:
+        return [url] if url else []
+    # 只变换 hostname（保留端口；userinfo 不参与 www./m. 变换，防凭据损坏）
+    hostname = (sp.hostname or "").lower()
+    try:
+        port = sp.port
+    except ValueError:
+        port = None  # 非法端口串：按无端口处理，不让变体生成崩
+    userinfo = (f"{sp.username}:{sp.password or ''}@" if sp.username else "")
+
+    def _netloc(h):
+        # IPv6 字面量 hostname 含 ':'，urlsplit 已去括号——重建时必须补回
+        hh = f"[{h}]" if ":" in h else h
+        return f"{userinfo}{hh}" + (f":{port}" if port else "")
+
+    host = _netloc(hostname)
+    out = []
+
+    def _u(scheme, netloc, path, query):
+        return urlunsplit((scheme, netloc, path or "/", query, ""))
+
+    # 剥 utm_*/fbclid 等跟踪参数（只影响分析统计，不影响资源寻址）
+    q = [(k, v) for k, v in parse_qsl(sp.query, keep_blank_values=True)
+         if not k.lower().startswith(("utm_", "fbclid", "gclid", "ref_"))]
+    qstr = urlencode(q)
+    base = _u(sp.scheme, host, sp.path or "/", qstr)
+    no_track = _u(sp.scheme, host, sp.path.rstrip("/") or "/", qstr) if sp.path not in ("", "/") else base
+    alt_scheme = _u("http" if sp.scheme == "https" else "https", host, sp.path or "/", qstr)
+    if ":" in hostname:
+        # IPv6 字面量：www./m. 变换无意义，只保留协议变体
+        no_www = mobile = ""
+    elif hostname.startswith("www."):
+        bare = hostname[4:]
+        no_www = _u(sp.scheme, _netloc(bare), sp.path or "/", qstr)
+        mobile = _u(sp.scheme, _netloc("m." + bare), sp.path or "/", qstr)
+    else:
+        no_www = _u(sp.scheme, _netloc("www." + hostname), sp.path or "/", qstr)
+        mobile = ""
+    for v in (base, no_track, alt_scheme, no_www, mobile):
+        if v and v not in out:
+            out.append(v)
+    return out[:max_n]
+
+
 def _preflight_and_rescue(cfg: dict, description: str = "", log=None) -> dict:
     """入口预检 + 候选救援（治本：AI 选错入口时自动换可用入口，而不是反复改选择器）。"""
     su = cfg.get("start_urls") or []
@@ -1891,6 +2020,8 @@ def _preflight_and_rescue(cfg: dict, description: str = "", log=None) -> dict:
         return cfg
     try:
         from .sites import fetch_html
+        if log:
+            log(f"🩺 入口预检中（{min(3, len(su))} 个入口，每个最多 15 秒）…")
         good = []
         bad = []
         for u in su[:3]:
@@ -1926,6 +2057,33 @@ def _preflight_and_rescue(cfg: dict, description: str = "", log=None) -> dict:
         except Exception as e:
             if log:
                 log("⚠️ 候选救援失败: %s" % e)
+        # URL 变体兜底：协议/www/尾斜杠/移动版（对标 Crawlee URL normalization——
+        # 大量"入口失效"只是贴错形态，不必动选择器）
+        _is_post = str(((cfg.get("source") or {}).get("method")) or "GET").upper() == "POST" \
+            or (cfg.get("source") or {}).get("type") == "http_json"
+        if not good and su and not _is_post:
+            # GET 探测无法验证 POST 型 API 入口（必 405），跳过变体替换防误换
+            variants = [u for u in url_variants(su[0]) if u != su[0]][:4]
+            if log and variants:
+                log(f"🔎 入口变体兜底探测中（最多 {len(variants)} 个：协议/www/移动版）…")
+            try:
+                from .sites import fetch_html as _fh
+                for v in variants:
+                    try:
+                        rv = _fh(v, timeout=8, allow_html_404=False)
+                        if (bool(rv.get("ok")) and int(rv.get("status") or 0) in (200, 201, 206)
+                                and len((rv.get("html") or "").strip()) >= 200):
+                            cfg["start_urls"] = [v] + su[:3]
+                            if log:
+                                log(f"✅ 入口变体可用，已替换: {v[:80]}"
+                                    "（原入口协议/域名形态不对，不是页面结构问题）")
+                            return cfg
+                    except Exception:
+                        continue
+                if log:
+                    log("⚠️ URL 变体（协议/www/移动版）也全部不可达——入口本身可能不存在")
+            except Exception:
+                pass
         return cfg
     except Exception as e:
         if log:
@@ -1950,7 +2108,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             log_cb(msg)
 
     # 批量回归模式：US_REUSE_CONFIG=1 且任务已有落盘配置 → 直接复用（省 LLM、可反复修引擎）
-    _h = hashlib.md5(description.encode()).hexdigest()[:10]
+    _h = hashlib.md5(description.encode(), usedforsecurity=False).hexdigest()[:10]
     _task_dir0 = ROOT / "tasks" / f"auto_{_h}"
     _reused_cfg = None
     if os.environ.get("US_REUSE_CONFIG") == "1":
@@ -1982,7 +2140,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         _learned = _try_learned_config(description, log=log)
         if _learned:
             cfg = _learned
-            name = f"auto_{hashlib.md5(description.encode()).hexdigest()[:10]}"
+            name = f"auto_{hashlib.md5(description.encode(), usedforsecurity=False).hexdigest()[:10]}"
             task_dir = ROOT / "tasks" / name
             (task_dir / "modules").mkdir(parents=True, exist_ok=True)
             try:
@@ -2029,6 +2187,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                        "precise": _precise.get("site")}
     _loop_rounds = 0 if _precise_done else rounds
     _llm_ev_tried = False
+    _entry_rescued = False
     _auto_precise_tried = False
     for round_i in range(1, _loop_rounds + 1):
         # 写任务包
@@ -2056,11 +2215,13 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                 round_timeout = max(round_timeout, 1200)  # 详情补抓(几十页)要时间，放宽到 20 分钟
         log(f"▶️ 第 {round_i} 轮运行（超时上限 {round_timeout}s）...")
         from .engine_v3 import run_task
-        from .log import Logger
         log_file = ROOT / "outputs" / f".run_{name}.log"
         _box = {}
         def _run_round():
-            _box["r"] = run_task(task_dir, limit=limit, log_file=log_file, log_cb=log_cb)
+            try:
+                _box["r"] = run_task(task_dir, limit=limit, log_file=log_file, log_cb=log_cb)
+            except Exception as e:
+                _box["e"] = e
         _t = _th.Thread(target=_run_round, daemon=True)
         _t.start()
         _t.join(timeout=round_timeout)
@@ -2077,14 +2238,15 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             last_result = result
             last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
             break
-        try:
-            result = _box.get("r") or {}   # 线程内 run_task 抛错时兜底，避免二次崩溃
-            last_result = result
-            last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
-        except Exception as e:
-            result = {"total": 0, "fetched": 0, "errors": -1, "error": str(e)}
-            last_result = result
-            last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else str(e)
+        if "e" in _box:
+            # 引擎线程崩溃：显式报错（errors=-1），不伪装成"正常 0 条"
+            log(f"💥 引擎线程崩溃: {type(_box['e']).__name__}: {_box['e']}")
+            result = {"total": 0, "fetched": 0, "errors": -1,
+                      "error": f"{type(_box['e']).__name__}: {_box['e']}"}
+        else:
+            result = _box.get("r") or {}
+        last_result = result
+        last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
 
         items_path = ROOT / "outputs" / "items" / f"{name}.jsonl"
         sample = []
@@ -2163,7 +2325,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
 
         if round_i < rounds:
             # 🩺 首轮失败先换候选入口（不急着让 LLM 改选择器——入口错改选择器无用）
-            if round_i == 1 and not _llm_ev_tried:
+            if round_i == 1 and not _entry_rescued:
                 # 已学配置首轮失败 → 网站可能改版：删除 learned，下轮 AI 重新生成（防一直用坏配置）
                 if _learned:
                     _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
@@ -2173,6 +2335,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     cfg = _preflight_and_rescue(cfg, description, log=log)
                     if cfg.get("start_urls") != _old_su:
                         log("🔁 入口已替换，下一轮用新入口重跑")
+                        _entry_rescued = True
                         (task_dir / "config.json").write_text(
                             json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
                         continue
@@ -2266,7 +2429,9 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
             try:
                 from .agent import agent_task
                 _u0 = (cfg.get("start_urls") or [""])[0]
-                _cdp0 = str(_src_now.get("cdp") or "")
+                _cdp0 = resolve_cdp_for_agent(_src_now)
+                if _cdp0:
+                    log("🕹️ 检测到调试 Chrome 在线：附着你的真实浏览器跑代理（复用你已登录/已过验证的会话）...")
                 ag = agent_task(description, start_url=_u0, max_steps=10,
                                 cdp=_cdp0, limit=limit, log_cb=log,
                                 stop_file=str(Path(task_dir) / ".stop"))
@@ -2280,7 +2445,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     # 落盘
                     try:
                         import hashlib as _hl
-                        _n = f"auto_{_hl.md5(description.encode()).hexdigest()[:10]}"
+                        _n = f"auto_{_hl.md5(description.encode(), usedforsecurity=False).hexdigest()[:10]}"
                         _fp = ROOT / "outputs" / f"{_n}.json"
                         _fp.write_text(json.dumps(ag["items"], ensure_ascii=False, indent=2), encoding="utf-8")
                         files = {"json": f"outputs/{_n}.json"}
@@ -2359,6 +2524,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         summary = f"{_flag} 任务结束：成功 {total} 条{vtxt}{_font_obfuscation_hint(real)}，导出 {list(files)}"
     else:
         reason = _diagnose_failure(cfg.get("start_urls"), last_result, log)
+        reason = _maybe_import_session_on_auth_wall(cfg, reason, log)
         summary = f"⚠️ 任务结束：0 条。原因诊断：{reason}"
         log(summary)
     return {
@@ -2419,6 +2585,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                        "precise": _precise.get("site")}
     _loop_rounds = 0 if _precise_done else rounds
     _llm_ev_tried = False
+    _entry_rescued = False
     _auto_precise_tried = False
     import os as _os
     import threading as _th
@@ -2441,14 +2608,17 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         log_file = ROOT / "outputs" / f".run_{name}.log"
         _box = {}
         def _run_round():
-            _box["r"] = run_task(td, limit=limit, log_file=log_file, log_cb=log_cb)
+            try:
+                _box["r"] = run_task(td, limit=limit, log_file=log_file, log_cb=log_cb)
+            except Exception as e:
+                _box["e"] = e
         _t = _th.Thread(target=_run_round, daemon=True)
         _t.start()
         _t.join(timeout=round_timeout)
         if _t.is_alive():
             log(f"⏱️ 本轮超过 {round_timeout}s 未结束，正在发送停止信号并回收后台线程...")
             try:
-                (Path(task_dir) / ".stop").write_text("1", encoding="utf-8")
+                (td / ".stop").write_text("1", encoding="utf-8")
             except Exception:
                 pass
             _t.join(timeout=30)
@@ -2458,14 +2628,15 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             last_result = result
             last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
             break
-        try:
-            result = _box.get("r") or {}   # 线程内 run_task 抛错时兜底，避免二次崩溃
-            last_result = result
-            last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
-        except Exception as e:
-            result = {"total": 0, "fetched": 0, "errors": -1, "error": str(e)}
-            last_result = result
-            last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else str(e)
+        if "e" in _box:
+            # 引擎线程崩溃：显式报错（errors=-1），不伪装成"正常 0 条"
+            log(f"💥 引擎线程崩溃: {type(_box['e']).__name__}: {_box['e']}")
+            result = {"total": 0, "fetched": 0, "errors": -1,
+                      "error": f"{type(_box['e']).__name__}: {_box['e']}"}
+        else:
+            result = _box.get("r") or {}
+        last_result = result
+        last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
         items_path = ROOT / "outputs" / "items" / f"{name}.jsonl"
         sample = []
         if items_path.exists():
@@ -2492,7 +2663,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
             # 已学配置产生的内容不是用户要的 → 该配置是坏的，立即删掉（防止每轮都复用坏配置空转）
             if _learned:
-                _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
+                _drop_learned_by_start_url((config.get("start_urls") or [""])[0],
                                            reason=f"意图校验失败：{_intent_bad[:50]}", log=log)
         if _miss:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
@@ -2535,18 +2706,19 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
 
         if round_i < rounds:
             # 🩺 首轮失败先换候选入口（不急着让 LLM 改选择器——入口错改选择器无用）
-            if round_i == 1 and not _llm_ev_tried:
+            if round_i == 1 and not _entry_rescued:
                 # 已学配置首轮失败 → 网站可能改版：删除 learned，下轮 AI 重新生成（防一直用坏配置）
                 if _learned:
-                    _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
+                    _drop_learned_by_start_url((config.get("start_urls") or [""])[0],
                                                reason="首轮失败，网站可能改版", log=log)
                 try:
-                    _old_su = list(cfg.get("start_urls") or [])
-                    cfg = _preflight_and_rescue(cfg, description, log=log)
-                    if cfg.get("start_urls") != _old_su:
+                    _old_su = list(config.get("start_urls") or [])
+                    config = _preflight_and_rescue(config, description, log=log)
+                    if config.get("start_urls") != _old_su:
                         log("🔁 入口已替换，下一轮用新入口重跑")
-                        (task_dir / "config.json").write_text(
-                            json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+                        _entry_rescued = True
+                        (td / "config.json").write_text(
+                            json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
                         continue
                 except Exception as _e:
                     log(f"⚠️ 失败轮入口救援异常：{_e}")
@@ -2658,12 +2830,12 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
             _low = [c for c in verify["checks"] if c.get("name", "").startswith("字段完整率")
                     and not c.get("pass", True)]
             if len(_low) >= 2:
-                _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
+                _drop_learned_by_start_url((config.get("start_urls") or [""])[0],
                                            reason="质量下降（字段完整率偏低）", log=log)
         # ⚠️ LLM 兜底/浏览器代理成功 ≠ 配置真的有效（见 _learnable）——不沉淀毒配置
         if _learnable(last_result):
             try:
-                _save_learned(cfg, description, log=log)
+                _save_learned(config, description, log=log)
             except Exception:
                 pass
         vtxt = ""

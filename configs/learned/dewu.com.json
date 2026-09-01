@@ -1,0 +1,122 @@
+{
+ "host": "dewu.com",
+ "learned_at": 1786427838.14583,
+ "from_description": "从得物App“鞋类-热销榜”，在2025年9月第一个星期一上午9点抓取前30款鞋的名称、售价、销量、求购数。",
+ "config": {
+  "start_urls": [
+   "https://www.dewu.com/rank"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 6,
+   "scroll_wait_ms": 800,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/rank",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": ".rank-item, [class*='rank-item'], [class*='rank'] li, .goods-item, .list-item",
+    "fields": {
+     "name": {
+      "css": ".name::text, .title::text, .productName::text, a:first-of-type::text"
+     },
+     "price": {
+      "css": ".price::text, .salePrice::text, [class*='price']::text"
+     },
+     "sales": {
+      "css": ".sales::text, .sold::text, [class*='salesCount']::text, [class*='soldCount']::text, [class*='sales']::text"
+     },
+     "demand": {
+      "css": ".want::text, .demand::text, [class*='purchaseCount']::text, [class*='buyCount']::text, [class*='demand']::text, [class*='want']::text"
+     },
+     "link": {
+      "css": "a:first-of-type::attr(href)"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": ".rank-item, [class*='rank-item'], [class*='rank'] li, .goods-item, .list-item",
+    "fields": {
+     "name": {
+      "css": ".name::text, .title::text, .productName::text, a:first-of-type::text"
+     },
+     "price": {
+      "css": ".price::text, .salePrice::text, [class*='price']::text"
+     },
+     "sales": {
+      "css": ".sales::text, .sold::text, [class*='salesCount']::text, [class*='soldCount']::text, [class*='sales']::text"
+     },
+     "demand": {
+      "css": ".want::text, .demand::text, [class*='purchaseCount']::text, [class*='buyCount']::text, [class*='demand']::text, [class*='want']::text"
+     },
+     "link": {
+      "css": "a:first-of-type::attr(href)"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "name",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "name"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://www.dewu.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "name",
+     "type": "css_text",
+     "selector": "h1::text, .productName::text, .title::text"
+    },
+    {
+     "name": "price",
+     "type": "css_text",
+     "selector": ".price::text, .salePrice::text, [class*='price']::text"
+    },
+    {
+     "name": "sales",
+     "type": "css_text",
+     "selector": ".sales::text, .sold::text, [class*='salesCount']::text, [class*='soldCount']::text"
+    },
+    {
+     "name": "demand",
+     "type": "css_text",
+     "selector": ".want::text, .purchase::text, [class*='purchaseCount']::text, [class*='want']::text, [class*='demand']::text"
+    }
+   ],
+   "filters": [],
+   "concurrency": 2,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 2,
+   "max_requests": 80,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1,
+   "max_retries": 3
+  }
+ }
+}

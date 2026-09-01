@@ -1,0 +1,79 @@
+{
+ "host": "api.github.com",
+ "learned_at": 1787414390.196821,
+ "from_description": "抓取GitHub github.com/topics/web-scraping 主题下 star 前20的仓库名称、简介、star数",
+ "config": {
+  "start_urls": [
+   "https://api.github.com/search/repositories?q=topic:web-scraping&sort=stars&order=desc&per_page=20"
+  ],
+  "source": {
+   "type": "http"
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/search/repositories",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "json",
+    "records_path": "items",
+    "fields": {
+     "name": {
+      "from": "full_name"
+     },
+     "description": {
+      "from": "description"
+     },
+     "stars": {
+      "from": "stargazers_count"
+     },
+     "url": {
+      "from": "html_url"
+     }
+    }
+   },
+   "default": {
+    "type": "json",
+    "records_path": "items",
+    "fields": {
+     "name": {
+      "from": "full_name"
+     },
+     "description": {
+      "from": "description"
+     },
+     "stars": {
+      "from": "stargazers_count"
+     },
+     "url": {
+      "from": "html_url"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "name",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "name"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 20,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

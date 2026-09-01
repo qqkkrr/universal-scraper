@@ -44,12 +44,22 @@ python3 -m universal_scraper.cli dianping --keyword 烤肉 --city 2 --cookie-fil
 
 ## 🆕 v2.2 更新（一句话任务 × 极简 WebUI）
 
-- **实时反馈**：WebUI 改为后台任务 + 轮询，每一步（探测/生成配置/第 N 轮/结果）即时显示，不再"看起来卡死"；结束必有「✅/⚠️ 任务结束」横幅 + 人话原因。
-- **极简界面**：只保留「🤖 一句话任务」和「📋 贴网页爬虫」两个入口 + 少量配置项（条数/轮数/超时/浏览器/深度/页数）。
+- **小白一步完成**：写完任务描述点「🚀 开始任务（推荐 · 一步到位）」直接开跑——AI 自动理解、
+  自动配置、失败自动重试并告诉你怎么办；不想看执行计划的小白不用多点任何一步。
+  纯小白还可以展开「🙋 手把手三步」：贴网址 + 选要什么 → 自动拼出任务描述。
+- **结果直接可见**：任务跑完，页面里直接预览抓到的数据表格（前 20 条，可左右滑动）；
+  导出文件每个都带「复制路径」和「📂 打开所在文件夹」按钮，不用会找目录。
+- **失败自救闭环**：失败/0 条自动展示解决方案卡 + AI 一键诊断（同一任务只自动诊断一次，
+  不重复烧调用）；任务结束后按钮自动恢复，改完描述直接再跑，不用刷新页面。
+- **实时反馈**：WebUI 后台任务 + 轮询，每一步即时显示；图书目录采集支持中途停止
+  （已完成的书照常导出并如实标注）。
 - **提速**：入口探测 8s 短超时 + 磁盘缓存（1 小时）；重复任务秒开。
-- **拓宽边界**：常规选择器解析失败时，自动用 LLM 从页面 Markdown 直接抽取条目（ScrapeGraphAI 路线）——选择器写不对、结构怪异的页面也能出数据。
-- **复核工具**：新增 `verify` 模块 + `us verify` 命令——字段完整率 / 去重率 / 数量校验 / 抽样重抓对比；auto 跑完自动复核并在界面展示。
-- **分享**：`webui --share` 局域网分享（同 WiFi 直接打开）；双击「启动工具.command」一键启动；附「安装依赖.command」与「分享给其他人用.txt」。
+- **拓宽边界**：常规选择器解析失败时，自动用 LLM 从页面 Markdown 直接抽取条目（ScrapeGraphAI 路线）。
+- **入口自愈**（对标 Crawlee URL normalization）：贴错协议/www/尾斜杠/移动版？预检失败时自动尝试 URL 变体并替换可用入口，还会告诉你是"形态不对"而不是页面结构问题。
+- **拦截自适应降速**（对标 Scrapy AUTOTHROTTLE）：命中风控/限流自动把请求间隔翻倍（封顶 8s），连续成功再逐步恢复——被拦时打得更轻，恢复时跑得更快。
+- **登录墙自动接会话**：0 条且诊断为登录/验证墙时，若调试 Chrome 在线会自动导入你的登录会话并提示"直接重跑即可"。
+- **复核工具**：`verify` 模块 + `us verify` 命令——字段完整率 / 去重率 / 数量校验 / 抽样重抓对比。
+- **分享**：`webui --share` 局域网分享；双击「启动工具.command」一键启动。
 
 ## ✨ 作品展示网站
 
@@ -58,7 +68,19 @@ python3 -m universal_scraper.cli dianping --keyword 烤肉 --city 2 --cookie-fil
 ## 🤖 MCP 原生接入（v2.1 新增）
 
 对标 silkworm-mcp / scrape-mcp / cortex-scout：把整个爬虫引擎变成 AI 客户端的原生工具。
-启动后提供 5 个工具：`scrape`（一键抓取）、`auto`（一句话任务全自动）、`crawl`（递归爬站）、`extract`（HTML→Markdown 省 token）、`check`（体检）。
+启动后提供 6 个工具：`scrape`（一键抓取）、`auto`（一句话任务全自动）、`crawl`（递归爬站）、`extract`（HTML→Markdown 省 token）、`books`（ISBN 书单→图书目录+比价）、`check`（体检）。
+
+`books` 工具用法（AI 客户端直接调）：
+```json
+{"name": "books", "arguments": {
+  "spec": {"name": "我的书单", "books": [{"title": "设计中的设计", "isbn": "9787563394180"}]},
+  "out": "outputs/book_catalog", "download_covers": false, "interval": 1.0
+}}
+```
+返回 `status`（`OK` / `PARTIAL`·带 warning 与逐行诊断 / `NO_DATA`·伴随 error 上报 / `INVALID_SPEC`·伴随 error）、
+逐项 `diagnostics` 与行动方案；0 条或全源失败时
+`isError=true`，不会伪装成功。只采集书目数据与公开封面，不下载电子书/PDF，不绕过登录墙。
+也可以传 `"spec_path": "examples/books.spec.json"` 代替内联 spec。
 
 ```bash
 # 启动 MCP Server（stdio）
@@ -90,7 +112,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
 
 ```bash
 python3 -m pip install pytest        # 首次
-python3 -m pytest tests/ -q          # 38 个用例，全离线（本地服务器/ mock），无需外网
+python3 -m pytest tests/ -q          # 全量回归，全离线（本地服务器/ mock），无需外网
 ```
 
 覆盖：配置校验 / HTML+JSON 解析 / 管道过滤去重 / 失败分类 / **安全回归**（路径穿越封堵）/
@@ -914,6 +936,11 @@ python3 -m universal_scraper.cli cookies --session outputs/.session/session.json
 # /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=9222
 ```
 
+# 《科研管理》2026 年全部文章：官方目录 + 公开 MAG XML 全文
+python3 -m universal_scraper.cli journal --site kygl --since 2026 --fulltext \
+  --out "/Users/kairanqin/Desktop/Annualreport_tools-main/《科研管理》范文"
+# 或分两步：KYGL_OUT=... python3 scripts/kygl_fulltext_download.py
+
 AI 自修复升级：检测到反爬拦截统计（cloudflare/verify/captcha/429/403）时，
 自动建议改为 browser+登录/验证，或 CDP 直连已登录浏览器，不再用 HTTP 硬刚。
 
@@ -1157,3 +1184,47 @@ GitHub Trending、arXiv（Atom API）、LeetCode 题库（官方 JSON）、B站�
   强登录/强反爬站点（淘宝/京东/拼多多/知乎/微博/大众点评/虎扑/CSDN/竞彩）确认需浏览器+登录/CDP 模式（工具已自动升级）。
 - 复跑命令：`python3 tests/stress100/run_plan_tests.py --range 1-100 --workers 6`
   `python3 tests/stress100/run_exec_tests.py --ids 56,58,61,42 --limit 5 --timeout 75`
+
+
+---
+
+## 📚 图书目录采集（books 命令，2026-08-26 新增）
+
+工业设计书籍采集实测后，把“豆瓣详情 + 在哪儿买 + 当当搜索 + 京东登录墙诊断”固化为内置能力。
+
+```bash
+# 示例 spec 已含 2 本书
+python3 -m universal_scraper.cli books --spec examples/books.spec.json --out outputs/book_catalog --interval 1.0
+```
+
+spec 结构：
+
+```json
+{
+  "books": [
+    {
+      "group": "原研哉《设计中的设计》",
+      "title": "设计中的设计 | 全本",
+      "isbn": "9787563394180",
+      "douban_subject_id": "4230237",
+      "language": "中文",
+      "edition": "广西师范大学出版社·全本（2010）"
+    }
+  ]
+}
+```
+
+- `isbn` 是主键，缺失或重复会被诊断，不会生成假成功行。
+- 不填 `douban_subject_id` 时，工具按 ISBN/书名先查豆瓣读书，再抓详情。
+- 输出：`booklist.csv`、`booklist.md`、`crawl_log.md`、`books.json`、`covers/`（公开封面）。
+- 京东搜索页触发登录墙时，工具只使用豆瓣“在哪儿买”的公开聚合价和跳转链接；**不获取/提交登录态，不逆向 h5st，不绕过验证码**。
+- `NO_RESULT/NO_VENDOR/LOGIN_WALL/FETCH_ERROR` 会按字段写入结构化 `diagnostics` 与行动方案，整批状态为 `PARTIAL`，绝不把 0 条伪装成成功。
+- 本命令不下载整本电子书/PDF；正文请走图书馆、出版社或已授权数据库。
+
+精配解析器已注册：
+`douban_book_detail`、`douban_book_search`、`douban_book_buylinks`、`dangdang_search`。
+
+```bash
+python3 -m universal_scraper.cli sites --run 'https://book.douban.com/subject/4230237/'
+python3 -m universal_scraper.cli sites --run 'https://search.dangdang.com/?key=9787563394180'
+```

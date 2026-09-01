@@ -6,7 +6,7 @@ import re
 from typing import Any, Dict, List
 
 from ..protocols import BaseParser, ParseResult, Response, ParseContext, Request
-from ..selectors import jpath, css_text, css_attr, xpath_text, apply_extractor, regex_extract
+from ..selectors import jpath, apply_extractor
 try:
     from lxml.html import HtmlElement as _lxml_el
 except Exception:  # pragma: no cover
@@ -316,7 +316,6 @@ class ConfigParser(BaseParser):
         return out[:200]
 
     def _map_html(self, html: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-        from ..selectors import css_text, css_attr, xpath_text
         out = {}
         for name, spec in fields.items():
             if isinstance(spec, dict):

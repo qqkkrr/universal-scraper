@@ -46,6 +46,17 @@ class AgentError(RuntimeError):
     pass
 
 
+def debug_chrome_alive() -> bool:
+    """调试 Chrome（用户已登录/过验证的真实浏览器，固定 9222 端口）是否在运行。"""
+    try:
+        import urllib.request as _ur
+        # 固定本机调试端点（非用户输入），无 SSRF 面
+        with _ur.urlopen("http://127.0.0.1:9222/json/version", timeout=2) as _r:
+            return getattr(_r, "status", 200) == 200
+    except Exception:
+        return False
+
+
 class AgentSession:
     """agent_browser.cjs 长驻子进程封装。"""
 
@@ -142,7 +153,6 @@ def _llm(messages: List[Dict[str, str]], timeout: int = 150) -> str:
 
 
 def _parse_action(raw: str) -> Dict[str, Any]:
-    m = json.loads(raw) if False else None
     import re
     mm = re.search(r"\{.*\}", raw or "", re.S)
     if not mm:
@@ -304,7 +314,7 @@ def agent_task(description: str, start_url: str = "", max_steps: int = 12,
                 try:
                     sess.send({"op": "type", "selector": act.get("selector", ""),
                                "text": act.get("value", "")}, timeout=20)
-                    history.append(f"type -> ok")
+                    history.append("type -> ok")
                 except Exception as e:
                     history.append(f"type 失败: {str(e)[:80]}")
                 continue
@@ -374,7 +384,7 @@ def run_agent_cli(description: str, url: str = "", max_steps: int = 12,
         out = agent_task(description, start_url=url, max_steps=max_steps,
                          cdp=cdp, limit=limit, log_cb=log)
         out["messages"] = lines
-        name = f"agent_{_hl.md5(description.encode()).hexdigest()[:8]}"
+        name = f"agent_{_hl.md5(description.encode(), usedforsecurity=False).hexdigest()[:8]}"
         out["name"] = name
         out["result"] = {"total": out.get("total", 0), "fetched": 0,
                          "errors": 0, "agent_mode": True}

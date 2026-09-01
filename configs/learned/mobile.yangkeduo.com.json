@@ -1,0 +1,126 @@
+{
+ "host": "mobile.yangkeduo.com",
+ "learned_at": 1786427595.879158,
+ "from_description": "从拼多多“秒杀”频道，在2025年8月18日20:00抓取所有标有“限时”的数码商品名称、秒杀价、限量件数、已抢比例。",
+ "config": {
+  "start_urls": [
+   "https://mobile.yangkeduo.com/seckill.html"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.48"
+   },
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/seckill",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "div._1cbPZFE7",
+    "fields": {
+     "name": {
+      "css": "._1Tk_m28N .J9WPy2Wu::text"
+     },
+     "seckill_price": {
+      "css": "div._1_mHsNT0 > div:nth-child(2)::text, div._1_mHsNT0 > div:nth-child(2) > span::text, div._1_mHsNT0 > div:nth-child(2) > div::text"
+     },
+     "limit_qty": {
+      "css": "div.rd41F6kL::text"
+     },
+     "grabbed_ratio": {
+      "css": "div.rd41F6kL > div.IkXI5oRB.m9lfFP_K::attr(style), div.rd41F6kL > div:nth-child(1)::attr(style)"
+     },
+     "tag": {
+      "css": "div._1cbPZFE7::text"
+     },
+     "link": {
+      "css": "a:first-of-type::attr(href), div._1cbPZFE7[data-link]::attr(data-link), div._1cbPZFE7[data-url]::attr(data-url)"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "div._1cbPZFE7",
+    "fields": {
+     "name": {
+      "css": "._1Tk_m28N .J9WPy2Wu::text"
+     },
+     "seckill_price": {
+      "css": "div._1_mHsNT0 > div:nth-child(2)::text, div._1_mHsNT0 > div:nth-child(2) > span::text, div._1_mHsNT0 > div:nth-child(2) > div::text"
+     },
+     "limit_qty": {
+      "css": "div.rd41F6kL::text"
+     },
+     "grabbed_ratio": {
+      "css": "div.rd41F6kL > div.IkXI5oRB.m9lfFP_K::attr(style), div.rd41F6kL > div:nth-child(1)::attr(style)"
+     },
+     "tag": {
+      "css": "div._1cbPZFE7::text"
+     },
+     "link": {
+      "css": "a:first-of-type::attr(href), div._1cbPZFE7[data-link]::attr(data-link), div._1cbPZFE7[data-url]::attr(data-url)"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "name",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "name"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://mobile.yangkeduo.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "seckill_price",
+     "type": "css_text",
+     "selector": ".goods-price::text, .price::text, .now-price::text"
+    },
+    {
+     "name": "limit_qty",
+     "type": "css_text",
+     "selector": ".stock::text, .limit::text, .sku-stock::text"
+    },
+    {
+     "name": "grabbed_ratio",
+     "type": "css_text",
+     "selector": ".progress::text, .percent::text, .sold-bar::text"
+    }
+   ],
+   "filters": [],
+   "concurrency": 1,
+   "interval": 1.0
+  },
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 50,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1.0,
+   "max_retries": 3
+  }
+ }
+}

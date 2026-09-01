@@ -44,6 +44,8 @@ class CsvStorage(JsonLinesStorage):
         super().__init__(config, task_vars)
         self.writer = None
         self.fields: List[str] = []
+        import threading
+        self._wlock = threading.Lock()  # engine_v3 多 worker 并发写（扩列+writerow 必须串行）
 
     def open(self, name: str) -> None:
         self.name = name
@@ -63,6 +65,10 @@ class CsvStorage(JsonLinesStorage):
                 self.fields = []
 
     def write(self, item: Dict[str, Any]) -> None:
+        with self._wlock:
+            self._write_locked(item)
+
+    def _write_locked(self, item: Dict[str, Any]) -> None:
         for k in item:
             if k not in self.fields:
                 self.fields.append(k)

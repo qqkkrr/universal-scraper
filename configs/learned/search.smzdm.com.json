@@ -1,0 +1,119 @@
+{
+ "host": "search.smzdm.com",
+ "learned_at": 1787412980.9414358,
+ "from_description": "抓取什么值得买 smzdm.com '科学捡漏' 频道带'手慢无'标签的爆料标题、商品链接、优惠力度，前 20 条",
+ "config": {
+  "start_urls": [
+   "https://search.smzdm.com/?s=科学捡漏&c=home",
+   "https://www.smzdm.com/jianlou/"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/jianlou",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "li.feed-row",
+    "fields": {
+     "title": {
+      "css": "h5.feed-block-title a::text"
+     },
+     "link": {
+      "css": "h5.feed-block-title a::attr(href)"
+     },
+     "buy_link": {
+      "css": "xpath:.//a[contains(concat(' ', normalize-space(@class), ' '), ' buy ') or contains(@class,'go-buy') or contains(@class,'z-buy')][1]/@href"
+     },
+     "discount_desc": {
+      "css": ".feed-block-descripe::text"
+     },
+     "tag_check": {
+      "css": "xpath:.//a[contains(normalize-space(.),'手慢无')]/text() | .//span[contains(normalize-space(.),'手慢无')]/text()"
+     }
+    },
+    "extract_links": {
+     "allow": "^/jianlou/p\\d+/$",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "li.feed-row",
+    "fields": {
+     "title": {
+      "css": "h5.feed-block-title a::text"
+     },
+     "link": {
+      "css": "h5.feed-block-title a::attr(href)"
+     },
+     "buy_link": {
+      "css": "xpath:.//a[contains(concat(' ', normalize-space(@class), ' '), ' buy ') or contains(@class,'go-buy') or contains(@class,'z-buy')][1]/@href"
+     },
+     "discount_desc": {
+      "css": ".feed-block-descripe::text"
+     },
+     "tag_check": {
+      "css": "xpath:.//a[contains(normalize-space(.),'手慢无')]/text() | .//span[contains(normalize-space(.),'手慢无')]/text()"
+     }
+    },
+    "extract_links": {
+     "allow": "^/jianlou/p\\d+/$",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "tag_check",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "link",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://www.smzdm.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "real_buy_link",
+     "type": "css_attr",
+     "selector": ".dgo, a.go-buy, a.buy-btn",
+     "attribute": "href"
+    }
+   ],
+   "concurrency": 2,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 100,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

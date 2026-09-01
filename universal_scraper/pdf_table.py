@@ -74,7 +74,7 @@ def download_pdf(url: str, proxy: Optional[str] = None, timeout: int = 60,
     }
     if headers:
         hdrs.update(headers)
-    r = requests.get(url, timeout=timeout, verify=False, headers=hdrs,
+    r = requests.get(url, timeout=timeout, verify=True, headers=hdrs,
                      proxies={"http": proxy, "https": proxy} if proxy else None)
     r.raise_for_status()
     if len(r.content) < 200 or not r.content.lstrip().startswith(b"%PDF"):
@@ -335,7 +335,7 @@ def parse_pdf_auto(path: str, fields: Optional[List[str]] = None,
                 if fields:
                     rows = normalize_field_names(rows, fields)
                 return {"kind": "table", "rows": rows, "tables": len(by_table)}
-    except Exception as e:
+    except Exception:
         # pdfplumber 失败不致命，回退文本
         pass
     try:
@@ -390,7 +390,7 @@ def download_attachment(url: str, proxy: Optional[str] = None, timeout: int = 90
     import requests
     hdrs = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                           "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15"}
-    r = requests.get(url, timeout=timeout, verify=False, headers=hdrs,
+    r = requests.get(url, timeout=timeout, verify=True, headers=hdrs,
                      proxies={"http": proxy, "https": proxy} if proxy else None)
     r.raise_for_status()
     if len(r.content) < 50:
@@ -431,7 +431,6 @@ def attachment_to_rows(url: str, proxy: Optional[str] = None,
                 with zipfile.ZipFile(fp) as z:
                     if "word/document.xml" in z.namelist():
                         xml = z.read("word/document.xml")
-                        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
                         root = ET.fromstring(xml)
                         for p in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
                             t = "".join(n.text or "" for n in p.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"))

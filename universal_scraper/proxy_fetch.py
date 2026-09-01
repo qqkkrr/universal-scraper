@@ -13,10 +13,9 @@ import concurrent.futures as cf
 import json
 import re
 import sys
-import time
 import urllib.request
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 SOURCES = [
     # 仅保留实测可用源（proxyscrape/openproxy 已失效，HTTP 000）

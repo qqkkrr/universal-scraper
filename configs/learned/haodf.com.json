@@ -1,0 +1,125 @@
+{
+ "host": "haodf.com",
+ "learned_at": 1787503365.975889,
+ "from_description": "抓取好大夫在线 www.haodf.com 北京儿童医院科室列表的医生出诊时间、擅长领域，前 20 条",
+ "config": {
+  "start_urls": [
+   "https://www.haodf.com/hospital/D00005/doctors.htm",
+   "https://www.haodf.com/hospital/D00005.htm"
+  ],
+  "source": {
+   "type": "http",
+   "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.haodf.com/"
+   }
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "D00005.htm",
+    "parser": "departments"
+   },
+   {
+    "match": "regex",
+    "pattern": "^/hospital/D00005/keshi/",
+    "parser": "doctors"
+   }
+  ],
+  "parsers": {
+   "departments": {
+    "type": "html",
+    "row_css": "a[href*='/keshi/']",
+    "fields": {
+     "dept_name": {
+      "css": "::text"
+     },
+     "link": {
+      "css": "::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/hospital/D00005/keshi/",
+     "same_domain": true
+    }
+   },
+   "doctors": {
+    "type": "html",
+    "row_css": "div.doctor-list li, ul.ys-list li, ul.dr-list li, table.doctor-table tr",
+    "fields": {
+     "doctor_name": {
+      "css": "a[href*='/doctor/']:first-of-type::text, span.name::text"
+     },
+     "specialty": {
+      "css": "p.specialty::text, div.goodat::text, td.goodat::text"
+     },
+     "link": {
+      "css": "a[href*='/doctor/']:first-of-type::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/doctor/",
+     "same_domain": true
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "div.doctor-list li, ul.ys-list li, ul.dr-list li, table.doctor-table tr",
+    "fields": {
+     "doctor_name": {
+      "css": "a[href*='/doctor/']:first-of-type::text, span.name::text"
+     },
+     "specialty": {
+      "css": "p.specialty::text, div.goodat::text, td.goodat::text"
+     },
+     "link": {
+      "css": "a[href*='/doctor/']:first-of-type::attr(href)"
+     }
+    },
+    "extract_links": {
+     "allow": "^/doctor/",
+     "same_domain": true
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "doctor_name",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://www.haodf.com/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "clinic_time",
+     "type": "css_text",
+     "selector": "div.visit-time::text, table.clinic-table td::text, .time-tip::text"
+    }
+   ],
+   "filters": [],
+   "concurrency": 1,
+   "interval": 0.5
+  },
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 50,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 2
+  }
+ }
+}

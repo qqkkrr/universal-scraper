@@ -23,7 +23,8 @@ UA_POOL = [
 
 
 class HttpSession:
-    __slots__ = ("domain", "ua", "proxy", "cookies", "errors", "last_used", "id", "jar")
+    __slots__ = ("domain", "ua", "proxy", "cookies", "errors", "last_used", "id", "jar",
+                 "archive_seeded")
 
     def __init__(self, domain: str, ua: str, proxy: Optional[str]):
         self.domain = domain
@@ -35,6 +36,7 @@ class HttpSession:
         self.errors = 0
         self.last_used = 0.0
         self.id = random.randint(100000, 999999)
+        self.archive_seeded = False  # 已存档登录态是否播种过（轮换出的新会话为 False）
 
 
 class SessionPool:
@@ -52,7 +54,7 @@ class SessionPool:
         self._pool: Dict[str, List[HttpSession]] = {}
         self._idx: Dict[str, int] = {}
         self._proxy_counter = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # 可重入：acquire/rotate 持锁时会调 _next_proxy/rotate
         self.stats = {"created": 0, "rotated": 0, "blocked": 0}
         # 可选外部代理池回调（ProxyPool.next / mark_fail），打通冷却与失败惩罚
         self._proxy_source = None

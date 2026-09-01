@@ -13,7 +13,6 @@
 """
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -174,12 +173,10 @@ def decide_tactic(desc: str, detect: Dict[str, Any], log: Optional[Callable[[str
     from .pdf_table import is_pdf_url
     d = detect or {}
     text_len = int(d.get("textLen") or 0)
-    text = (d.get("textHead") or "") + (d.get("title") or "")
     has_vue = bool(d.get("hasVue"))
     pdfs = d.get("pdfLinks") or []
     imgs = d.get("bigImages") or []
     tables = d.get("tables") or []
-    status = d.get("httpStatus")
 
     # 1) 登录墙：文本极少 + 登录关键词
     if text_len < 200 and d.get("loginText"):

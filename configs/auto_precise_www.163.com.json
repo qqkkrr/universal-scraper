@@ -1,0 +1,14 @@
+{
+  "host": "www.163.com",
+  "kind": "tactic:pdf_attach",
+  "name": "auto_precise_www.163.com",
+  "entry": "https://www.163.com/",
+  "tactic": "pdf_attach",
+  "params": {
+    "entry": "https://www.163.com/",
+    "direct_pdf": false,
+    "host": "www.163.com",
+    "seed": "https://www.163.com/"
+  },
+  "description": "抓取网易公开课 open.163.com 心理学分类课程名称、来源、播放量，前 20 条"
+}

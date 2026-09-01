@@ -56,7 +56,7 @@ class CaptchaMiddleware(BaseMiddleware):
             return resp
         out = Path(ctx.vars.get("_captcha_dir", "/tmp/universal_scraper_captcha"))
         out.mkdir(parents=True, exist_ok=True)
-        fp = out / f"captcha_{hashlib.md5(str(resp.url).encode()).hexdigest()[:12]}.png"
+        fp = out / f"captcha_{hashlib.md5(str(resp.url).encode(), usedforsecurity=False).hexdigest()[:12]}.png"
         fp.write_bytes(body)
         res = solve_captcha_file(str(fp), ctx.config.get("anti_bot", {}))
         if res.get("answer"):

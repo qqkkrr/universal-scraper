@@ -1,0 +1,110 @@
+{
+ "host": "stats.gov.cn",
+ "learned_at": 1787496416.063498,
+ "from_description": "抓取国家统计局 stats.gov.cn 规模以上工业企业利润分行业数据表的行业名称、利润总额、同比增速，前 20 行",
+ "config": {
+  "start_urls": [
+   "https://www.stats.gov.cn/sj/zxfb/"
+  ],
+  "source": {
+   "type": "browser",
+   "headless": true,
+   "scroll_count": 4,
+   "scroll_wait_ms": 800
+  },
+  "rules": [
+   {
+    "match": "regex",
+    "pattern": "^https://www\\.stats\\.gov\\.cn/sj/zxfb/?$",
+    "parser": "list"
+   },
+   {
+    "match": "regex",
+    "pattern": "/t\\d{8}_\\d+\\.html$",
+    "parser": "table"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "xpath:.//li[.//a[contains(text(),'工业企业利润')]]",
+    "fields": {
+     "title": {
+      "css": "a::text"
+     },
+     "link": {
+      "css": "a::attr(href)"
+     }
+    }
+   },
+   "table": {
+    "type": "html",
+    "row_css": "table tr:not(:first-child)",
+    "fields": {
+     "行业名称": {
+      "css": "td:nth-child(1)::text"
+     },
+     "利润总额": {
+      "css": "td:nth-child(2)::text"
+     },
+     "同比增速": {
+      "css": "td:nth-child(3)::text"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "table tr:not(:first-child)",
+    "fields": {
+     "行业名称": {
+      "css": "td:nth-child(1)::text"
+     },
+     "利润总额": {
+      "css": "td:nth-child(2)::text"
+     },
+     "同比增速": {
+      "css": "td:nth-child(3)::text"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "行业名称",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "link"
+   }
+  ],
+  "detail": {
+   "enabled": true,
+   "url_field": "link",
+   "url_transform": [
+    {
+     "prefix": "https://www.stats.gov.cn/"
+    }
+   ],
+   "extract": [
+    {
+     "name": "article_title",
+     "type": "css_text",
+     "selector": "h1::text"
+    }
+   ],
+   "concurrency": 1,
+   "interval": 1
+  },
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 20,
+   "max_concurrency": 2
+  },
+  "anti_bot": {
+   "min_interval": 1,
+   "max_retries": 3
+  }
+ }
+}

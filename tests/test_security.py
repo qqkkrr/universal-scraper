@@ -12,12 +12,25 @@ REPORTS = ROOT / "outputs" / "reports"
 
 @pytest.fixture(scope="module")
 def srv():
+    # 测试服务器与真实服务共用模块级状态；通过临时文件/空 JOBS 隔离，
+    # 避免任何 HTTP 测试污染用户 jobs_history.json、settings.json 或 schedules.json。
+    import tempfile
+    _tmp = tempfile.TemporaryDirectory()
+    _orig = (webui.HISTORY_FILE, webui.JOBS, webui.SETTINGS_FILE, webui.SCHEDULES_FILE)
+    webui.HISTORY_FILE = Path(_tmp.name) / "jobs_history.json"
+    webui.JOBS = {}
+    webui.SETTINGS_FILE = Path(_tmp.name) / "settings.json"
+    webui.SCHEDULES_FILE = Path(_tmp.name) / "schedules.json"
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), webui.Handler)
     port = httpd.server_address[1]
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
-    yield f"http://127.0.0.1:{port}"
-    httpd.shutdown()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        httpd.shutdown()
+        webui.HISTORY_FILE, webui.JOBS, webui.SETTINGS_FILE, webui.SCHEDULES_FILE = _orig
+        _tmp.cleanup()
 
 def _get(srv, path):
     try:
@@ -85,11 +98,20 @@ def test_auto_start_config_without_taskdir_safe(srv):
     assert ok, "config 应写入 tasks/<name>/config.json"
     # 原 bug：无 task_dir 时 run_with_config 写到 CWD（项目根）——必须不存在
     assert not (ROOT / "config.json").exists(), "config 不得写到项目根（CWD）"
-    # 停掉后台任务并清理
+    # 停掉后台任务并等待线程彻底结束；避免清理任务目录时后台线程仍写 .running.lock
     try:
         _post(srv, "/api/job/stop", {"job": jid})
     except Exception:
         pass
+    for _ in range(50):
+        try:
+            _, state = _get(srv, "/api/job?job=" + jid)
+            state = json.loads(state)
+            if state.get("status") != "running":
+                break
+        except Exception:
+            break
+        time.sleep(0.2)
     shutil.rmtree(td, ignore_errors=True)
 
 
@@ -126,3 +148,13 @@ def test_same_origin_post_allowed(srv):
             st_file.write_bytes(backup)
         else:
             st_file.unlink(missing_ok=True)
+
+
+def test_none_header_filtered():
+    """curl_cffi 对 None header 抛 TypeError → _sanitize_headers 必须过滤 None 值。"""
+    from universal_scraper.core import _sanitize_headers
+    h = _sanitize_headers({"Accept": "*/*", "X-None": None, "X-Caller": None, "X-Ok": "1", "UA": "t"})
+    assert h.get("X-Ok") == "1" and h.get("UA") == "t"
+    assert "X-None" not in h and "X-Caller" not in h
+    assert all(v is not None for v in h.values()), "仍有 None header"
+    assert _sanitize_headers(None) == {}

@@ -1,0 +1,105 @@
+{
+ "host": "163.com",
+ "learned_at": 1787496643.483454,
+ "from_description": "抓取网易公开课 open.163.com 心理学分类课程名称、来源、播放量，前 20 条",
+ "config": {
+  "start_urls": [
+   "https://www.163.com/"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 6,
+   "scroll_wait_ms": 1000,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "kaola.com",
+    "parser": "list"
+   },
+   {
+    "match": "contains",
+    "pattern": "/",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "json_paged",
+    "records_path": "data.list",
+    "strategy": "page_param",
+    "page_param": "pageNumber",
+    "page_size_param": "pageSize",
+    "page_size": 20,
+    "max_pages": 1,
+    "fields": {
+     "product_name": {
+      "from": "title"
+     },
+     "price": {
+      "from": "salePrice"
+     },
+     "tax": {
+      "from": "taxFee"
+     },
+     "rating": {
+      "from": "averageScore"
+     }
+    }
+   },
+   "default": {
+    "type": "json_paged",
+    "records_path": "data.list",
+    "strategy": "page_param",
+    "page_param": "pageNumber",
+    "page_size_param": "pageSize",
+    "page_size": 20,
+    "max_pages": 1,
+    "fields": {
+     "product_name": {
+      "from": "title"
+     },
+     "price": {
+      "from": "salePrice"
+     },
+     "tax": {
+      "from": "taxFee"
+     },
+     "rating": {
+      "from": "averageScore"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "product_name",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "price",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "product_name"
+   }
+  ],
+  "detail": {
+   "enabled": false
+  },
+  "queue": {
+   "max_depth": 3,
+   "max_requests": 100,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 1,
+   "max_retries": 3
+  }
+ }
+}

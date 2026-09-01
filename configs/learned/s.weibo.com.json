@@ -1,0 +1,94 @@
+{
+ "host": "s.weibo.com",
+ "learned_at": 1787412689.312278,
+ "from_description": "抓取微博热搜榜 s.weibo.com 前 10 条热搜的标题、热度",
+ "config": {
+  "start_urls": [
+   "https://s.weibo.com/top/summary"
+  ],
+  "source": {
+   "type": "browser",
+   "scroll_count": 4,
+   "scroll_wait_ms": 800,
+   "record_from": "capture_all",
+   "capture_all": true
+  },
+  "rules": [
+   {
+    "match": "contains",
+    "pattern": "/top/summary",
+    "parser": "list"
+   }
+  ],
+  "parsers": {
+   "list": {
+    "type": "html",
+    "row_css": "#pl_top_realtimehot table tbody tr",
+    "fields": {
+     "rank": {
+      "css": "xpath:normalize-space(.//td[contains(@class,'td-01')])"
+     },
+     "keyword": {
+      "css": "td.td-02 a:first-of-type::text"
+     },
+     "link": {
+      "css": "td.td-02 a:first-of-type::attr(href)"
+     },
+     "hot_value": {
+      "css": "td.td-02 span::text"
+     },
+     "tag": {
+      "css": "td.td-02 i::text"
+     }
+    }
+   },
+   "default": {
+    "type": "html",
+    "row_css": "#pl_top_realtimehot table tbody tr",
+    "fields": {
+     "rank": {
+      "css": "xpath:normalize-space(.//td[contains(@class,'td-01')])"
+     },
+     "keyword": {
+      "css": "td.td-02 a:first-of-type::text"
+     },
+     "link": {
+      "css": "td.td-02 a:first-of-type::attr(href)"
+     },
+     "hot_value": {
+      "css": "td.td-02 span::text"
+     },
+     "tag": {
+      "css": "td.td-02 i::text"
+     }
+    }
+   }
+  },
+  "pipelines": [
+   {
+    "type": "filter",
+    "field": "keyword",
+    "op": "non_empty"
+   },
+   {
+    "type": "filter",
+    "field": "hot_value",
+    "op": "non_empty"
+   },
+   {
+    "type": "dedup",
+    "key": "keyword"
+   }
+  ],
+  "detail": {},
+  "queue": {
+   "max_depth": 1,
+   "max_requests": 1,
+   "max_concurrency": 1
+  },
+  "anti_bot": {
+   "min_interval": 0.5,
+   "max_retries": 5
+  }
+ }
+}
