@@ -167,6 +167,7 @@ async function main() {
   const captchaDir = arg("captchaDir", null);
   const captchaTimeout = parseInt(arg("captchaTimeout", "300000"), 10);
   const maxPages = parseInt(arg("maxPages", "100"), 10);
+  const startPage = parseInt(arg("startPage", "1"), 10);
   const settle = parseInt(arg("settle", "1500"), 10);
 
   const spec = JSON.parse(fs.readFileSync(specFile, "utf-8"));
@@ -318,10 +319,11 @@ function centerCaptcha(page) {
     });
 
     // 网络捕获：拦截 SPA 自己发出的签名 API（不逆向签名）
-    const captures = spec.capture || [];
+    // capture 契约：数组=声明式捕获；true(布尔)=全捕获（配置常传布尔，绝不能迭代它）
+    const captures = Array.isArray(spec.capture) ? spec.capture : [];
     const capturedBy = {};
     // capture_all：把页面上所有 JSON 响应都存下来（不知道接口名也能事后挖数据）
-    const captureAll = !!spec.capture_all;
+    const captureAll = !!spec.capture_all || spec.capture === true;
     const capturedAll = [];
     page.on("response", async (res) => {
       const u = res.url();
@@ -641,7 +643,8 @@ function centerCaptcha(page) {
     }
 
     let pagesDone = 0;
-    for (let p = 1; p <= maxPages; p++) {
+    // startPage：定向分页（配深链 URL 使用，如列表第 1161 页）——页号从 startPage 计
+    for (let p = startPage; p <= maxPages; p++) {
       // 验证码/滑块处理
       if (captchaDir && (spec.captcha || spec.slider)) {
         const ok = await handleCaptcha(page, spec, captchaDir, captchaTimeout);

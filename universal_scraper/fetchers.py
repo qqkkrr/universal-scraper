@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from .core import HttpClient, log, die, smart_decode, update_cookie_jar, jar_cookie_header
+from .core import log, die, smart_decode, update_cookie_jar, jar_cookie_header
 from .antibot import solve_captcha_file, detect_block
 from .session import SessionPool
 from .selectors import jpath, css_text, xpath_text
@@ -237,14 +237,17 @@ class HttpFetcher(BaseFetcher):
                 if strat == "none":
                     break
                 if total is not None:
-                    fetched = page * limit if strat == "offset" else (page) * (len(recs) or 1)
                     if not recs or len(records) >= int(total):
                         break
                 elif not recs:
                     break
                 page += 1
             else:  # http_html
-                rows = self._extract_html_rows(text)
+                if self.source.get("embedded_json"):
+                    from .selectors import extract_embedded_json_rows
+                    rows = extract_embedded_json_rows(text, self.source["embedded_json"])
+                else:
+                    rows = self._extract_html_rows(text)
                 records.extend(rows)
                 log(f"  page {page}: +{len(rows)}（累计 {len(records)}）")
                 nxt = pagination.get("next_selector") or pagination.get("next_xpath")
@@ -267,6 +270,7 @@ class HttpFetcher(BaseFetcher):
             from .selectors import css_elements
             rows = css_elements(html, row_css or "tr")
         out = []
+        from .selectors import _lxml_html_tostring  # 函数内延迟导入（lxml 可选依赖）
         for el in rows:
             el_html = el if isinstance(el, str) else _lxml_html_tostring(el)
             row = {}
@@ -341,28 +345,39 @@ class BrowserScriptFetcher(BaseFetcher):
         env["NODE_PATH"] = NODE_PATH
         proc, errbuf = _spawn_bridge(cmd, env)
         assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if obj.get("type") == "captcha" and obj.get("imageFile"):
-                # 自动求解并写答案文件（ddddocr/2captcha/human）
-                res = solve_captcha_file(
-                    obj["imageFile"],
-                    self.anti,
-                    answer_file=str(obj["imageFile"]) + ".answer",
-                    seq=obj.get("seq", 0),
-                )
-                if res.get("error"):
-                    log(f"  验证码求解失败({res.get('strategy')}): {res.get('error')}", "WARN")
-            yield obj
-        rc, err = _wait_bridge(proc, errbuf)
-        if rc != 0 and not err:
-            die(f"浏览器桥退出码 {rc}")
+        _completed = False
+        try:
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") == "captcha" and obj.get("imageFile"):
+                    # 自动求解并写答案文件（ddddocr/2captcha/human）
+                    res = solve_captcha_file(
+                        obj["imageFile"],
+                        self.anti,
+                        answer_file=str(obj["imageFile"]) + ".answer",
+                        seq=obj.get("seq", 0),
+                    )
+                    if res.get("error"):
+                        log(f"  验证码求解失败({res.get('strategy')}): {res.get('error')}", "WARN")
+                yield obj
+            rc, err = _wait_bridge(proc, errbuf)
+            if rc != 0 and not err:
+                die(f"浏览器桥退出码 {rc}")
+            _completed = True
+        finally:
+            # 生成器被提前终止（消费端异常/die()）时回收桥子进程，防孤儿 node/Playwright
+            if not _completed and proc.poll() is None:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=10)
+                except Exception:
+                    pass
 
 
 class BrowserFetcher(BaseFetcher):
@@ -381,7 +396,6 @@ class BrowserFetcher(BaseFetcher):
 
     def fetch_list(self, pagination: Dict[str, Any]) -> List[Dict[str, Any]]:
         import tempfile
-        from .selectors import xpath_elements, css_elements, xpath_text, css_text, css_attr
 
         spec = {
             "url": self.source["url"],
@@ -390,7 +404,11 @@ class BrowserFetcher(BaseFetcher):
             "pagination": self.source.get("pagination", {"type": "none"}),
             "captcha": self.source.get("captcha"),
             "slider": self.source.get("slider"),
-            "capture": self.source.get("capture"),
+            # capture 契约：布尔 true=全捕获（翻译成桥的 capture_all）；列表=声明式捕获。
+            # 绝不能把布尔原样传给 spec.capture——桥会迭代它导致 TypeError 崩溃。
+            "capture": (self.source.get("capture")
+                        if isinstance(self.source.get("capture"), list) else None),
+            "capture_all": self.source.get("capture") is True,
             "login": self.source.get("login"),
             "verify": self.source.get("verify"),
         }
@@ -409,6 +427,7 @@ class BrowserFetcher(BaseFetcher):
 
             cmd = [NODE, str(self.bridge), "--spec", str(spec_file), "--out", str(out_dir),
                    "--maxPages", str(max_pages), "--settle", str(settle),
+                   "--startPage", str(int(pagination.get("start", 1))),
                    "--captchaDir", str(cap_dir),
                    "--storageState", storage_state,
                    "--scrollCount", str(self.source.get("scroll_count", 0)),
@@ -444,7 +463,11 @@ class BrowserFetcher(BaseFetcher):
                                        seq=obj.get("seq", 0))
                 elif t == "page":
                     html = Path(obj["file"]).read_text(encoding="utf-8", errors="replace")
-                    rows = self._extract(html)
+                    if self.source.get("embedded_json"):
+                        from .selectors import extract_embedded_json_rows
+                        rows = extract_embedded_json_rows(html, self.source["embedded_json"])
+                    else:
+                        rows = self._extract(html)
                     records.extend(rows)
                     log(f"  page {obj.get('page')}: +{len(rows)}（累计 {len(records)}）")
                     # 渲染页落盘到任务目录：供失败轮内 LLM 直接抽取/选择器精修用
@@ -474,7 +497,10 @@ class BrowserFetcher(BaseFetcher):
                     proc.terminate(); die(f"浏览器错误: {obj.get('message')}")
             rc, err = _wait_bridge(proc, errbuf)
             if rc != 0:
-                die(f"浏览器桥退出码 {rc}: {err[-400:]}")
+                # 报错保留首行（真正的异常类型常在头部）+ 尾部，避免截断导致误诊
+                _lines = [l for l in err.strip().splitlines() if l.strip()]
+                _head = _lines[0][:220] if _lines else ""
+                die(f"浏览器桥退出码 {rc}: 首行[{_head}] 尾部[{err[-300:]}]")
             # 记录来源 = 网络捕获（SPA 签名接口，如小红书评论）
             if self.source.get("record_from") == "capture":
                 records = self._records_from_capture(out_dir)
@@ -504,6 +530,7 @@ class BrowserFetcher(BaseFetcher):
             els = css_elements(html, s.get("row_css") or "body")
         out = []
         for el in els:
+            from .selectors import _lxml_html_tostring
             el_html = el if isinstance(el, str) else (_lxml_html_tostring(el))
             row = {}
             for name, fspec in (s.get("fields", {}) or {}).items():
@@ -570,11 +597,3 @@ class BrowserFetcher(BaseFetcher):
         log(f"捕获记录: {len(recs)} 条")
         return recs
 
-
-
-def _lxml_html_tostring(el) -> str:
-    try:
-        from lxml import html as _h
-        return _h.tostring(el, encoding="unicode")
-    except Exception:
-        return str(el)

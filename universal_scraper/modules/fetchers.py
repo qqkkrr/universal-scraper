@@ -7,8 +7,9 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
 
+from ..cookies import _norm_domain
 from ..protocols import BaseFetcher, Request, Response
 from ..session import SessionPool
 from ..antibot import detect_block
@@ -46,6 +47,74 @@ def _wait_bridge(proc, errbuf, timeout: int = 1800):
     return rc, "".join(errbuf)
 
 
+def parse_cookie_header(s: str):
+    """'a=1; b=2' -> [('a','1'), ('b','2')]（无等号/空片段忽略）。"""
+    pairs = []
+    for part in (s or "").split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, _, v = part.partition("=")
+        if k.strip():
+            pairs.append((k.strip(), v.strip()))
+    return pairs
+
+
+def seed_archive_into_jar(jar, archive_domain: str, pairs) -> None:
+    """把已存档登录态按名播种进 CookieJar：
+    - 域限定为 .<archive_domain>（自身+子域才携带，绝不发给第三方域）
+    - 之后交给 RFC6265 自然合并：服务端 Set-Cookie 同名覆盖、异名共存，
+      长任务中途不会因首个 Set-Cookie 而把登录态整串顶掉。"""
+    from http.cookiejar import Cookie
+    dom = (archive_domain or "").lower().lstrip(".")
+    if not dom or not pairs:
+        return
+    for item in pairs:
+        name, value = item[0], item[1]
+        secure = bool(item[2]) if len(item) > 2 else False
+        jar.set_cookie(Cookie(
+            version=0, name=name, value=value, port=None, port_specified=False,
+            domain="." + dom, domain_specified=True, domain_initial_dot=True,
+            path="/", path_specified=True, secure=secure, expires=None,
+            discard=True, comment=None, comment_url=None, rest={}, rfc2109=False))
+
+
+def _reconcile_host_only_overrides(jar, archive_domain: str, names, req_host: str = "") -> None:
+    """服务端以 Host-Only 形态（无 Domain 属性）重发同名 Cookie 时，其 jar 键
+    与播种的点域版本不同、不会互相覆盖——RFC6265§5.4 会把两个同名都发出去、
+    多数服务端取第一个（陈旧的播种值）。此时删掉播种版，让服务端新版成为唯一权威。
+    req_host：当前请求主机——Host-Only 可能落在 www./子域形态的主机上，同样算权威。"""
+    dom = (archive_domain or "").lower().lstrip(".")
+    req_host = (req_host or "").lower()
+    if not dom or not names:
+        return
+    names = set(names)
+    try:
+        host_only = {}   # 服务端权威版（Host-Only：域==归档主域，或==当前请求主机）
+        dotted = {}      # 我们播种的旧版（点域）
+        for cookie in list(jar):
+            if cookie.name not in names:
+                continue
+            raw = cookie.domain.lower()
+            dd = raw.lstrip(".")
+            is_dotted = raw.startswith(".")
+            if is_dotted and dd == dom:
+                dotted[cookie.name] = cookie
+            elif not is_dotted and (dd == dom or (req_host and dd == req_host)):
+                # 只认归档主域/当前请求主机上的 Host-Only；祖先域 Host-Only 不会
+                # 随本请求发送，不能当权威（否则会误删仍会被发出的播种版）
+                host_only[cookie.name] = cookie
+        # 仅当存在 Host-Only 权威版时才删点域播种版；没有则播种版继续生效
+        for name, ck in dotted.items():
+            if name in host_only:
+                try:
+                    jar.clear(ck.domain, ck.path, ck.name)
+                except KeyError:
+                    pass
+    except Exception:
+        pass
+
+
 class HttpFetcher(BaseFetcher):
     """HTTP 取数器：curl_cffi（TLS 指纹伪装）→ requests → urllib 自动选后端；
     支持代理池轮换（anti._proxy_pool）与 429 Retry-After 限流重试。"""
@@ -54,8 +123,43 @@ class HttpFetcher(BaseFetcher):
     def __init__(self, config, task_vars, anti):
         super().__init__(config, task_vars, anti)
         self._cache: dict = {} if config.get("cache") else None
+        # 🍪 自动会话（HTTP 路线）：目标域名有已存档登录态（用户从调试 Chrome
+        #    导入过/任务存过）→ 播种进会话 jar（域名限定+按名合并），
+        #    "登录一次以后全自动"
+        self._archive_domain = str(anti.get("cookie_domain") or "")
+        self._archive_pairs = []
+        self._archive_logged = False
+        if self._archive_domain:
+            try:
+                # 结构化读取：保留 secure 标记（防 Secure 令牌被明文重放到 http://），
+                # 且按 cookie 自身域过滤（与归档域不同树的第三方会话不播种）
+                from ..cookies import load_cookies
+                _dom = self._archive_domain.lstrip(".")
+
+                def _related(d):
+                    d = str(d or "").lower().lstrip(".")
+                    return bool(d) and (d == _dom or _dom.endswith("." + d)
+                                        or d.endswith("." + _dom))
+
+                rows = [c for c in (load_cookies(self._archive_domain) or [])
+                        if c.get("name") and _related(c.get("domain"))]
+                # 同名多作用域去重：归档主域条目排最后（播种时后写者胜出），
+                # 保证主域权威初值胜出且不受存档文件行序影响
+                rows.sort(key=lambda c: 0 if str(c.get("domain", "")).lower().lstrip(".")
+                          in (_dom, "www." + _dom) else 1, reverse=True)
+                # rows 为空（无同树条目）时不得回退到未过滤的 cookie_header——
+                # 那会把刚被判定为不同树的第三方会话又播种回目标域
+                self._archive_pairs = [(str(c["name"]), str(c["value"]),
+                                        bool(c.get("secure"))) for c in rows]
+            except Exception as _e:
+                self._archive_pairs = []
+                log(f"⚠️ 已存档登录态装载失败（domain={self._archive_domain}）：{_e}，本次将以未登录状态请求", "WARN")
         from ..core import make_http_client
         self.client = make_http_client(anti)
+        # Autothrottle 基准速率必须在创建后立即固化——懒初始化会在"首个请求
+        # 就被拦截"的时序下把已降速的值当基准，导致渐进恢复永久失效
+        self.anti.setdefault("base_min_interval",
+                             float(getattr(self.client, "min_interval", 1.0) or 1.0))
         self.proxy_pool = anti.get("_proxy_pool")
         if self.proxy_pool is None and anti.get("proxies"):
             from ..proxy import ProxyPool
@@ -82,6 +186,47 @@ class HttpFetcher(BaseFetcher):
                     self.client.max_retries = 1
             except Exception:
                 pass
+
+    def _autothrottle(self, kind: str) -> None:
+        """拦截自适应降速（对标 Scrapy AUTOTHROTTLE）：命中风控/限流时请求间隔
+        翻倍（2s 起，封顶 8s），连续命中继续放缓；成功响应在 _maybe_speedup 恢复。"""
+        try:
+            # 拦截打断成功连击：恢复必须从最近一次拦截之后重新数满（封顶态同样要清）
+            self._ok_streak = 0
+            cur = float(getattr(self.client, "min_interval", 0.0) or 0.0)
+            nxt = min(max(cur * 2.0, 2.0), 8.0)
+            if nxt <= cur + 1e-9:
+                return
+            self.client.min_interval = nxt
+            self.anti["min_interval"] = nxt
+            msg = f"🐢 检测到拦截[{kind}]，自动降速：请求间隔 → {nxt:.1f}s（连续命中会继续放缓）"
+            _cb = self.anti.get("_log_cb")
+            if _cb:
+                _cb(msg)
+            else:
+                log("  " + msg, "WARN")
+        except Exception:
+            pass
+
+    def _maybe_speedup(self) -> None:
+        """连续 3 次成功且间隔已被降速过 → 恢复一半（不立即回原速，防抖）。"""
+        try:
+            self._ok_streak = getattr(self, "_ok_streak", 0) + 1
+            cur = float(getattr(self.client, "min_interval", 0.0) or 0.0)
+            base = float(self.anti.get("base_min_interval") or 0.0)
+            if base <= 0:
+                self.anti["base_min_interval"] = base = cur if cur > 0 else 0.2
+            if self._ok_streak >= 3 and cur > base + 1e-9:
+                nxt = max((cur + base) / 2.0, base)
+                self.client.min_interval = nxt
+                self.anti["min_interval"] = nxt
+                self._ok_streak = 0
+                msg = f"🐇 连续成功，逐步恢复速度：请求间隔 → {nxt:.1f}s"
+                _cb = self.anti.get("_log_cb")
+                if _cb:
+                    _cb(msg)
+        except Exception:
+            pass
 
     def _pick_proxy(self) -> str:
         """从代理池取一个可用代理；没有则直连（None）。"""
@@ -124,8 +269,23 @@ class HttpFetcher(BaseFetcher):
         # 会话池：取当前域会话（含 Cookie jar/UA/代理），封禁自动轮换
         sess = self.sessions.acquire(url)
         self._cur_session = sess
+        if self._archive_pairs and not sess.archive_seeded:
+            seed_archive_into_jar(sess.jar, self._archive_domain, self._archive_pairs)
+            sess.archive_seeded = True  # 会话对象自身标记：轮换出的新会话会重新播种
+            if not self._archive_logged:
+                self._archive_logged = True
+                _cb = self.anti.get("_log_cb")
+                if _cb:
+                    _cb(f"🍪 已把 {self._archive_domain} 的已保存登录态注入会话"
+                        "（服务端下发的新 Cookie 会自动合并，不会顶掉登录态）")
         headers = self._sign_headers(req)
         headers.setdefault("User-Agent", sess.ua)
+        if self._archive_pairs:
+            from urllib.parse import urlparse as _up
+            _reconcile_host_only_overrides(
+                sess.jar, self._archive_domain,
+                [n for n, _ in self._archive_pairs],
+                req_host=(_up(url).hostname or "").lower())
         ck = jar_cookie_header(sess.jar, url)
         if ck:
             headers.setdefault("Cookie", ck)
@@ -153,6 +313,7 @@ class HttpFetcher(BaseFetcher):
         if blocked:
             if self.anti.get("_block_stats") is not None:
                 self.anti["_block_stats"][bd["kind"]] = self.anti["_block_stats"].get(bd["kind"], 0) + 1
+            self._autothrottle(bd["kind"])
             from ..protocols import RateLimitedError
             status = res.get("status", 0)
             # 429 必须带上服务端 Retry-After（秒或 HTTP-date），引擎才能按它精确调度
@@ -182,6 +343,7 @@ class HttpFetcher(BaseFetcher):
         resp = Response(request=req, status=res.get("status", 0),
                         body=body, text=text,
                         json=res.get("json"), url=res.get("url", req.url))
+        self._maybe_speedup()
         if self._cache is not None and req.method == "GET" and ok:
             # 内存缓存上限（防长任务内存爆炸）：超 2000 条丢最旧
             if len(self._cache) > 2000:
@@ -201,7 +363,7 @@ class HttpFetcher(BaseFetcher):
             return req.url
         parts = urllib.parse.urlsplit(req.url)
         # 同名参数替换（分页时把旧 page 换成新 page），避免 ?page=1&page=2
-        qdict = dict(urllib.parse.parse_qsl(parts.query))
+        qdict = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))  # 空值参数保留
         for k, v in params.items():
             qdict[k] = str(v)
         return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path,
@@ -310,7 +472,7 @@ class BridgeFetcher(BaseFetcher):
 
     def fetch_all(self) -> list:
         """调用桥，返回全部原始记录。"""
-        import json as _json, subprocess, re as _re
+        import json as _json, re as _re
         bridge_path = Path(self.bridge)
         if not bridge_path.is_absolute():
             cands = []
@@ -334,6 +496,7 @@ class BridgeFetcher(BaseFetcher):
                 cmd += [f"--{k}", str(v)]
         proc, errbuf = _spawn_bridge(cmd, {**os.environ, "NODE_PATH": _NODE_PATH})
         records = []
+        bad_lines = 0
         assert proc.stdout is not None
         for line in proc.stdout:
             line = line.strip()
@@ -342,6 +505,7 @@ class BridgeFetcher(BaseFetcher):
             try:
                 obj = _json.loads(line)
             except Exception:
+                bad_lines += 1
                 continue
             t = obj.get("type")
             if t == "page":
@@ -354,6 +518,8 @@ class BridgeFetcher(BaseFetcher):
                 proc.terminate()
                 raise RuntimeError(obj.get("message"))
         rc, err = _wait_bridge(proc, errbuf)
+        if bad_lines:
+            log(f"⚠️ 桥输出含 {bad_lines} 行无法解析，数据可能不完整")
         if rc != 0:
             raise RuntimeError(f"桥退出码 {rc}: {err[-300:]}")
         return records
@@ -377,13 +543,14 @@ class BrowserFetcher(BaseFetcher):
         self.cookie_domain = anti.get("cookie_domain") or ""
         if self.cookie_domain:
             try:
-                from .cookies import load_storage_state
+                from ..cookies import load_storage_state
+                import json as _json
                 _ss = load_storage_state(self.cookie_domain)
                 if _ss:
                     (self.session_dir / "session.json").write_text(
-                        json.dumps(_ss, ensure_ascii=False), encoding="utf-8")
-            except Exception:
-                pass
+                        _json.dumps(_ss, ensure_ascii=False), encoding="utf-8")
+            except Exception as _e:
+                self._notify(f"⚠️ 已存档登录态(storageState)装载/写入失败（domain={self.cookie_domain}）：{_e}，浏览器可能以未登录状态启动")
         self._pool = None
         self._pool_enabled = config.get("pool", True)
         self._req_id = 0
@@ -421,28 +588,30 @@ class BrowserFetcher(BaseFetcher):
     def _ensure_pool(self):
         if not self._pool_enabled:
             return None
-        # 池进程已死 → 清掉，重新拉起（自愈）
-        if self._pool is not None and self._pool.poll() is not None:
-            self._pool = None
-        if self._pool is not None:
+        # 双检锁：并发首抓/自愈重启时只允许一个线程拉起池进程（否则前者进程泄漏）
+        with self._lock:
+            # 池进程已死 → 清掉，重新拉起（自愈）
+            if self._pool is not None and self._pool.poll() is not None:
+                self._pool = None
+            if self._pool is not None:
+                return self._pool
+            import subprocess, threading
+            env = {**os.environ, "NODE_PATH": _NODE_PATH}
+            ss = self.session_dir / "session.json"
+            if ss.exists():
+                env["US_STORAGE_STATE"] = str(ss)
+            if self._proxy and not self._single_proxy_mode:
+                env["US_PROXY"] = self._proxy
+            if self._task_dir:
+                env["US_STOP_FILE"] = str(self._task_dir / ".stop")
+            self._pool = subprocess.Popen(
+                [_NODE_BIN, str(self.scripts_dir / "browser_pool.cjs")],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, encoding="utf-8", env=env,
+            )
+            self._reader = threading.Thread(target=self._read_pool, daemon=True)
+            self._reader.start()
             return self._pool
-        import subprocess, threading
-        env = {**os.environ, "NODE_PATH": _NODE_PATH}
-        ss = self.session_dir / "session.json"
-        if ss.exists():
-            env["US_STORAGE_STATE"] = str(ss)
-        if self._proxy and not self._single_proxy_mode:
-            env["US_PROXY"] = self._proxy
-        if self._task_dir:
-            env["US_STOP_FILE"] = str(self._task_dir / ".stop")
-        self._pool = subprocess.Popen(
-            [_NODE_BIN, str(self.scripts_dir / "browser_pool.cjs")],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            text=True, encoding="utf-8", env=env,
-        )
-        self._reader = threading.Thread(target=self._read_pool, daemon=True)
-        self._reader.start()
-        return self._pool
 
     def _read_pool(self):
         import json as _json
@@ -457,11 +626,16 @@ class BrowserFetcher(BaseFetcher):
                 obj = _json.loads(line)
             except Exception:
                 continue
-            with self._cond:
-                rid = obj.get("id")
-                if rid in self._pending:
-                    self._pending[rid] = obj
-                    self._cond.notify_all()
+            try:
+                with self._cond:
+                    rid = obj.get("id")
+                    if rid in self._pending:
+                        self._pending[rid] = obj
+                        self._cond.notify_all()
+            except Exception as e:
+                # reader 线程绝不能死：一行处理失败即永久 120s 超时且不自愈
+                from ..core import log as _corelog
+                _corelog(f"⚠️ 池输出行处理失败({type(e).__name__}): {str(e)[:60]}", "WARN")
         # EOF：池进程退出（崩溃/被杀）→ 挂起请求立即报错，下一次 fetch 自愈重启。
         # 仅当 self._pool 仍是本 reader 的池时才清理，避免误清新拉起的池。
         with self._cond:
@@ -498,7 +672,10 @@ class BrowserFetcher(BaseFetcher):
             "login": self.config.get("login"),
             "verify": self.config.get("verify"),
             "fingerprint": self.config.get("fingerprint"),
-            "capture": self.config.get("capture"),
+            # capture 契约：布尔 true=全捕获（翻译成桥的 capture_all）；列表=声明式捕获
+            "capture": (self.config.get("capture")
+                        if isinstance(self.config.get("capture"), list) else None),
+            "capture_all": self.config.get("capture") is True,
         }
         wait_sel = self.config.get("wait_selector")
         wait_to = int(self.config.get("wait_timeout") or 30000)
@@ -534,6 +711,19 @@ class BrowserFetcher(BaseFetcher):
                    "--scrollCount", str(self.config.get("scroll_count", 0)),
                    "--scrollWait", str(self.config.get("scroll_wait_ms", 2000)),
                    "--debugDir", str(Path(self.scripts_dir).parent / "outputs" / ".debug")]
+            # CDP 附着：调试 Chrome(9222) 在线时附着其真实会话（复用用户登录态）
+            _cdp = self.config.get("cdp") or ""
+            if not _cdp:
+                try:
+                    from ..agent import debug_chrome_alive
+                    if debug_chrome_alive():
+                        _cdp = "http://127.0.0.1:9222"
+                        (self.anti.get("_log_cb") or log)(
+                            "🖥️ 检测到调试 Chrome 在线，附着真实浏览器（复用登录态）…")
+                except Exception:
+                    pass
+            if _cdp:
+                cmd += ["--cdp", _cdp]
             if self._task_dir:
                 cmd += ["--stopFile", str(self._task_dir / ".stop")]
             env = {**os.environ, "NODE_PATH": _NODE_PATH}
@@ -541,6 +731,7 @@ class BrowserFetcher(BaseFetcher):
             html = ""
             final_url = req.url
             finished = False
+            bad_lines = 0
             for line in proc.stdout:
                 line = line.strip()
                 if not line:
@@ -548,6 +739,7 @@ class BrowserFetcher(BaseFetcher):
                 try:
                     obj = _json.loads(line)
                 except Exception:
+                    bad_lines += 1
                     continue
                 t = obj.get("type")
                 msg = obj.get("message") or ""
@@ -583,6 +775,8 @@ class BrowserFetcher(BaseFetcher):
                     proc.kill()
                 except Exception:
                     pass
+            if bad_lines:
+                log(f"⚠️ 桥输出含 {bad_lines} 行无法解析，数据可能不完整")
             try:
                 if not html:
                     files = sorted(out_dir.glob("*.html"))
@@ -602,11 +796,12 @@ class BrowserFetcher(BaseFetcher):
                         proc.kill()
                 except Exception:
                     pass
-        return Response(request=req, status=200, body=html.encode("utf-8"),
+        # 空页面不伪造 200：status=0 走引擎错误统计路径（否则空壳被当成功，问题被掩盖）
+        return Response(request=req, status=200 if html else 0, body=html.encode("utf-8"),
                         text=html, json=None, url=final_url)
 
     def _fetch_pool(self, pool, req: Request) -> Response:
-        import json as _json, threading
+        import json as _json
         if pool.poll() is not None:
             pool = self._ensure_pool()
             if pool is None:
@@ -617,6 +812,7 @@ class BrowserFetcher(BaseFetcher):
             self._pending[rid] = None
             payload = {"id": rid, "url": req.url,
                        "scroll": self.config.get("scroll_count", 0),
+                       "scrollWait": self.config.get("scroll_wait_ms", 1500),
                        "actions": self.config.get("actions", []),
                        "stealth": bool(self.config.get("stealth", False)),
                        "remove_overlays": bool(self.config.get("remove_overlays", False))}
@@ -627,15 +823,23 @@ class BrowserFetcher(BaseFetcher):
             ss = self.session_dir / "session.json"
             if ss.exists():
                 payload["storageState"] = str(ss)
+            # 写入移出临界区：stdin 管道写满而池进程停读时，持锁阻塞会挂死所有 worker
+            # （登记已在锁内完成，reader 线程按 rid 回填结果，写晚于登记是安全的）
+        try:
             pool.stdin.write(_json.dumps(payload, ensure_ascii=False) + "\n")
             pool.stdin.flush()
+        except Exception:
+            # 池进程已死等写入失败：撤销登记，防 _pending 无等待者条目慢性泄漏
+            self._pending.pop(rid, None)
+            raise
         # 等待结果（带超时）
         deadline = time.time() + 120
         with self._cond:
             while self._pending.get(rid) is None:
                 if self._stopped():
-                    with self._lock:
-                        self._pending.pop(rid, None)
+                    # 注意：此处已持有 self._lock（Condition 包装同一把锁，非重入），
+                    # 严禁再 with self._lock 二次获取（会死锁），直接操作即可
+                    self._pending.pop(rid, None)
                     try:
                         if self._pool is not None:
                             self._pool.terminate()
@@ -643,8 +847,7 @@ class BrowserFetcher(BaseFetcher):
                         pass
                     raise KeyboardInterrupt("任务已停止（WebUI 停止信号，浏览器池已终止）")
                 if time.time() > deadline:
-                    with self._lock:
-                        self._pending.pop(rid, None)
+                    self._pending.pop(rid, None)
                     raise TimeoutError(f"浏览器池渲染超时: {req.url}")
                 self._cond.wait(1.0)
             obj = self._pending.pop(rid)
@@ -654,13 +857,16 @@ class BrowserFetcher(BaseFetcher):
         # 🍪 自动存档会话 cookie（含 cf_clearance/登录态），下次同域名任务自动复用
         _cks = obj.get("cookies")
         if _cks and (self.cookie_domain or req.url):
+            _d = ""
             try:
-                from .cookies import save_cookies
-                _d = self.cookie_domain or (req.url or "").split("//")[-1].split("/")[0].lower().lstrip("www.")
+                from ..cookies import save_cookies
+                # 只回存任务目标域的会话：跟链到第三方域的 cookie 不进本地存档
+                _d = self.cookie_domain or _norm_domain((req.url or "").split("//")[-1].split("/")[0])
                 save_cookies(_d, _cks)
-            except Exception:
-                pass
-        return Response(request=req, status=200, body=html.encode("utf-8"),
+            except Exception as _e:
+                self._notify(f"⚠️ 会话 cookie 回存失败（domain={_d or '未知'}）：{_e}，下次同域任务可能需要重新登录")
+        # 空页面不伪造 200：status=0 走引擎错误统计路径（否则空壳被当成功，问题被掩盖）
+        return Response(request=req, status=200 if html else 0, body=html.encode("utf-8"),
                         text=html, json=None, url=obj.get("url") or req.url)
 
     def _fetch_single(self, req: Request) -> Response:
@@ -701,7 +907,8 @@ class BrowserFetcher(BaseFetcher):
         if obj.get("type") == "stopped" or self._stopped():
             raise KeyboardInterrupt("任务已停止（WebUI 停止信号）")
         html = Path(out_file).read_text(encoding="utf-8", errors="replace")
-        return Response(request=req, status=200, body=html.encode("utf-8"),
+        # 空页面不伪造 200：status=0 走引擎错误统计路径（否则空壳被当成功，问题被掩盖）
+        return Response(request=req, status=200 if html else 0, body=html.encode("utf-8"),
                         text=html, json=None, url=obj.get("url") or req.url)
 
     def close(self) -> None:
@@ -730,8 +937,6 @@ class BrowserFetcher(BaseFetcher):
             self._pool = None
 
 
-import os as _os_environ  # noqa: E402
-import threading  # noqa: E402
 import time  # noqa: E402
 import os as _os_mod  # noqa: E402
 from ..runtime import resolve_node, resolve_node_path as _resolve_node_path

@@ -8,11 +8,12 @@
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional
+from typing import Any, List
 
 try:
     from lxml import html as _lxml_html
-    from lxml.cssselect import CSSSelector as _CSSSelector
+    # 可用性探测：cssselect 是 lxml 的可选扩展（缺失则 HAS_LXML=False 走正则回退）
+    _CSSSelector = __import__("lxml.cssselect", fromlist=["CSSSelector"]).CSSSelector
     HAS_LXML = True
 except Exception:  # pragma: no cover
     HAS_LXML = False
@@ -262,3 +263,104 @@ def _lxml_html_tostring(el) -> str:
         return _h.tostring(el, encoding="unicode")
     except Exception:
         return str(el)
+
+
+def extract_embedded_json_rows(html: str, spec: Any) -> List[Dict[str, Any]]:
+    """从页面 <script> 内嵌 JSON 提取记录行（SSR 常见：window.X = [...]、
+    module 作用域 const X = [...]、裸 X = [...] 都认）。
+
+    spec: 变量引用字符串，如 "window.article_list" / "article_list"；
+          或 {"var": "window.article_list", "path": "list"}（path 为解析后下钻的点路径，
+          数组下标用数字段）。
+    只解析 JSON 兼容字面量（容忍尾逗号）；单引号/无引号键等非标 JS 不支持。
+    找不到变量或解析失败一律返回 []，由上层按 0 条走诊断，不假成功。
+    """
+    import json as _json
+
+    if isinstance(spec, dict):
+        ref = str(spec.get("var") or "")
+        drill = str(spec.get("path") or "")
+    else:
+        ref, drill = str(spec or ""), ""
+    if not ref:
+        return []
+    name = ref.split(".")[-1].strip()
+    if not name:
+        return []
+
+    val = None
+    # 三种赋值形态按序尝试；每种形态遍历全部出现位置，直到有一处成功解析
+    pats = (
+        rf"window\.{re.escape(name)}\s*(?<![=!<>])=(?!=)\s*",
+        rf"(?:var|let|const)\s+{re.escape(name)}\s*(?<![=!<>])=(?!=)\s*",
+        rf"(?<![\w$.]){re.escape(name)}\s*(?<![=!<>])=(?!=)\s*",
+    )
+    for pat in pats:
+        for m in re.finditer(pat, html):
+            val = _balanced_json(html, m.end(), _json)
+            if val is not None:
+                break
+        if val is not None:
+            break
+    if val is None:
+        return []
+
+    if drill:
+        for part in drill.split("."):
+            if isinstance(val, dict):
+                val = val.get(part)
+            elif isinstance(val, list):
+                try:
+                    val = val[int(part)]
+                except (ValueError, IndexError):
+                    return []
+            else:
+                return []
+            if val is None:
+                return []
+    if isinstance(val, dict):
+        val = [val]
+    if not isinstance(val, list):
+        return []
+    return [r for r in val if isinstance(r, dict)]
+
+
+def _balanced_json(s: str, start: int, json_mod: Any) -> Any:
+    """从 start 起跳过空白后必须出现 [ 或 {，用括号配平截出字面量并解析。
+    字符串内的引号/转义/括号不影响配平。解析失败（含尾逗号容忍一次）返回 None。"""
+    n = len(s)
+    i = start
+    while i < n and s[i] in " \t\r\n":
+        i += 1
+    if i >= n or s[i] not in "[{":
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for j in range(i, n):
+        c = s[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c in "[{":
+            depth += 1
+        elif c in "]}":
+            depth -= 1
+            if depth == 0:
+                literal = s[i:j + 1]
+                try:
+                    return json_mod.loads(literal)
+                except Exception:
+                    pass
+                try:
+                    return json_mod.loads(re.sub(r",\s*([}\]])", r"\1", literal))
+                except Exception:
+                    return None
+    return None
