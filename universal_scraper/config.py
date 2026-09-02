@@ -133,6 +133,12 @@ def collect_warnings(cfg: Dict[str, Any]) -> "List[str]":
         if pt in V3_ONLY_STEPS:
             warns.append(f"pipeline[{i}] 类型 '{pt}' 仅 v3 任务包执行器实现，"
                          "run --config 会跳过（v2 可用: transform/template 等，见 contract.PIPELINE_STEPS）。")
+    # 猎聘战例：capture 声明缺 records_path 会把整个响应体当一条记录（导出全空）
+    if stype == "browser" and src.get("record_from") == "capture" and isinstance(src.get("capture"), list):
+        for j, cap in enumerate(src["capture"]):
+            if isinstance(cap, dict) and not cap.get("records_path"):
+                warns.append(f"source.capture[{j}] 缺 records_path——会把整个响应体当一条记录"
+                             "（导出全空）。请声明记录数组所在路径，如 \"data.list\"")
     return warns
 
 

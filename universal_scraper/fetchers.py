@@ -613,6 +613,11 @@ class BrowserFetcher(BaseFetcher):
                 obj = item.get("json") if isinstance(item, dict) and "json" in item else item
                 rows = jpath(obj, rp) if rp else obj
                 if not isinstance(rows, list):
+                    if rows is not None:
+                        # 猎聘战例：records_path 拼错时把整个响应体当一条记录、导出全空——必须可见
+                        log(f"  ⚠️ capture[{cap.get('name')}] 未命中 records_path='{rp}'"
+                            f"（响应顶层键: {list(obj)[:8] if isinstance(obj, dict) else type(obj).__name__}），"
+                            "已按整条响应记录")
                     rows = [rows]
                 for row in rows:
                     if isinstance(row, dict):

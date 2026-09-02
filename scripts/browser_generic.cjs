@@ -655,13 +655,23 @@ function centerCaptcha(page) {
       const file = path.join(outDir, `page_${p}.html`);
       fs.writeFileSync(file, html);
       out({ type: "page", page: p, file });
+      if (html.length < 300) {
+        out({ type: "diag", message: `页面 DOM 仅 ${html.length}B——evaluate/上下文可能异常`
+            + "（网络捕获不受影响；此类站改用 url 深链翻页可绕开 DOM）" });
+      }
       pagesDone = p;
 
       // 翻页
       const pg = spec.pagination || { type: "none" };
       if (pg.type === "none") break;
       if (pg.stop_condition) {
-        try { if (await page.evaluate(pg.stop_condition)) break; } catch (e) {}
+        try {
+          const sc = await page.evaluate(pg.stop_condition);
+          out({ type: "diag", message: `stop_condition 结果: ${String(sc).slice(0, 80)}` });
+          if (sc) break;
+        } catch (e) {
+          out({ type: "diag", message: `stop_condition 执行失败: ${String(e.message).slice(0, 120)}` });
+        }
       }
       let changed = false;
       if (pg.type === "click") {
@@ -674,7 +684,18 @@ function centerCaptcha(page) {
         changed = after !== before;
         if (!changed && pg.max_clicks) { let c = 0; while (!changed && c < pg.max_clicks) { await page.locator(sel).first().click(); await sleep(pg.wait_ms || 1800); c++; changed = (await page.evaluate(() => document.documentElement.outerHTML.length)) !== before; } }
       } else if (pg.type === "js") {
-        await page.evaluate(pg.js);
+        const ret = await page.evaluate(pg.js);
+        out({ type: "diag", message: `js 翻页返回: ${String(ret).slice(0, 160) || "(空——检查选择器)"}` });
+        await sleep(pg.wait_ms || 1800);
+        changed = true;
+      } else if (pg.type === "url") {
+        // URL 深链翻页（猎聘/Next.js 类 SPA 最稳）：template 里 {page} 占位，绕开 DOM 交互
+        const nxt = String(pg.template || "").replace("{page}", String(p + 1));
+        if (!nxt || nxt === String(pg.template)) {
+          out({ type: "error", message: "url 翻页需要 template 且含 {page} 占位" });
+          process.exit(1);
+        }
+        await page.goto(nxt, { waitUntil: pg.wait_until || "domcontentloaded", timeout: pg.timeout_ms || 30000 });
         await sleep(pg.wait_ms || 1800);
         changed = true;
       }

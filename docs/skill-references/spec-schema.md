@@ -99,6 +99,17 @@ URL 里可以用 `vars` 定义的变量（如 `?q={{keyword}}`）；**页码不�
 - `scroll_count`/`scroll_wait_ms`：滚动加载型列表。
 - `capture` + `record_from`: `"capture"`（按声明模式）或 `"capture_all"`（录下全部 JSON
   响应，每条记录 `{_api_url, data}`，事后由你挑字段）——数据藏在接口里时用。
+  声明式模式的每项**必须有 `records_path`**（缺失会把整个响应体当一条记录，
+  validate 会警告、运行时会打印响应顶层键）：
+
+  ```json
+  "capture": [{"name": "jobs", "url_pattern": "pc-search-job", "records_path": "data.data.jobCardList"}]
+  ```
+
+  捕获文件（capture_all.json / last_page.html）自动保留在输出目录，不焚毁。
+  遇 DOM evaluate 失效的站（page_N.html 仅几十字节、捕获却完好），改用
+  **URL 深链翻页**绕开 DOM：`source.pagination` 用
+  `{"type": "url", "template": "https://…currentPage={page}", "wait_ms": 2000}`。
 - `headless: false` + 人工关卡：验证码/滑块由用户手动过，`login_timeout_ms` 内等他完成。
 
 **browser_script** — 专用桥接脚本（财新/招投标/淘宝等，`scripts/*.cjs`）：

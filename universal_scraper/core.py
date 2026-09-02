@@ -603,51 +603,94 @@ def html_text(block: str) -> str:
 
 # ---------------------------------------------------------------- 导出
 
-def export_rows(rows: List[Dict[str, Any]], out_dir: Path, base_name: str) -> Dict[str, Path]:
-    """同时导出 CSV + JSON + Excel（有 openpyxl 时）。"""
+def export_rows(rows: List[Dict[str, Any]], out_dir: Path, base_name: str,
+                formats: Optional[List[str]] = None) -> Dict[str, Path]:
+    """按 formats 导出（默认 json+csv+xlsx）。设计要点（猎聘战例）：
+    - 逐格式独立容错：一种格式失败不影响其余
+    - dict/list 值安全序列化：xlsx/csv 不再因嵌套结构崩溃
+    - 覆盖保护：目标 .json 若是配置文件（含 source/name），自动改用 *_data 后缀"""
     out_dir.mkdir(parents=True, exist_ok=True)
+    want = [f.lower() for f in (formats or ["json", "csv", "xlsx"])]
     paths: Dict[str, Path] = {}
 
-    # JSON
+    def _safe(v: Any) -> Any:
+        if isinstance(v, (dict, list)):
+            return json.dumps(v, ensure_ascii=False)
+        return v
+
+    def _base() -> str:
+        probe = out_dir / f"{base_name}.json"
+        try:
+            if probe.exists():
+                head = probe.read_text(encoding="utf-8", errors="replace")[:400]
+                if '"source"' in head and '"name"' in head:
+                    log(f"⚠️ {probe.name} 疑似配置文件，数据改存 {base_name}_data.* 防覆盖")
+                    return base_name + "_data"
+        except Exception:
+            pass
+        return base_name
+
+    base_name = _base()
+
+    # JSON（永远写：机器可读主格式）
     jp = out_dir / f"{base_name}.json"
     jp.write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     paths["json"] = jp
 
-    # CSV（字段并集，防超长）
-    all_keys: List[str] = []
-    for r in rows:
-        for k in r:
-            if k not in all_keys:
-                all_keys.append(k)
-    cp = out_dir / f"{base_name}.csv"
-    with open(cp, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
-        w.writeheader()
-        for r in rows:
-            w.writerow({k: (str(v) if v is not None else "") for k, v in r.items()})
-    paths["csv"] = cp
+    if "csv" in want:
+        try:
+            all_keys: List[str] = []
+            for r in rows:
+                for k in r:
+                    if k not in all_keys:
+                        all_keys.append(k)
+            cp = out_dir / f"{base_name}.csv"
+            with open(cp, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
+                w.writeheader()
+                for r in rows:
+                    w.writerow({k: (str(_safe(v)) if v is not None else "") for k, v in r.items()})
+            paths["csv"] = cp
+        except Exception as e:
+            log(f"CSV 导出失败（跳过）: {e}", "WARN")
 
-    # Excel
-    try:
-        import openpyxl
-        from openpyxl.styles import Font
-        xp = out_dir / f"{base_name}.xlsx"
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = base_name[:28]
-        ws.append(all_keys)
-        for c in ws[1]:
-            c.font = Font(bold=True)
-        for r in rows:
-            ws.append([r.get(k, "") for k in all_keys])
-        for col in ws.columns:
-            letter = col[0].column_letter
-            ws.column_dimensions[letter].width = min(max(len(str(c.value or "")) for c in col[:100]) + 2, 60)
-        wb.save(xp)
-        paths["xlsx"] = xp
-    except ImportError:
-        log("openpyxl 未安装，跳过 Excel 导出", "WARN")
+    if "xlsx" in want:
+        try:
+            import openpyxl
+            from openpyxl.styles import Font
+            xp = out_dir / f"{base_name}.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = (base_name[:28] or "data")
+            all_keys: List[str] = []
+            for r in rows:
+                for k in r:
+                    if k not in all_keys:
+                        all_keys.append(k)
+            ws.append(all_keys)
+            for c in ws[1]:
+                c.font = Font(bold=True)
 
+            def _cell(v: Any) -> Any:
+                v = _safe(v)
+                if v is None:
+                    return ""
+                return v if isinstance(v, (int, float, str)) else str(v)
+
+            for r in rows:
+                ws.append([_cell(r.get(k, "")) for k in all_keys])
+            for col in ws.columns:
+                letter = col[0].column_letter
+                ws.column_dimensions[letter].width = min(max(len(str(c.value or "")) for c in col[:100]) + 2, 60)
+            wb.save(xp)
+            paths["xlsx"] = xp
+        except ImportError:
+            log("openpyxl 未安装，跳过 Excel 导出", "WARN")
+        except Exception as e:
+            log(f"Excel 导出失败（跳过，CSV/JSON 不受影响）: {e}", "WARN")
+
+    if not paths:
+        log("⚠️ 没有任何格式导出成功", "WARN")
     return paths
 
 

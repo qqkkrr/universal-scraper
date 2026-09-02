@@ -414,6 +414,9 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
                 source["url"] = urls[0] if urls else source["url"]
 
         anti_iter = dict(anti)
+        # 现场持久化：capture_all.json/last_page.html 写进任务输出目录（猎聘战例——
+        # v2 独立配置此前不设 _task_dir，捕获文件随临时目录焚毁）
+        anti_iter["_task_dir"] = str(out_dir)
         if proxy_pool.size:
             anti_iter["_proxy_pool"] = proxy_pool
             if isinstance(fetcher_cls, HttpFetcher.__class__):
@@ -506,7 +509,8 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             lab = iterate.get("labels", {}).get(str(it.get(var_name))) if iterate else None
             base = f"{base}_{lab or it_name}"
         if rows and not dry_run:
-            paths = export_rows(rows, out_dir, base)
+            paths = export_rows(rows, out_dir, base,
+                                formats=output.get("formats") or ["json", "csv", "xlsx"])
             summary[base] = len(rows)
             logger.info(f"{base} 导出: {len(rows)} 条 -> " + ", ".join(f"{k}={v.name}" for k, v in paths.items()))
 
@@ -520,7 +524,8 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
     # 合并导出
     if all_rows and not dry_run:
         base = _resolve_template(output.get("base_name", name), vars)
-        paths = export_rows(all_rows, out_dir, base + "_合并" if len(iterations) > 1 else base)
+        paths = export_rows(all_rows, out_dir, base + "_合并" if len(iterations) > 1 else base,
+                            formats=output.get("formats") or ["json", "csv", "xlsx"])
         summary["_merged"] = len(all_rows)
         logger.info("合并导出: " + ", ".join(f"{k}={v.name}" for k, v in paths.items()))
         logger.info(f"总计 {len(all_rows)} 条")
