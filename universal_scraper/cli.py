@@ -277,7 +277,17 @@ def main() -> int:
 
     if args.cmd == "jobs":
         from .engine_v3 import run_task
-        jobs = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        try:
+            jobs = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            print(f"❌ 编排文件不存在: {args.file}", file=sys.stderr)
+            return 1
+        except json.JSONDecodeError as e:
+            print(f"❌ 编排文件不是合法 JSON: {e}", file=sys.stderr)
+            return 1
+        if not isinstance(jobs, list):
+            print("❌ 编排文件应为 JSON 数组：[{\"task\": \"tasks/a\"}, ...]", file=sys.stderr)
+            return 1
         total = 0
         for i, job in enumerate(jobs, 1):
             tp = Path(job["task"])
@@ -481,6 +491,7 @@ def main() -> int:
                 '(async()=>{const b=await chromium.connectOverCDP("http://127.0.0.1:9222");'
                 'const ctx=b.contexts()[0];if(!ctx){console.error("CDP 无浏览器上下文");process.exit(1);}'
                 'const cs=await ctx.cookies();console.log(JSON.stringify(cs));'
+                'process.exit(0);'  # connectOverCDP 的 ws 会挂住事件循环，必须显式退出
                 '})().catch(e=>{console.error(e.message);process.exit(1);})'
             )
             _env = {**_os.environ, "NODE_PATH": resolve_node_path()}

@@ -2871,6 +2871,7 @@ def run_auto_cli(description: str, limit: Optional[int] = None) -> Dict[str, Any
         lines.append(msg)
         print(msg, flush=True)
 
+    log("🤖 正在规划任务（调用模型，最长约 90 秒；模型配置见 `llm` 命令）…")
     try:
         out = auto_task(description, limit=limit, log_cb=log)
         out["messages"] = lines
