@@ -236,6 +236,11 @@ def main() -> int:
     cdp_p.add_argument("--login-state", default="", help="查某域名的 Cookie 数量与名称，如 taobao.com")
     cdp_p.add_argument("--out", default="", help="把该域名的 Cookie 串写入文件（配合 --login-state）")
 
+    jr_p = sub.add_parser("jsrecon", help="🔍 接口侦察：下载页面 JS 包自动提取候选 API 端点（SPA 先于 capture 使用）")
+    jr_p.add_argument("url", help="目标页面 URL")
+    jr_p.add_argument("--max-scripts", type=int, default=6, help="最多分析的 JS 包数（默认 6）")
+    jr_p.add_argument("--out", default=None, help="结果 JSON 保存路径")
+
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
     vp.add_argument("--file", required=True, help="结果 JSON 文件，如 outputs/xxx.json")
     vp.add_argument("--network", action="store_true", help="联网抽样重抓对比（默认只做本地检查）")
@@ -580,6 +585,21 @@ def main() -> int:
         if r.stderr.strip():
             print(r.stderr.strip(), file=sys.stderr)
         return 0 if r.returncode == 0 else 1
+
+    if args.cmd == "jsrecon":
+        from .quick import js_recon
+        r = js_recon(args.url, max_scripts=args.max_scripts, out=args.out)
+        if r.get("error"):
+            print(f"❌ {r['error']}", file=sys.stderr)
+            return 1
+        print(f"🔍 接口侦察 {r['url']}：分析 {r['scripts_checked']} 个 JS 包，"
+              f"提取 {len(r.get('api_candidates', []))} 个候选端点")
+        for ep in r.get("api_candidates", [])[:40]:
+            print(f"  {ep}")
+        if r.get("saved"):
+            print(f"✅ 已保存: {r['saved']}")
+        print("（候选端点需逐个探测验证：带 UA/Referer/cookie 预热，见反爬手册）")
+        return 0
 
     if args.cmd == "journal":
         from .journals import run as journal_run

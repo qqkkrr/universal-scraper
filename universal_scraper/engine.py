@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 import signal
 import time
@@ -428,7 +429,8 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
         vars.update(overrides)
     anti = dict(config.get("anti_bot", {}))
     output = config.get("output", {})
-    out_dir = Path(output.get("dir", "outputs"))
+    # 版权中心战例：~/Desktop 写法曾把波浪号当字面路径，在 CWD 下建出名为 '~' 的目录
+    out_dir = Path(os.path.expandvars(os.path.expanduser(str(output.get("dir", "outputs")))))
     out_dir.mkdir(parents=True, exist_ok=True)
     cap_dir = out_dir / ".captcha"
     cap_dir.mkdir(parents=True, exist_ok=True)
@@ -518,6 +520,17 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
 
         rows_raw = fetcher.fetch_list(pagination)
         logger.info(f"原始记录: {len(rows_raw)}")
+        if source.get("recon"):
+            # 纯侦察模式（版权中心战例）：只要网络日志/现场证据，不做记录抽取与导出
+            ev = [p for p in out_dir.iterdir() if p.name in
+                  ("capture_all.json", "last_page.html")] if out_dir.exists() else []
+            logger.info(f"[recon] 纯侦察模式：跳过抽取/导出。证据文件: "
+                        f"{[str(p) for p in ev] or '（无捕获——检查 capture 配置）'}")
+            if rows_raw:
+                (out_dir / "recon_records.json").write_text(
+                    json.dumps(rows_raw, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+                logger.info(f"[recon] 原始记录 {len(rows_raw)} 条已存 {out_dir / 'recon_records.json'}")
+            return {"recon": True, "records": len(rows_raw), "evidence": [str(p) for p in ev]}
 
         # 智联战例：record.fields 未声明曾静默丢字段——自动按 source 字段映射（保留原始列名）
         rec_fields = (config.get("record", {}) or {}).get("fields")

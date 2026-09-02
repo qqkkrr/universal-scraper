@@ -137,9 +137,18 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
   ```
 
   捕获文件（capture_all.json / last_page.html）自动保留在输出目录，不焚毁。
+  **capture_all.json 每条记录的结构**：
+
+  ```json
+  {"url": "接口URL", "method": "POST", "post_data": "请求体原文（GET 无此键）",
+   "request_content_type": "application/json", "json": {解析后的响应}}
+  ```
+
+  响应无法解析（含跨域 XHR 拿不到 body）时以 `raw` 键代替 `json`（原文前 4KB）。
   遇 DOM evaluate 失效的站（page_N.html 仅几十字节、捕获却完好），改用
   **URL 深链翻页**绕开 DOM：`source.pagination` 用
   `{"type": "url", "template": "https://…currentPage={page}", "wait_ms": 2000}`。
+  **纯侦察模式**：`source.recon: true`——只留网络日志/现场证据，跳过记录抽取与导出。
 - `headless: false` + 人工关卡：验证码/滑块由用户手动过，`login_timeout_ms` 内等他完成。
 
 **browser_script** — 专用桥接脚本（财新/招投标/淘宝等，`scripts/*.cjs`）：

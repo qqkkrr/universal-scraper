@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -94,6 +95,10 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
     if not (selector or article or table):
         from .extractors import html_to_markdown
         result["markdown"] = html_to_markdown(text) or text[:200_000]
+        # SPA 壳判型提示（版权中心战例：3.9KB 壳完全靠人眼识别）
+        if 0 < len(text) < 6144 and re.search(r'id="(?:app|root|__next)"', text):
+            result["recon_hint"] = ("页面为 SPA 壳（无实质内容）——数据靠 JS/接口，"
+                                    "先 jsrecon 找接口或 capture 捕获（配方 R8/R13）")
     if links:
         from .queue import extract_links
         result["links"] = extract_links(text, url, links_allow, links_deny)
@@ -102,11 +107,69 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
     return result
 
 
+def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[str, Any]:
+    """接口侦察（版权中心战例）：下载页面 JS 包 → 提取候选 API 端点。
+    安全边界：仅 http/https；host 解析到私网/环回/保留地址即拒绝。"""
+    import ipaddress
+    import socket
+    from urllib.parse import urljoin, urlsplit
+    sp = urlsplit(url)
+    if sp.scheme not in ("http", "https"):
+        return {"error": f"仅允许 http/https: {url}"}
+    try:
+        for info in socket.getaddrinfo(sp.hostname, None):
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                return {"error": f"拒绝私有/保留地址: {sp.hostname} -> {ip}"}
+    except socket.gaierror as e:
+        return {"error": f"域名解析失败: {e}"}
+
+    from .core import make_http_client
+    client = make_http_client({"min_interval": 0.5, "timeout": 20, "http_backend": "auto"})
+    res = client.get(url)
+    html = res.get("text", "")
+    if not html:
+        return {"error": f"页面获取失败: HTTP {res.get('status')}"}
+    scripts = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', html)
+    urls = [urljoin(url, s) for s in scripts if s]
+    api_pat = re.compile(
+        r'(?:["\'])(/[A-Za-z0-9_\-]*/(?:api|service|gateway|rest|query|search|inquiry)[/\w\-./]*'
+        r'|https?://[\w.\-]+/(?:api|gateway|service)[/\w\-./]*'
+        r'|baseURL[:\s]*["\']([^"\']{4,120})["\'])')
+    found: Dict[str, List[str]] = {}
+    checked = 0
+    for su in urls:
+        if checked >= max_scripts:
+            break
+        try:
+            jr = client.get(su)
+            body = jr.get("text", "")[:2_000_000]
+            if not body:
+                continue
+            checked += 1
+            hits = sorted(set(m[0] or m[1] or "" for m in api_pat.findall(body)))[:60]
+            hits = [h for h in hits if h]
+            if hits:
+                found[su.rsplit("/", 1)[-1][:48] or su] = hits
+        except Exception:
+            continue
+    all_hits = sorted({h for v in found.values() for h in v})
+    result = {"url": url, "scripts_checked": checked, "api_candidates": all_hits,
+              "by_script": found, "hint": "候选端点需逐个探测验证（带 UA/Referer/cookie 预热）"}
+    if out:
+        import os as _os
+        p = Path(_os.path.expanduser(out))
+        p.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+        result["saved"] = str(p)
+    return result
+
+
 def save_result(result: Dict[str, Any], out: Optional[str] = None,
                 as_json: bool = False) -> Path:
     """把结果写到文件（默认 .md；--json 则 .json）。返回路径。"""
     if out:
-        fp = Path(out)
+        import os as _os
+        fp = Path(_os.path.expanduser(out))
     else:
         import hashlib
         ext = ".json" if as_json else ".md"

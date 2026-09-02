@@ -47,7 +47,9 @@ def load_config(path: Path) -> Dict[str, Any]:
 
 def _require(cfg: Dict[str, Any], key: str, path: str, types, hint: str = "") -> Any:
     if key not in cfg:
-        raise ConfigError(path, f"缺少必填字段 '{key}'", hint)
+        # 版权中心战例：新手第一次写错结构时，顺手给出 scaffold 出路
+        raise ConfigError(path, f"缺少必填字段 '{key}'",
+                          (hint + "；可先跑 `scaffold --type http_html` 生成模板再改").strip())
     v = cfg[key]
     if types and not isinstance(v, types):
         raise ConfigError(f"{path}.{key}", f"类型应为 {types.__name__}，实际 {type(v).__name__}",
