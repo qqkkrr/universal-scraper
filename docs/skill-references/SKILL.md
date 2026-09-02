@@ -8,7 +8,7 @@ description: >
   样本先行确认、0 结果强制诊断。当用户想抓取/采集/爬取/下载网页数据、
   提到爬虫/scraper/crawler/spider/数据采集，或点名 universal-scraper 时使用。
 metadata:
-  version: "1.6.2"
+  version: "1.7.1"
   source_project: "universal-scraper (10 轮审计, 164 测试)"
 ---
 
@@ -207,7 +207,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 论文 PDF 批量下载 | `journal`（magtech 系统已精配） |
 | 图书目 + 比价 | `books --spec` |
 | 大众点评 | `dianping`（cookie 直抓专用） |
-| 登录站复用登录态 | `cookies`（用户登录一次 → 导出直抓串） |
+| 登录站复用登录态 | `cookies`（用户登录一次 → 导出直抓串）；`cdp --login-state/--list-tabs` 查调试 Chrome |
+| 强风控电商（淘宝系/盒马） | R17：mtop+登录关卡+RGV587 冷却+desc 图 OCR |
 | 免费代理池 | `proxy` |
 | 定时重复采集 | `schedule --task --every <秒>` |
 | 监控网页变化 | `monitor --task --every <秒>` |

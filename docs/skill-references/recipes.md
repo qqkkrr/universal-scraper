@@ -226,6 +226,30 @@ HTTP 批量爆发不仅自身被封，还会**反噬正在工作的浏览器会�
 4. **数据若在接口里**：附加成功后先跑一次 `capture: true` + actions 等待，
    Next.js 的 `__next_f` flight 数据有时能从接口/脚本里直接拿到，能直抓就不爬 UI。
 
+## R17 · 淘宝系电商店铺（盒马/淘宝/天猫，mtop + 登录墙 + OCR）
+
+目标特征：mtop/jsonp 接口、RGV587 会话标记、滑块=人工关卡、列表价格是
+`priceEncoded` 不能直接用、配料/规格在详情 desc **图片**里。标准路线：
+
+1. **L3 登录关卡**：`open-debug-chrome.sh` → 用户登录一次（淘宝系无登录态寸步难行）。
+2. **找接口**：进店后先 capture_all（现在会**同时记录请求体**、自动剥 JSONP 壳）；
+   或直接用页面自带的 mtop 库（`window.lib.mtop.H5Request`）——借页面自己的库，
+   不逆向 sign，这是合规红线内唯一捷径。
+3. **翻页**：接口参数在 body 里 → `pagination.strategy: "template"` +
+   `json_body: {"pageIdx": "{{page}}"}`。
+4. **价格红线**：列表接口的 `priceEncoded` 是加价后假象——价格必须进详情页 DOM 取。
+5. **RGV587 = 会话已被标记**：引擎现在能识别（session_flagged）。正确动作是
+   冷却几分钟 + 换路线，**不是重试**。兜底路线：主站搜索关键词 → 结果里按店铺名过滤
+   （盒马战例靠它完成交付）。
+6. **配料/规格 OCR**：食品/化妆品的配料表普遍在详情末尾的标签图里。CDP 截图 desc
+   区域 → rapidocr 识别（doctor 会检查 `rapidocr_onnxruntime`）：
+   ```python
+   from rapidocr_onnxruntime import RapidOCR
+   text = "\n".join(line[1] for line in RapidOCR()(img_path)[0])
+   ```
+7. **对比校验**：换 pageSize/翻页参数后抽查首末页字段完整性——参数换挡丢字段是
+   该系接口的常见暗坑。
+
 ## 交付前必做
 
 ```bash

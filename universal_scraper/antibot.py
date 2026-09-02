@@ -253,6 +253,8 @@ BLOCK_PATTERNS = [
     # CWAP/WZWS 滑块 WAF（期刊/政务站常见）：必须排在 verify 前，命中即判为 waf
     ("waf", re.compile(r"wzws-waf-cgi|CWAP-waf|waf_slider_verify|wzws_waf|waf-cgi|WZWS-RAY|滑动填|请完成安全验证|向右滑动|拖动滑块|拼图完成", re.I)),
     ("verify", re.compile(r"验证中心|安全验证|滑动验证|点选验证|人机验证|拼图验证|spiderindefence|访问过于频繁|异常访问|请求过于频繁|操作频繁|安全检测", re.I)),
+    # 淘宝系会话标记（盒马战例）：RGV587 页 / mtop ret=TIMEOUT::——冷却+换路线，不是重试
+    ("session_flagged", re.compile(r"RGV587_ERROR|RGV587|ERRCODE_NOT_LOGIN|WAIT_DIRECT|punish|TIMEOUT::|接口超时", re.I)),
     ("login", re.compile(r"请先登录|尚未登录|登录后访问|扫码登录|账号登录|立即登录|passport\.|/login\b|login\.aspx|欢迎登录", re.I)),
     ("captcha", re.compile(r"captcha|图形验证|输入验证码|请输入验证码|verify_code|turnstile|recaptcha", re.I)),
     ("rate_limit", re.compile(r"too many requests|rate limit|频率限制|访问太快|限流", re.I)),

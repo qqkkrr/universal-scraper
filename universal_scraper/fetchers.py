@@ -186,7 +186,8 @@ class HttpFetcher(BaseFetcher):
             log(f"  检测到反爬拦截[{bd['kind']}] {bd['detail']}（{url[:100]}）", "WARN")
             if self.anti.get("_block_stats") is not None:
                 self.anti["_block_stats"][bd["kind"]] = self.anti["_block_stats"].get(bd["kind"], 0) + 1
-            if bd["kind"] in ("cloudflare", "verify", "captcha", "rate_limit", "anti_bot", "429", "403"):
+            if bd["kind"] in ("cloudflare", "verify", "captcha", "rate_limit", "anti_bot",
+                              "session_flagged", "waf", "429", "403"):
                 from .protocols import RateLimitedError
                 raise RateLimitedError(url, retry_after=None, detail=f"反爬拦截[{bd['kind']}] {bd['detail']}")
         return res

@@ -231,6 +231,11 @@ def main() -> int:
 
     sub.add_parser("ip", help="🌐 查看当前出口 IP 与运营商（换网络后确认）")
 
+    cdp_p = sub.add_parser("cdp", help="🔗 调试 Chrome (9222) 辅助：列标签页 / 查登录态 / 导 Cookie")
+    cdp_p.add_argument("--list-tabs", action="store_true", help="列出所有打开的标签页（默认）")
+    cdp_p.add_argument("--login-state", default="", help="查某域名的 Cookie 数量与名称，如 taobao.com")
+    cdp_p.add_argument("--out", default="", help="把该域名的 Cookie 串写入文件（配合 --login-state）")
+
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
     vp.add_argument("--file", required=True, help="结果 JSON 文件，如 outputs/xxx.json")
     vp.add_argument("--network", action="store_true", help="联网抽样重抓对比（默认只做本地检查）")
@@ -531,6 +536,41 @@ def main() -> int:
             print(f"✅ 已写入: {args.out}", file=sys.stderr)
         print(f"（{len(pairs)} 个 cookie，域过滤={dom or '全部'}）", file=sys.stderr)
         return 0
+
+    if args.cmd == "cdp":
+        import json as _json
+        import os as _os
+        import subprocess as _sp
+        from .runtime import resolve_node, resolve_node_path
+        js = (
+            'const {chromium}=require("playwright");'
+            '(async()=>{const b=await chromium.connectOverCDP("http://127.0.0.1:9222");'
+            'const ctx=b.contexts()[0];if(!ctx){console.error("CDP 无浏览器上下文");process.exit(1);}'
+        )
+        if args.login_state:
+            dom = args.login_state
+            js += (f'const cs=(await ctx.cookies()).filter(c=>String(c.domain).includes({json.dumps(dom)}));'
+                   f'console.log(JSON.stringify({{"domain":{json.dumps(dom)},"count":cs.length,'
+                   f'"names":cs.map(c=>c.name).slice(0,30)}}));')
+            if args.out:
+                js += (f'require("fs").writeFileSync({json.dumps(args.out)},'
+                       f'cs.map(c=>c.name+"="+c.value).join("; "));'
+                       f'console.error("已写入 {args.out}");')
+        else:
+            js += 'console.log(JSON.stringify(ctx.pages().map(p=>p.url())));'
+        js += 'process.exit(0);})().catch(e=>{console.error(e.message);process.exit(1);})'
+        env = {**_os.environ, "NODE_PATH": resolve_node_path()}
+        r = _sp.run([resolve_node(), "-e", js], capture_output=True, text=True, env=env, timeout=30)
+        out = (r.stdout or "").strip()
+        if out:
+            try:
+                for u in json.loads(out):
+                    print(u)
+            except json.JSONDecodeError:
+                print(out)
+        if r.stderr.strip():
+            print(r.stderr.strip(), file=sys.stderr)
+        return 0 if r.returncode == 0 else 1
 
     if args.cmd == "journal":
         from .journals import run as journal_run

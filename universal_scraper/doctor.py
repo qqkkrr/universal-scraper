@@ -17,7 +17,7 @@ NODE = os.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
 NODE_PATH = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", resolve_node_path())
 
 REQUIRED_PY = ["lxml", "curl_cffi", "charset_normalizer", "openpyxl"]
-OPTIONAL_PY = ["pandas", "requests", "ddddocr", "cv2"]
+OPTIONAL_PY = ["pandas", "requests", "ddddocr", "cv2", "rapidocr_onnxruntime"]
 
 
 def _py_ok(name: str) -> bool:

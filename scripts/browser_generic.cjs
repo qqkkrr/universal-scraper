@@ -325,6 +325,17 @@ function centerCaptcha(page) {
     // capture_all：把页面上所有 JSON 响应都存下来（不知道接口名也能事后挖数据）
     const captureAll = !!spec.capture_all || spec.capture === true;
     const capturedAll = [];
+    // JSONP 兼容：mtotp9({...}) 等 wrapper 自动剥壳，解析失败保留原始 body 兜底（盒马战例）
+    async function jsonMaybe(res) {
+      try { return { json: await res.json() }; } catch (e) {}
+      try {
+        const t = await res.text();
+        const m = t.match(/^\s*[\w$]+\(([\s\S]*)\)\s*;?\s*$/);
+        if (m) { try { return { json: JSON.parse(m[1]) }; } catch (e2) {} }
+        try { return { json: JSON.parse(t) }; } catch (e2) {}
+        return { raw: t.slice(0, 4000) };
+      } catch (e) { return {}; }
+    }
     page.on("response", async (res) => {
       const u = res.url();
       if (res.status() >= 400) {
@@ -347,12 +358,13 @@ function centerCaptcha(page) {
           out({ type: "capture_http_error", name: key, url: u.slice(0, 220), status: res.status() });
           continue;
         }
-        if (!ct.includes("json")) continue;
+        // JSONP（application/javascript）也算 JSON 族——盒马/淘宝 mtop 接口全是它
+        if (!(ct.includes("json") || ct.includes("javascript"))) continue;
         try {
-          const j = await res.json();
+          const r2 = await jsonMaybe(res);
           const arr = (capturedBy[key] = capturedBy[key] || []);
           if (arr.length < 5000) {  // 命名捕获上限，防长任务内存爆炸
-            arr.push({ url: u, json: j });
+            arr.push(r2.json !== undefined ? { url: u, json: r2.json } : { url: u, raw: r2.raw });
           }
           if (c.save && arr.length % (c.save_every || 5) === 0) {
             const f = path.join(outDir, `${key}.json`);
@@ -360,11 +372,12 @@ function centerCaptcha(page) {
           }
         } catch (e) {}
       }
-      if (captureAll && res.status() < 400 && (res.headers()["content-type"] || "").includes("json")) {
+      const ctAll = res.headers()["content-type"] || "";
+      if (captureAll && res.status() < 400 && (ctAll.includes("json") || ctAll.includes("javascript"))) {
         if (capturedAll.length < 2000) {
           try {
-            const j = await res.json();
             // 小米有品战例：同时落盘请求体/方法/关键头——一次浏览器侦察即可改写成 http_json 配置
+            const r2 = await jsonMaybe(res);
             let post_data = "";
             let method = "GET";
             let req_ct = "";
@@ -375,8 +388,11 @@ function centerCaptcha(page) {
               const hh = rq.headers();
               req_ct = hh["content-type"] || "";
             } catch (e) {}
-            capturedAll.push({ url: u, method, post_data: post_data || undefined,
-                               request_content_type: req_ct || undefined, json: j });
+            const rec = { url: u, method, post_data: post_data || undefined,
+                          request_content_type: req_ct || undefined };
+            capturedAll.push(r2.json !== undefined
+              ? Object.assign(rec, { json: r2.json })
+              : Object.assign(rec, { raw: r2.raw }));
             if (capturedAll.length % 50 === 0) {
               fs.writeFileSync(path.join(outDir, "capture_all.json"), JSON.stringify(capturedAll, null, 1));
             }

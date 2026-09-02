@@ -33,7 +33,13 @@ FETCHERS = {
 
 def map_record(raw: Dict[str, Any], fields: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
-    for name, spec in (fields or {}).items():
+    if not isinstance(fields, dict):
+        # 盒马战例：record.fields 写成 list，validate 之外这里必须兜住——丢映射不丢数据
+        if fields:
+            log(f"⚠️ record.fields 应为 dict（当前 {type(fields).__name__}），"
+                "已跳过映射、保留原始字段——请修正配置")
+        return dict(raw)
+    for name, spec in fields.items():
         if isinstance(spec, str):
             out[name] = jpath(raw, spec, None)
         elif isinstance(spec, dict):

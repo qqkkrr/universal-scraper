@@ -105,6 +105,13 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
             raise ConfigError(f"detail.extract[{i}].type", f"未知提取类型 '{et}'",
                               f"可选: {', '.join(sorted(EXTRACT_TYPES))}")
 
+    rec_fields = (cfg.get("record", {}) or {}).get("fields")
+    if rec_fields is not None and not isinstance(rec_fields, dict):
+        # 盒马战例：record.fields 写成 list 时 validate 放行、run 崩 AttributeError
+        raise ConfigError("record.fields",
+                          f"record.fields 应为 dict {{列名: {{from: 字段}}}}，当前为 {type(rec_fields).__name__}",
+                          '例如: {"标题": {"from": "title"}}')
+
     cap = cfg.get("anti_bot", {}).get("captcha", {})
     cs = cap.get("strategy", "auto")
     if cs not in CAPTCHA_STRATEGIES:
