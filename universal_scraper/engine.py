@@ -470,7 +470,12 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
         rows_raw = fetcher.fetch_list(pagination)
         logger.info(f"原始记录: {len(rows_raw)}")
 
-        rows = [map_record(r, config.get("record", {}).get("fields", {})) for r in rows_raw]
+        # 智联战例：record.fields 未声明曾静默丢字段——自动按 source 字段映射（保留原始列名）
+        rec_fields = (config.get("record", {}) or {}).get("fields")
+        if not rec_fields and rows_raw and isinstance(rows_raw[0], dict):
+            rec_fields = {k: {"from": k} for k in rows_raw[0]}
+            logger.info(f"record.fields 未声明——已自动映射 {len(rec_fields)} 列（字段名=列名，需改名请在 record.fields 声明）")
+        rows = [map_record(r, rec_fields) for r in rows_raw]
         if config.get("record", {}).get("keep_raw"):
             for raw, mapped in zip(rows_raw, rows):
                 for k, v in raw.items():

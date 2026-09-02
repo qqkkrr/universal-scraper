@@ -239,6 +239,7 @@ def main() -> int:
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
     vp.add_argument("--file", required=True, help="结果 JSON 文件，如 outputs/xxx.json")
     vp.add_argument("--network", action="store_true", help="联网抽样重抓对比（默认只做本地检查）")
+    vp.add_argument("--data-key", default="", help="JSON 为 dict 包装时取数组的键；未指定则自动探测 data/list/rows/items")
 
     args = ap.parse_args()
 
@@ -622,7 +623,7 @@ def main() -> int:
 
     if args.cmd == "verify":
         from .verify import verify_file
-        rep = verify_file(args.file, network=args.network)
+        rep = verify_file(args.file, network=args.network, data_key=args.data_key)
         print(f"🧾 复核报告：{rep.get('total', 0)} 条｜{'✅ 全部通过' if rep.get('ok') else '⚠️ 存在问题'}")
         for c in rep.get("checks", []):
             mark = "✅" if c.get("pass", True) else "❌"

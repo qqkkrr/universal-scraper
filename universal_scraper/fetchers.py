@@ -92,6 +92,24 @@ class BaseFetcher:
         raise NotImplementedError
 
 
+def _apply_page_tokens(text: str, page: int, offset: int) -> str:
+    """翻页 token 替换：{{page}}/{{offset}}（文档写法）与 {page}/{offset}（简写）。
+    必须先替换双括号——先替换单括号会把 {{page}} 半替换成 '{2}'（智联战例）。"""
+    out = text.replace("{{offset}}", str(offset)).replace("{{page}}", str(page))
+    return out.replace("{offset}", str(offset)).replace("{page}", str(page))
+
+
+def _apply_page_tokens_value(v: Any, page: int, offset: int) -> Any:
+    if isinstance(v, str):
+        return _apply_page_tokens(v, page, offset)
+    if isinstance(v, (dict, list)):
+        try:
+            return json.loads(_apply_page_tokens(json.dumps(v, ensure_ascii=False), page, offset))
+        except Exception:
+            return v
+    return v
+
+
 class HttpFetcher(BaseFetcher):
     """HTTP 取数器：支持 JSON API（records_path/total_path）与 HTML 列表（row_css + 字段提取）。"""
 
@@ -214,31 +232,17 @@ class HttpFetcher(BaseFetcher):
         limit = pagination.get("limit", 20)
         records: List[Dict[str, Any]] = []
         total = None
-        # template 策略（POST body 翻页）：url/body/json_body 里的 {{page}}/{{offset}} 每页替换
-        tmpl = strat == "template"
-        if tmpl:
+        # none/template 都做一次 token 替换（none：page=start、offset=0——"单个大 size 请求"即可行）
+        do_tokens = (strat == "template") or strat == "none"
+        if do_tokens:
             _tmpl_orig = {k: s.get(k) for k in ("url", "body", "json_body")}
-
-        def _apply_page_tokens(v: Any) -> Any:
-            reps = [("{page}", str(page)), ("{{page}}", str(page)),
-                    ("{offset}", str((page - 1) * limit)), ("{{offset}}", str((page - 1) * limit))]
-            if isinstance(v, str):
-                out = v
-                for a, b in reps:
-                    out = out.replace(a, b)
-                return out
-            if isinstance(v, (dict, list)):
-                try:
-                    return json.loads(_apply_page_tokens(json.dumps(v, ensure_ascii=False)))
-                except Exception:
-                    return v
-            return v
 
         while page <= max_pages:
             params: Dict[str, Any] = {}
-            if tmpl:
+            if do_tokens:
+                off = (page - 1) * limit
                 for k, v0 in _tmpl_orig.items():
-                    s[k] = _apply_page_tokens(v0)
+                    s[k] = _apply_page_tokens_value(v0, page, off)
             elif strat == "page_param":
                 params[pagination["page_param"]] = page
             elif strat == "offset":

@@ -174,12 +174,21 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
     return report
 
 
-def verify_file(path: str, network: bool = False) -> Dict[str, Any]:
+def verify_file(path: str, network: bool = False, data_key: str = "") -> Dict[str, Any]:
     from pathlib import Path
     fp = Path(path)
     if not fp.exists():
         return {"ok": False, "error": f"文件不存在: {path}"}
     data = json.loads(fp.read_text(encoding="utf-8"))
+    # 智联战例：支持 dict 包装（{"data": [...]} 等）——data_key 显式指定或自动探测常用键
+    if isinstance(data, dict):
+        if data_key:
+            data = data.get(data_key, data)
+        else:
+            for k in ("data", "list", "rows", "items"):
+                if isinstance(data.get(k), list):
+                    data = data[k]
+                    break
     rows = data if isinstance(data, list) else [data]
     return verify_rows(rows, None, sample_n=3, network=network)
 

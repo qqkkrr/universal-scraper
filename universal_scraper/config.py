@@ -127,11 +127,12 @@ def collect_warnings(cfg: Dict[str, Any]) -> "List[str]":
     stype = src.get("type", "")
     rec = cfg.get("record", {}) or {}
     pag = cfg.get("pagination", {}) or {}
-    # 微博战例：source.fields 提取了、record.fields 空映射 → 输出全被丢弃
+    # 微博战例：source.fields 提取了、record.fields 空映射 → 输出被丢弃
+    # （v1.8 起运行时会自动按 source 字段映射；此提示改为确认口径/改名指引）
     if stype in ("http_html", "browser") and (src.get("fields") or src.get("row_css")) \
             and not rec.get("fields"):
-        warns.append("source.fields 有提取但 record.fields 为空——提取结果会在输出映射时"
-                     "被丢弃。请在 record.fields 声明：{\"列名\": {\"from\": \"字段名\"}}")
+        warns.append("record.fields 未声明——输出列将自动等于提取字段名。"
+                     "需改名/筛选请在 record.fields 声明：{\"列名\": {\"from\": \"字段名\"}}")
     if stype == "browser" and not src.get("cdp") and src.get("headless") is not False:
         warns.append("browser 为 headless 且未配 cdp——遇 Cloudflare/Turnstile 会被拦，"
                      "见配方 R16（调试 Chrome 过一次校验后附加）。")

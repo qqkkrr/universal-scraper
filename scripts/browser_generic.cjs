@@ -336,7 +336,9 @@ function centerCaptcha(page) {
         return { raw: t.slice(0, 4000) };
       } catch (e) { return {}; }
     }
-    page.on("response", async (res) => {
+    // 上下文级捕获：附加 CDP 时同一 Chrome 的既有标签页 XHR 也会录到（智联战例——
+    // page 级监听漏掉数据接口所在的既有标签页）。声明式 capture 仍按 url_pattern 过滤。
+    context.on("response", async (res) => {
       const u = res.url();
       if (res.status() >= 400) {
         if (diagBudget.http4xx-- > 0) out({ type: "http_4xx", status: res.status(), url: u.slice(0, 260) });

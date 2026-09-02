@@ -71,7 +71,8 @@ URL 里可以用 `vars` 定义的变量（如 `?q={{keyword}}`）；**页码不�
 **按名过滤**（电商规格 schema 神器）：`{"主材": {"from": "spec[name=主材].value"}}`。
 
 **POST body 翻页（mtop 风格接口）**：`pagination.strategy: "template"`，url/body/
-json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样支持）：
+json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样支持；
+`strategy: "none"` 时也做一次替换——`{{page}}` 取起始页，适合"单个大 size 请求"）：
 
 ```json
 {"name": "有品出行",
@@ -80,6 +81,17 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
  "pagination": {"strategy": "template", "max_pages": 10,
                 "records_path": "data.list"}}
 ```
+
+**多入口分片（iterate）**：登录墙翻页/多分类采集的标准解法——声明变量与取值列表，
+每轮独立小样与断点，全部轮次自动合并导出为 `*_合并.*`（智联战例：31 省份分片）：
+
+```json
+{"iterate": {"var": "省份", "values": ["北京", "上海", "广州"]},
+ "vars": {"省份": "北京"}}
+```
+
+`vars.省份` 是默认值；iterate 会逐个覆盖它，source 的 url/body/json_body 用
+`{{省份}}` 引用。`labels` 可选（`{"北京": "beijing"}` 映射成英文参数值）。
 
 **browser** — JS 渲染/交互（L2/L3）：
 
@@ -162,7 +174,8 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 ## record.fields
 
 `{"输出列名": {"from": "来源字段名"}}`。来源字段来自 source.fields 的键、JSON 的键
-或 embedded_json 的记录键。
+或 embedded_json 的记录键；`from` 支持 jpath 点路径/下标/通配/按名过滤。
+**未声明时运行时自动按提取字段名映射输出列**（需改名/筛选才必须声明）。
 
 ## pipeline（记录清洗与过滤——按日期/条件筛选就在这里）
 
