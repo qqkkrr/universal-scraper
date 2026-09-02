@@ -12,12 +12,9 @@ EXTRACT_TYPES = {"json", "css_text", "css_attr", "css_html", "xpath_text", "xpat
 CAPTCHA_STRATEGIES = {"auto", "ddddocr", "opencv_slider", "2captcha", "nopecha", "human", "config", "none", "external"}
 
 # ---------------------------------------------------------------- 共享常量（v2/v3 一套，杜绝 API 分裂）
-# 与 modules/pipelines.py / modules/parsers.py / engine.run_pipeline 实际实现对齐
-# 注意：parse_date/split/default/download/validate/dedup_content 仅 v3 任务包（modules/pipelines）实现；
-#       transform/template/cast/rename 等在 v2 run --config（engine.run_pipeline）实现。
-ALL_PIPELINE_TYPES = {"filter", "dedup", "dedup_content", "cast", "add", "validate",
-                      "rename", "default", "template", "split", "download", "parse_date",
-                      "transform"}
+# 词表唯一来源：contract.PIPELINE_STEPS（validate/执行器/文档测试全部从它派生，禁止手抄）
+from .contract import PIPELINE_STEPS, V3_ONLY_STEPS  # noqa: E402
+ALL_PIPELINE_TYPES = set(PIPELINE_STEPS)
 ALL_ACTION_TYPES = {"click", "type", "write", "fill", "press", "select", "wait",
                     "wait_time", "wait_for_selector", "waitfor", "scroll",
                     "exec", "js", "execute_javascript", "screenshot", "noop"}
@@ -79,6 +76,11 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if stype == "browser_script" and not src.get("bridge"):
         raise ConfigError("source.bridge", "browser_script 需要 bridge 脚本路径",
                           '例如: "../scripts/ggzy_bridge.cjs"')
+    if stype == "http_json" and not (cfg.get("pagination", {}) or {}).get("records_path"):
+        # 战例：B站接口 200 + 38 条数据，因缺 records_path 静默 page+0
+        raise ConfigError("pagination.records_path",
+                          "http_json 需要 records_path 指向记录数组（缺了会静默 0 条）",
+                          '例如: {"strategy": "none", "records_path": "data.list"}')
 
     pag = cfg.get("pagination", {})
     if pag:
@@ -89,9 +91,7 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
         if strat == "page_param" and not pag.get("page_param"):
             raise ConfigError("pagination.page_param", "page_param 策略需要 page_param 字段",
                               '例如: {"strategy": "page_param", "page_param": "page"}')
-        if strat in ("page_param", "offset") and not pag.get("records_path"):
-            raise ConfigError("pagination.records_path", "JSON 分页需要 records_path 指向记录数组",
-                              '例如: "data.records"')
+        # records_path 只对 http_json 强制（html 行来自 row_css，与策略无关）——见下方按类型校验
 
     for i, step in enumerate(cfg.get("pipeline", [])):
         pt = step.get("type")
@@ -111,6 +111,29 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
         raise ConfigError("anti_bot.captcha.strategy", f"未知验证码策略 '{cs}'",
                           f"可选: {', '.join(sorted(CAPTCHA_STRATEGIES))}")
     return cfg
+
+
+def collect_warnings(cfg: Dict[str, Any]) -> "List[str]":
+    """跨字段语义检查：不阻断运行，但必须在 validate 时可见（战例驱动，勿删）。"""
+    warns: List[str] = []
+    src = cfg.get("source", {}) or {}
+    stype = src.get("type", "")
+    rec = cfg.get("record", {}) or {}
+    pag = cfg.get("pagination", {}) or {}
+    # 微博战例：source.fields 提取了、record.fields 空映射 → 输出全被丢弃
+    if stype in ("http_html", "browser") and (src.get("fields") or src.get("row_css")) \
+            and not rec.get("fields"):
+        warns.append("source.fields 有提取但 record.fields 为空——提取结果会在输出映射时"
+                     "被丢弃。请在 record.fields 声明：{\"列名\": {\"from\": \"字段名\"}}")
+    if stype == "browser" and not src.get("cdp") and src.get("headless") is not False:
+        warns.append("browser 为 headless 且未配 cdp——遇 Cloudflare/Turnstile 会被拦，"
+                     "见配方 R16（调试 Chrome 过一次校验后附加）。")
+    for i, step in enumerate(cfg.get("pipeline", [])):
+        pt = step.get("type")
+        if pt in V3_ONLY_STEPS:
+            warns.append(f"pipeline[{i}] 类型 '{pt}' 仅 v3 任务包执行器实现，"
+                         "run --config 会跳过（v2 可用: transform/template 等，见 contract.PIPELINE_STEPS）。")
+    return warns
 
 
 def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,

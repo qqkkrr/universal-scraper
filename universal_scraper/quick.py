@@ -24,7 +24,8 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
               links_deny: Optional[str] = None,
               screenshot: Optional[str] = None,
               cookie: Optional[str] = None,
-              headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+              headers: Optional[Dict[str, str]] = None,
+              cdp: Optional[str] = None) -> Dict[str, Any]:
     """抓取一个 URL，返回 {url, status, text, markdown?, selector?, article?, tables?, links?}。
     links=True 时额外提取页面所有外链（对标 Firecrawl scrape links）。
     - browser=False: 走 HTTP（curl_cffi→requests→urllib 自动选后端）
@@ -63,6 +64,8 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
             cfg["js_pre"] = js
         if wait_selector:
             cfg["wait_selector"] = wait_selector
+        if cdp:
+            cfg["cdp"] = cdp  # 附加调试 Chrome：侦察与正式采集同通道、过 Cloudflare
         anti = {"session_dir": "/tmp/us_fetch_session", "min_interval": 0.1,
                 "http_backend": "auto"}
         if proxy:

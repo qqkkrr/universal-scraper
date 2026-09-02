@@ -139,6 +139,7 @@ def main() -> int:
     fp.add_argument("--screenshot", default=None, help="浏览器截全页图保存路径（Firecrawl screenshot 风格）")
     fp.add_argument("--links-allow", default=None, help="只保留匹配该正则的外链")
     fp.add_argument("--links-deny", default=None, help="排除匹配该正则的外链")
+    fp.add_argument("--cdp", default=None, help="附加调试 Chrome（如 http://127.0.0.1:9222），侦察与正式跑同通道")
 
     cp = sub.add_parser("crawl", help="从 URL 递归爬站（Firecrawl crawl 风格）")
     cp.add_argument("url", help="入口 URL")
@@ -216,6 +217,8 @@ def main() -> int:
     ck_p.add_argument("--session", default="outputs/.session/session.json", help="storageState JSON 路径")
     ck_p.add_argument("--domain", default="", help="按域名过滤，如 jd.com / dianping.com / weibo.com")
     ck_p.add_argument("--out", default="", help="同时写入文件（如 /tmp/jd_cookie.txt）")
+    ck_p.add_argument("--from-cdp", action="store_true",
+                      help="直接从 9222 调试 Chrome 导出 Cookie（CDP 附加运行不落盘 session.json 时的正路）")
 
     dp_p = sub.add_parser("dianping", help="🌶️ 大众点评专用：Cookie 直抓搜索页列表（绕开验证码/csec）")
     dp_p.add_argument("--keyword", required=True, help="关键词，如 美食 / 烤肉")
@@ -245,6 +248,9 @@ def main() -> int:
         try:
             cfg = load_config(Path(args.config))
             print(f"✅ 配置有效: {cfg.get('name')} (source={cfg['source'].get('type')})")
+            from .config import collect_warnings
+            for w in collect_warnings(cfg):
+                print(f"⚠️  {w}")
             return 0
         except ConfigError as e:
             print(f"❌ {e}", file=sys.stderr)
@@ -465,16 +471,37 @@ def main() -> int:
     if args.cmd == "cookies":
         import json as _json
         from pathlib import Path as _P
-        sf = _P(args.session)
-        if not sf.exists():
-            print(f"❌ 会话文件不存在: {sf}", file=sys.stderr)
-            return 1
-        try:
-            st = _json.loads(sf.read_text(encoding="utf-8"))
-        except Exception as e:
-            print(f"❌ 解析失败: {e}", file=sys.stderr)
-            return 1
-        cs = st.get("cookies", []) or []
+        if getattr(args, "from_cdp", False):
+            # CDP 附加运行不落盘 storageState——直接从调试 Chrome 取全部 Cookie
+            import os as _os
+            import subprocess as _sp
+            from .runtime import resolve_node, resolve_node_path
+            _js = (
+                'const {chromium}=require("playwright");'
+                '(async()=>{const b=await chromium.connectOverCDP("http://127.0.0.1:9222");'
+                'const ctx=b.contexts()[0];if(!ctx){console.error("CDP 无浏览器上下文");process.exit(1);}'
+                'const cs=await ctx.cookies();console.log(JSON.stringify(cs));'
+                '})().catch(e=>{console.error(e.message);process.exit(1);})'
+            )
+            _env = {**_os.environ, "NODE_PATH": resolve_node_path()}
+            r = _sp.run([resolve_node(), "-e", _js], capture_output=True, text=True,
+                        env=_env, timeout=30)
+            if r.returncode != 0:
+                print(f"❌ CDP 导出失败: {r.stderr.strip()[:200]}（9222 未运行先跑 open-debug-chrome.sh）",
+                      file=sys.stderr)
+                return 1
+            cs = _json.loads(r.stdout.strip() or "[]")
+        else:
+            sf = _P(args.session)
+            if not sf.exists():
+                print(f"❌ 会话文件不存在: {sf}", file=sys.stderr)
+                return 1
+            try:
+                st = _json.loads(sf.read_text(encoding="utf-8"))
+            except Exception as e:
+                print(f"❌ 解析失败: {e}", file=sys.stderr)
+                return 1
+            cs = st.get("cookies", []) or []
         dom = (args.domain or "").lower()
         if dom:
             cs = [c for c in cs if dom in str(c.get("domain", "")).lower()]
@@ -589,7 +616,7 @@ def main() -> int:
                            article=args.article, table=args.table, proxy=args.proxy,
                            actions=actions, wait_selector=args.wait, links=args.links,
                            links_allow=args.links_allow, links_deny=args.links_deny,
-                           screenshot=args.screenshot)
+                           screenshot=args.screenshot, cdp=args.cdp)
         if result.get("error"):
             print(f"❌ {result['error']}", file=sys.stderr)
             return 1

@@ -25,6 +25,22 @@ NODE = os.environ.get("UNIVERSAL_SCRAPER_NODE", resolve_node())
 NODE_PATH = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", resolve_node_path())
 
 
+def _dump_debug_page(source_url: str, text: str, page: int) -> None:
+    """提取 0 条时强制落盘现场——独立 config 运行没有 _task_dir，也要有据可查。"""
+    try:
+        import time as _t
+        from urllib.parse import urlparse as _up
+        _dir = Path(os.environ.get("UNIVERSAL_SCRAPER_DEBUG_DIR")
+                    or "/tmp/universal_scraper_debug")
+        _dir.mkdir(parents=True, exist_ok=True)
+        _host = (_up(source_url).netloc or "page").replace(":", "_")
+        _p = _dir / f"{_host}_p{page}_{int(_t.time())}.html"
+        _p.write_text(text, encoding="utf-8")
+        log(f"  ⚠️ 本页提取 0 条——现场已存 {_p}（打开核对选择器/内嵌JSON变量名/风控页）")
+    except Exception:
+        pass
+
+
 def _spawn_bridge(cmd: List[str], env: Optional[Dict[str, str]] = None):
     """启动浏览器桥子进程 + 后台排空 stderr（防止管道写满死锁）。"""
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -233,6 +249,9 @@ class HttpFetcher(BaseFetcher):
                 total = jpath(obj, pagination.get("total_path", "data.total"), total)
                 records.extend(recs if isinstance(recs, list) else [])
                 log(f"  page {page}: +{len(recs) if isinstance(recs, list) else 0}（累计 {len(records)}）")
+                if isinstance(recs, list) and not recs and text:
+                    log(f"  ⚠️ 记录数组为空/未命中——响应体前200字节: {text[:200]!r}"
+                        f"（检查 pagination.records_path / 响应里的风控码）")
                 # 终止条件
                 if strat == "none":
                     break
@@ -250,6 +269,8 @@ class HttpFetcher(BaseFetcher):
                     rows = self._extract_html_rows(text)
                 records.extend(rows)
                 log(f"  page {page}: +{len(rows)}（累计 {len(records)}）")
+                if not rows and text:
+                    self._dump_debug_page(text, page)
                 nxt = pagination.get("next_selector") or pagination.get("next_xpath")
                 nxt_url = self._next_url(text, nxt)
                 if not rows or not nxt_url:
@@ -470,6 +491,8 @@ class BrowserFetcher(BaseFetcher):
                         rows = self._extract(html)
                     records.extend(rows)
                     log(f"  page {obj.get('page')}: +{len(rows)}（累计 {len(records)}）")
+                    if not rows and html:
+                        self._dump_debug_page(html, int(obj.get("page") or 1))
                     # 渲染页落盘到任务目录：供失败轮内 LLM 直接抽取/选择器精修用
                     try:
                         if _td:
