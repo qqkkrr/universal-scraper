@@ -250,6 +250,26 @@ HTTP 批量爆发不仅自身被封，还会**反噬正在工作的浏览器会�
 7. **对比校验**：换 pageSize/翻页参数后抽查首末页字段完整性——参数换挡丢字段是
    该系接口的常见暗坑。
 
+## R18 · 闲鱼/二手平台（登录墙 + JS 站 + 跨域 mtop）
+
+目标特征：扫码登录强制、数据靠 JS 渲染、接口是跨域 mtop（**capture 录不到响应体**——
+跨域 XHR 的 body 拿不到是 CDP 限制，别在 capture 路线上空转）。标准路线：
+
+1. **L3 登录关卡**：`open-debug-chrome.sh` → 用户扫一次码；`cdp --login-state goofish.com`
+   确认登录态（v1.9 修复了输出 bug）。
+2. **列表**：browser 型 + `cdp` 附加 + **`actions` 排序点击**（v1.9 起透传到桥：
+   `[{"type":"click","selector":"最新排序"}]`）+ `pagination.type: "js"` 点"下一页"。
+3. **价格等无缝拼接字段**：用**结构化子字段**分开取，防 `¥5923人想要` 不可逆拼接：
+   ```json
+   "价格区": {"subs": {"价格": "span.price", "想要": "span.want"}}
+   ```
+4. **详情**：`detail.backend: "browser"`（v1.9 新增）——单次桥进程顺序导航全部详情 URL，
+   复用同一 CDP 连接，不逐页起浏览器。`backend: "http"` 对登录+JS 站只会拿回空壳。
+5. **文本派生字段**（使用次数/划痕）：pipeline `regex_extract`：
+   `{"type":"regex_extract","field":"描述","pattern":"使用(\\d+)次","to":"使用次数"}`。
+6. **iterate 多轮注意**：桥每轮会重连 CDP（已加重试），标签页已改为用完即关——
+   不再积压拖垮 Chrome；仍建议单轮 ≤ 几百页。
+
 ## 交付前必做
 
 ```bash

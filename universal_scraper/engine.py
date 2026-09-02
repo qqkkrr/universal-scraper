@@ -146,6 +146,22 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
                 except (ValueError, TypeError, OSError):
                     pass
             log(f"{log_prefix}transform[{field} {op}]: {changed} 条已变换")
+        elif st == "regex_extract":
+            # 正则提取变换（闲鱼战例）：从既有字段按 capture group 派生新字段
+            field = step["field"]
+            pat = _re.compile(step.get("pattern", ""))
+            grp = int(step.get("group", 1))
+            to = step.get("to") or (field + "_提取")
+            n_hit = 0
+            for r in rows:
+                m = pat.search(str(r.get(field) or ""))
+                if m:
+                    try:
+                        r[to] = m.group(grp)
+                        n_hit += 1
+                    except (IndexError, _re.error):
+                        pass
+            log(f"{log_prefix}regex_extract[{field}->{to}]: 命中 {n_hit}/{len(rows)}")
         elif st == "template":
             # 用已有字段拼新字段：tmpl 里 {字段名} 占位，如 "https://www.bilibili.com/video/{bvid}"
             name, tmpl = step["field"], step.get("tmpl", "")
@@ -214,12 +230,50 @@ def fetch_detail_row(http, row: Dict[str, Any], detail: Dict[str, Any]) -> Dict[
     return row
 
 
-def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, logger: Optional[Logger] = None) -> List:
+def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, logger: Optional[Logger] = None,
+                  source: Optional[Dict[str, Any]] = None) -> List:
     if not detail.get("enabled"):
         return rows
     concurrency = int(detail.get("concurrency", 1))
     interval = float(detail.get("interval", 0.5))
     timeout = float(anti.get("timeout", 15))
+    todo = [r for r in rows if not (r.get("detail_body") or "").strip()]
+    done = len(rows) - len(todo)
+    (logger or Logger()).info(f"详情：共 {len(rows)}，已有 {done}，待抓 {len(todo)}（并发 {concurrency}）")
+    if not todo:
+        return rows
+
+    # 详情 browser 后端（闲鱼战例）：登录态+JS 站的详情页 HTTP 全是空壳——
+    # 单次桥进程（可 cdp 附加）顺序导航全部 URL，一次连接抓完再统一抽取
+    if str(detail.get("backend", "")).lower() == "browser":
+        from .fetchers import BrowserFetcher
+        bsrc = {"type": "browser", "url": todo[0].get(detail.get("url_field", "url")) or "about:blank",
+                "cdp": detail.get("cdp") or (source or {}).get("cdp"),
+                "headless": detail.get("headless", False)}
+        bf = BrowserFetcher(bsrc, anti, {}, Path("."))
+        url_field = detail.get("url_field", "url")
+        urls = [r.get(url_field) or "" for r in todo]
+        pages = bf.fetch_pages([u for u in urls if u])
+        got = 0
+        for r in todo:
+            url = r.get(url_field) or ""
+            html = pages.get(url, "")
+            r[url_field + "_final"] = url
+            r["detail_status"] = "200" if html else "browser_miss"
+            ctx_obj = None
+            if detail.get("type") == "http_json":
+                import json as _json
+                try:
+                    ctx_obj = _json.loads(html)
+                except Exception:
+                    ctx_obj = None
+            for spec in detail.get("extract", []):
+                r[spec["name"]] = apply_extractor(spec, html, html, ctx_obj)
+            if html:
+                got += 1
+        (logger or Logger()).info(f"详情(browser)：批抓 {got}/{len(todo)} 页成功")
+        return rows
+
     backend = anti.get("http_backend", "requests")
     from .core import RequestsClient, HttpClient
     if backend == "requests":
@@ -233,11 +287,6 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
     else:
         http = HttpClient(min_interval=interval, timeout=timeout,
                           use_system_proxy=anti.get("use_system_proxy", False))
-    todo = [r for r in rows if not (r.get("detail_body") or "").strip()]
-    done = len(rows) - len(todo)
-    (logger or Logger()).info(f"详情：共 {len(rows)}，已有 {done}，待抓 {len(todo)}（并发 {concurrency}）")
-    if not todo:
-        return rows
 
     def _work(r):
         fetch_detail_row(http, r, detail)
@@ -538,7 +587,8 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
                                     r[kk] = vv
                             merged += 1
                     logger.info(f"断点续跑：从检查点合并 {merged} 条详情")
-            rows = fetch_details(rows, detail, anti_iter, checkpoint=checkpoint, logger=logger)
+            rows = fetch_details(rows, detail, anti_iter, checkpoint=checkpoint, logger=logger,
+                                 source=source)
 
         if rows:
             all_rows.extend(rows)

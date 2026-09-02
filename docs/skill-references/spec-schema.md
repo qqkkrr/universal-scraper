@@ -102,6 +102,7 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
   "pool": true,
   "stealth": true,
   "remove_overlays": true,
+  "actions": [{"type": "click", "selector": "text=最新发布", "wait_ms": 1500}],
   "wait": {"selector": "#list", "timeout": 20000},
   "row_css": "li.item",
   "fields": {"标题": {"css": "span.t"}},
@@ -119,6 +120,11 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 ```
 
 要点：
+- `actions`（v1.9 起生效）：页面加载后的动作链——`click`/`fill`/`press`/`wait`/`js`/`screenshot`，
+  排序切换、展开折叠等进这里；`js_pre` 仍是加载前注入。
+- **结构化子字段 `subs`**（防无缝拼接不可逆，如 `¥5923人想要`）：
+  `"价格区": {"subs": {"价格": "span.price", "想要": "span.want"}}`——行内分别取子选择器，
+  产出 dict（导出安全序列化）。
 - `cdp` 存在时附加用户已登录的调试 Chrome（L3），不再新开浏览器。
 - `scroll_count`/`scroll_wait_ms`：滚动加载型列表。
 - `capture` + `record_from`: `"capture"`（按声明模式）或 `"capture_all"`（录下全部 JSON
@@ -203,6 +209,8 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
   `{"type":"transform","field":"pubdate","op":"unix_to_datetime"}`。
 - `template`：用已有字段拼新字段，`tmpl` 里 `{字段名}` 占位：
   `{"type":"template","field":"视频链接","tmpl":"https://www.bilibili.com/video/{bvid}"}`。
+- `regex_extract`：正则 capture group 从既有字段派生新字段：
+  `{"type":"regex_extract","field":"描述","pattern":"使用(\\d+)次","group":1,"to":"使用次数"}`。
 - **仅 v3 任务包（`run --task`）支持的类型**：`parse_date`、`split`、`default`、
   `download`、`validate`、`dedup_content`——这些在 `run --config` 执行器中未实现，
   validate 会给出警告且运行时跳过。词表唯一来源见 `universal_scraper/contract.py`。
@@ -234,6 +242,16 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
  "extract": [{"name": "评分", "type": "json", "path": "data.score"},
              {"name": "主材", "type": "json", "path": "data.spec[name=主材].value"}]}
 ```
+
+**详情 browser 后端**（闲鱼战例——登录态+JS 站的详情页 HTTP 全是空壳）：
+
+```json
+{"enabled": true, "url_field": "链接", "backend": "browser",
+ "cdp": "http://127.0.0.1:9222",
+ "extract": [{"name": "价格", "type": "css_text", "selector": ".price"}]}
+```
+
+单次桥进程顺序导航全部详情 URL（同一 CDP 连接），不逐页起浏览器。
 
 `extract` 每项支持五种 `type`（配 `limit` 可抓列表字段，多条换行连接）：
 

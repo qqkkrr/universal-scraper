@@ -26,6 +26,7 @@ PIPELINE_STEPS: Dict[str, Dict[str, str]] = {
     # ---- 仅 v2（engine.run_pipeline）----
     "transform":     {"executor": "v2", "params": "field, op(unix_to_datetime|upper|lower), fmt"},
     "template":      {"executor": "v2", "params": "field, tmpl({字段}插值)"},
+    "regex_extract": {"executor": "v2", "params": "field, pattern, group, to"},
     # ---- 仅 v3（modules/pipelines.BasePipeline）----
     "dedup_content": {"executor": "v3", "params": "field"},
     "validate":      {"executor": "v3", "params": "field, rule"},

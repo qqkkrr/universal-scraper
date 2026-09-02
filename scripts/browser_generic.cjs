@@ -234,6 +234,7 @@ function centerCaptcha(page) {
   let browser = null;
   let context = null;
   let page = null;
+  const ownPages = [];  // 本进程创建的标签页——finally 必须关闭（CDP 模式防泄漏）
   try {
     const headless = arg("headless", "1") !== "0";
     const ctxOpts = (!profileDir && storageState && fs.existsSync(storageState)) ? { storageState } : {};
@@ -267,9 +268,16 @@ function centerCaptcha(page) {
       // 真实浏览器 = 真实指纹 + 真实登录态，是 MediaCrawler/DrissionPage CDP 模式的思路，
       // 对京东/知乎/微博/小红书这类强风控站最稳。
       out({ type: "cdp", message: "正在连接真实浏览器 CDP: " + cdpUrl });
-      browser = await chromium.connectOverCDP(cdpUrl);
+      // 闲鱼战例：iterate 多轮反复重连 CDP 会偶发超时——重试 2 次（间隔 3s）
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { browser = await chromium.connectOverCDP(cdpUrl, { timeout: 20000 }); break; }
+        catch (e) { lastErr = e; out({ type: "diag", message: `CDP 连接失败(第${attempt + 1}次): ${e.message}` }); await sleep(3000); }
+      }
+      if (!browser) throw lastErr || new Error("CDP 连接失败");
       context = browser.contexts()[0] || await browser.newContext();
       page = await context.newPage();
+      ownPages.push(page);
     } else if (profileDir) {
       // 持久档案模式：登录态保存在档案目录，登录一次永久复用（最接近真实浏览器）
       // headless 默认有头（登录需要），可显式 --headless 1 无头（登录态已存在时抓取用）
@@ -672,6 +680,60 @@ function centerCaptcha(page) {
       out({ type: "capture_file", name: key, file: f, count: capturedBy[key].length });
     }
 
+    // ===== spec.actions：页内动作链（闲鱼战例——排序点击/输入/等待，v1.9 起透传到桥） =====
+    if (Array.isArray(spec.actions) && spec.actions.length) {
+      for (const [ai, a] of spec.actions.entries()) {
+        try {
+          if (a.type === "click") {
+            const loc = page.locator(a.selector).first();
+            await loc.waitFor({ state: "visible", timeout: a.timeout_ms || 10000 });
+            await loc.click();
+            out({ type: "diag", message: `actions[${ai}] click ${a.selector} ✓` });
+          } else if (a.type === "type" || a.type === "fill") {
+            await page.locator(a.selector).first().fill(String(a.value ?? ""), { timeout: a.timeout_ms || 10000 });
+            out({ type: "diag", message: `actions[${ai}] fill ${a.selector} ✓` });
+          } else if (a.type === "press") {
+            await page.keyboard.press(a.key || "Enter");
+          } else if (a.type === "wait") {
+            if (a.selector) await page.locator(a.selector).first().waitFor({ state: "visible", timeout: a.timeout_ms || 15000 }).catch(() => {});
+            else await sleep(a.ms || 1000);
+            out({ type: "diag", message: `actions[${ai}] wait ✓` });
+          } else if (a.type === "js") {
+            const ret = await page.evaluate(a.js);
+            out({ type: "diag", message: `actions[${ai}] js 返回: ${String(ret).slice(0, 120)}` });
+          } else if (a.type === "screenshot") {
+            await page.screenshot({ path: a.path, fullPage: !!a.fullPage });
+            out({ type: "diag", message: `actions[${ai}] screenshot -> ${a.path}` });
+          }
+          if (a.wait_ms) await sleep(a.wait_ms);
+        } catch (e) {
+          out({ type: "diag", message: `actions[${ai}] ${a.type} 失败: ${String(e.message).slice(0, 120)}` });
+        }
+      }
+    }
+
+    // ===== spec.urls：批量详情模式（#2 详情 browser 后端）——单连接顺序导航，一页一存 =====
+    if (Array.isArray(spec.urls) && spec.urls.length) {
+      const waitMs = spec.detail_wait_ms || 1200;
+      let n = 0;
+      for (const [i, u] of spec.urls.entries()) {
+        try {
+          await page.goto(u, { timeout: 45000, waitUntil: "domcontentloaded" });
+          await sleep(waitMs);
+          const html = await page.evaluate(() => document.documentElement.outerHTML);
+          const file = path.join(outDir, `detail_${i}.html`);
+          fs.writeFileSync(file, html);
+          out({ type: "detail_page", index: i, url: u, file, bytes: html.length });
+          n++;
+        } catch (e) {
+          out({ type: "detail_page", index: i, url: u, error: String(e.message).slice(0, 160) });
+        }
+      }
+      out({ type: "done", pages: n });
+      setTimeout(() => { try { process.exit(0); } catch (e) {} }, 8000).unref();
+      return;
+    }
+
     let pagesDone = 0;
     // startPage：定向分页（配深链 URL 使用，如列表第 1161 页）——页号从 startPage 计
     for (let p = startPage; p <= maxPages; p++) {
@@ -738,6 +800,9 @@ function centerCaptcha(page) {
     out({ type: "error", message: String((e && e.message) || e) });
     process.exit(1);
   } finally {
+    // 闲鱼战例：CDP 附加模式下 browser.close() 只断连接，自建标签页会泄漏积压
+    // （曾积到 62 个标签页拖垮 Chrome）——先关掉我们自己开的页再断开
+    for (const p of ownPages) { try { await p.close(); } catch (e) {} }
     if (browser) await browser.close();
   }
 }

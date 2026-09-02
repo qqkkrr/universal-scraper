@@ -565,8 +565,16 @@ def main() -> int:
         out = (r.stdout or "").strip()
         if out:
             try:
-                for u in json.loads(out):
-                    print(u)
+                data = json.loads(out)
+                # 闲鱼战例：dict 结果曾按 list 遍历只打印出键名（"空表头"）——按形态分流
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        print(f"{k}: {', '.join(map(str, v)) if isinstance(v, list) else v}")
+                elif isinstance(data, list):
+                    for u in data:
+                        print(u)
+                else:
+                    print(data)
             except json.JSONDecodeError:
                 print(out)
         if r.stderr.strip():

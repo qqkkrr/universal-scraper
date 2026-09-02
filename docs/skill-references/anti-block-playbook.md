@@ -76,6 +76,9 @@
 异步触发（如 EUIPO eSearch），空等只会捕到配置/认证类响应——必须配
 `"actions": [{"type": "wait", "ms": 10000}]` 这类等待让 XHR 有时间发出；
 需要点击/翻页才出的数据，就把点击写进 actions 再捕获。
+⚠️ **跨域 XHR 的响应体录不到**（CDP 限制，闲鱼 goofish mtop 实测：raw 全空）——
+遇到跨域 mtop 接口别在 capture 路线上空转，直接走浏览器 DOM 提取或
+`detail.backend: "browser"`（配方 R18）。
 
 ## 五、实战档案（真实案例，照方抓药）
 

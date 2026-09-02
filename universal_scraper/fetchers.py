@@ -327,6 +327,13 @@ class HttpFetcher(BaseFetcher):
                 if isinstance(fspec, str):
                     row[name] = el_html  # 简单模式：整行文本
                     continue
+                if isinstance(fspec.get("subs"), dict):
+                    # 结构化子字段（闲鱼战例）：价格 span 与"X人想要"无缝拼接不可逆——
+                    # 在行内分别取子选择器，产出 dict（导出时安全序列化）
+                    from .selectors import css_text as _ct
+                    row[name] = {sub: _ct(el_html, sub_sel, 0).strip()
+                                 for sub, sub_sel in fspec["subs"].items()}
+                    continue
                 if fspec.get("attr"):
                     from .selectors import css_attr
                     row[name] = css_attr(el_html, fspec.get("css") or "", fspec["attr"], fspec.get("limit", 0))
@@ -443,24 +450,82 @@ class BrowserFetcher(BaseFetcher):
         self.base_dir = base_dir
         self.bridge = Path(__file__).resolve().parent.parent / "scripts/browser_generic.cjs"
 
+    def fetch_pages(self, urls: List[str]) -> Dict[str, str]:
+        """批量详情抓取（详情 browser 后端）：单次桥进程 = 单 CDP 连接顺序导航
+        全部 URL，返回 {url: html}。闲鱼战例——登录态+JS 站的详情页 HTTP 全是空壳。"""
+        import tempfile
+        if not urls:
+            return {}
+        spec = self._build_spec(urls=urls)
+        with tempfile.TemporaryDirectory(prefix="us_detail_") as tmp:
+            spec_file = Path(tmp) / "spec.json"
+            out_dir = Path(tmp) / "pages"
+            spec_file.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+            session_dir = Path(self.anti.get("session_dir") or "/tmp/universal_scraper_session")
+            session_dir.mkdir(parents=True, exist_ok=True)
+            storage_state = str(session_dir / f"{self.anti.get('session_name', 'session')}.json")
+            cmd = [NODE, str(self.bridge), "--spec", str(spec_file), "--out", str(out_dir),
+                   "--maxPages", str(len(urls)), "--settle", "1000",
+                   "--captchaDir", "/tmp/universal_scraper_captcha",
+                   "--storageState", storage_state,
+                   "--scrollCount", "0", "--scrollWait", "1000",
+                   "--loginTimeout", "600000",
+                   "--headless", "0" if self.source.get("headless") is False else "1"]
+            if self.source.get("cdp"):
+                cmd += ["--cdp", str(self.source["cdp"])]
+            env = dict(os.environ)
+            env["NODE_PATH"] = NODE_PATH
+            proc, errbuf = _spawn_bridge(cmd, env)
+            assert proc.stdout is not None
+            pages: Dict[str, str] = {}
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") == "detail_page" and obj.get("file") and not obj.get("error"):
+                    try:
+                        pages[obj["url"]] = Path(obj["file"]).read_text(encoding="utf-8", errors="replace")
+                        log(f"  详情 {int(obj.get('index', 0)) + 1}/{len(urls)}: {obj.get('bytes', 0)}B")
+                    except Exception:
+                        pass
+                elif obj.get("type") == "error":
+                    proc.terminate()
+                    die(f"详情批抓桥错误: {obj.get('message')}")
+            rc, err = _wait_bridge(proc, errbuf)
+            if rc != 0 and not pages:
+                die(f"详情批抓桥退出码 {rc}: {err[-300:]}")
+            return pages
+
+    def _build_spec(self, urls: Any = None) -> Dict[str, Any]:
+        s = self.source
+        spec = {
+            "url": s["url"],
+            "js_pre": s.get("js_pre"),
+            "wait": s.get("wait"),
+            "actions": s.get("actions"),  # 闲鱼战例：v1.9 起透传给桥执行（此前静默丢弃）
+            "pagination": s.get("pagination", {"type": "none"}),
+            "captcha": s.get("captcha"),
+            "slider": s.get("slider"),
+            # capture 契约：布尔 true=全捕获（翻译成桥的 capture_all）；列表=声明式捕获。
+            # 绝不能把布尔原样传给 spec.capture——桥会迭代它导致 TypeError 崩溃。
+            "capture": (s.get("capture") if isinstance(s.get("capture"), list) else None),
+            "capture_all": s.get("capture") is True,
+            "login": s.get("login"),
+            "verify": s.get("verify"),
+        }
+        if urls:
+            spec["urls"] = urls
+            spec["detail_wait_ms"] = s.get("detail_wait_ms", 1200)
+        return spec
+
     def fetch_list(self, pagination: Dict[str, Any]) -> List[Dict[str, Any]]:
         import tempfile
 
-        spec = {
-            "url": self.source["url"],
-            "js_pre": self.source.get("js_pre"),
-            "wait": self.source.get("wait"),
-            "pagination": self.source.get("pagination", {"type": "none"}),
-            "captcha": self.source.get("captcha"),
-            "slider": self.source.get("slider"),
-            # capture 契约：布尔 true=全捕获（翻译成桥的 capture_all）；列表=声明式捕获。
-            # 绝不能把布尔原样传给 spec.capture——桥会迭代它导致 TypeError 崩溃。
-            "capture": (self.source.get("capture")
-                        if isinstance(self.source.get("capture"), list) else None),
-            "capture_all": self.source.get("capture") is True,
-            "login": self.source.get("login"),
-            "verify": self.source.get("verify"),
-        }
+        spec = self._build_spec()
         max_pages = int(pagination.get("max_pages", 100))
         settle = int(pagination.get("settle_ms", 1500))
         with tempfile.TemporaryDirectory(prefix="us_browser_") as tmp:
@@ -587,6 +652,11 @@ class BrowserFetcher(BaseFetcher):
             for name, fspec in (s.get("fields", {}) or {}).items():
                 if isinstance(fspec, str):
                     row[name] = css_text(el_html, fspec, 0)
+                    continue
+                if isinstance(fspec.get("subs"), dict):
+                    # 结构化子字段（闲鱼战例）：行内分别取子选择器，防无缝拼接不可逆
+                    row[name] = {sub: css_text(el_html, sub_sel, 0).strip()
+                                 for sub, sub_sel in fspec["subs"].items()}
                     continue
                 if fspec.get("xpath"):
                     row[name] = xpath_text(el_html, fspec["xpath"], fspec.get("limit", 0))
