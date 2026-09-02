@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 SOURCE_TYPES = {"http_json", "http_html", "browser_script", "browser"}
-PAGINATION_STRATEGIES = {"page_param", "offset", "next_url", "none"}
+PAGINATION_STRATEGIES = {"page_param", "offset", "next_url", "none", "template"}
 EXTRACT_TYPES = {"json", "css_text", "css_attr", "css_html", "xpath_text", "xpath_attr", "regex", "regex_all", "constant"}
 CAPTCHA_STRATEGIES = {"auto", "ddddocr", "opencv_slider", "2captcha", "nopecha", "human", "config", "none", "external"}
 

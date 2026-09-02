@@ -51,6 +51,16 @@ def jpath(obj: Any, path: str, default: Any = None) -> Any:
         if isinstance(cur, dict):
             cur = cur.get(tok, default)
         elif isinstance(cur, list):
+            if "=" in tok and not tok.lstrip("-").isdigit():
+                # 过滤语法 spec[name=主材]：在 dict 列表里按 key=value 取第一个命中
+                # （小米有品战例：规格 [{"name":"主材","value":"PP"},...] 的按名取值）
+                k, _, v = tok.partition("=")
+                matches = [x for x in cur
+                           if isinstance(x, dict) and str(x.get(k)) == v]
+                if not matches:
+                    return default
+                cur = matches[0]
+                continue
             try:
                 cur = cur[int(tok)]
             except (ValueError, IndexError):

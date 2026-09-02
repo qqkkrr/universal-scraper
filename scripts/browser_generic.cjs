@@ -364,7 +364,19 @@ function centerCaptcha(page) {
         if (capturedAll.length < 2000) {
           try {
             const j = await res.json();
-            capturedAll.push({ url: u, json: j });
+            // 小米有品战例：同时落盘请求体/方法/关键头——一次浏览器侦察即可改写成 http_json 配置
+            let post_data = "";
+            let method = "GET";
+            let req_ct = "";
+            try {
+              const rq = res.request();
+              method = rq.method();
+              post_data = rq.postData() || "";
+              const hh = rq.headers();
+              req_ct = hh["content-type"] || "";
+            } catch (e) {}
+            capturedAll.push({ url: u, method, post_data: post_data || undefined,
+                               request_content_type: req_ct || undefined, json: j });
             if (capturedAll.length % 50 === 0) {
               fs.writeFileSync(path.join(outDir, "capture_all.json"), JSON.stringify(capturedAll, null, 1));
             }

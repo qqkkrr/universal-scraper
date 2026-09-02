@@ -213,9 +213,32 @@ class HttpFetcher(BaseFetcher):
         limit = pagination.get("limit", 20)
         records: List[Dict[str, Any]] = []
         total = None
+        # template 策略（POST body 翻页）：url/body/json_body 里的 {{page}}/{{offset}} 每页替换
+        tmpl = strat == "template"
+        if tmpl:
+            _tmpl_orig = {k: s.get(k) for k in ("url", "body", "json_body")}
+
+        def _apply_page_tokens(v: Any) -> Any:
+            reps = [("{page}", str(page)), ("{{page}}", str(page)),
+                    ("{offset}", str((page - 1) * limit)), ("{{offset}}", str((page - 1) * limit))]
+            if isinstance(v, str):
+                out = v
+                for a, b in reps:
+                    out = out.replace(a, b)
+                return out
+            if isinstance(v, (dict, list)):
+                try:
+                    return json.loads(_apply_page_tokens(json.dumps(v, ensure_ascii=False)))
+                except Exception:
+                    return v
+            return v
+
         while page <= max_pages:
             params: Dict[str, Any] = {}
-            if strat == "page_param":
+            if tmpl:
+                for k, v0 in _tmpl_orig.items():
+                    s[k] = _apply_page_tokens(v0)
+            elif strat == "page_param":
                 params[pagination["page_param"]] = page
             elif strat == "offset":
                 params[pagination.get("offset_param", "offset")] = (page - 1) * limit

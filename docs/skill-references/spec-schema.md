@@ -67,7 +67,19 @@ URL 里可以用 `vars` 定义的变量（如 `?q={{keyword}}`）；**页码不�
 
 ⚠️ **必须**在 pagination 里写 `records_path`（JSON 里列表数据所在的点路径，如
 `"data.list"`），否则抓到响应也提不出记录（page +0）。`record.fields` 的 `from`
-支持 jpath 点路径取嵌套值：`{"UP主": {"from": "owner.name"}}`。
+支持 jpath 点路径取嵌套值：`{"UP主": {"from": "owner.name"}}`，更支持
+**按名过滤**（电商规格 schema 神器）：`{"主材": {"from": "spec[name=主材].value"}}`。
+
+**POST body 翻页（mtop 风格接口）**：`pagination.strategy: "template"`，url/body/
+json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样支持）：
+
+```json
+{"name": "有品出行",
+ "source": {"type": "http_json", "method": "POST", "url": "https://api.x.com/gateway",
+            "json_body": {"pageIdx": "{{page}}", "pageSize": 20, "cate": "outdoor"}},
+ "pagination": {"strategy": "template", "max_pages": 10,
+                "records_path": "data.list"}}
+```
 
 **browser** — JS 渲染/交互（L2/L3）：
 
@@ -198,6 +210,17 @@ URL 里可以用 `vars` 定义的变量（如 `?q={{keyword}}`）；**页码不�
 ```
 
 相对链接用 `url_transform` 补前缀；`max_pages: 0` 表示全部。
+
+**详情支持 POST + JSON 网关**（小米有品战例：评分/规格在 POST 接口里）：
+`method: "POST"` + `json_body`（`{列表行字段}` 插值）+ `type: "http_json"`
+（extract 走 `type: "json"` 的 jpath 点路径/按名过滤）：
+
+```json
+{"enabled": true, "url_field": "商品ID", "method": "POST",
+ "json_body": {"itemId": "{商品ID}"}, "type": "http_json",
+ "extract": [{"name": "评分", "type": "json", "path": "data.score"},
+             {"name": "主材", "type": "json", "path": "data.spec[name=主材].value"}]}
+```
 
 `extract` 每项支持五种 `type`（配 `limit` 可抓列表字段，多条换行连接）：
 

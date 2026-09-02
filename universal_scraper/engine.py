@@ -156,6 +156,21 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
     return rows
 
 
+def _tmpl_value(v: Any, row: Dict[str, Any]) -> Any:
+    """{字段名} 用 row 的值递归插值（str/dict/list 通吃）——detail POST body 用。"""
+    if isinstance(v, str):
+        out = v
+        for k, val in row.items():
+            if "{" + str(k) + "}" in out:
+                out = out.replace("{" + str(k) + "}", str(val))
+        return out
+    if isinstance(v, dict):
+        return {k: _tmpl_value(x, row) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_tmpl_value(x, row) for x in v]
+    return v
+
+
 def fetch_detail_row(http, row: Dict[str, Any], detail: Dict[str, Any]) -> Dict[str, Any]:
     url = row.get(detail.get("url_field", "url")) or ""
     if not url:
@@ -168,12 +183,28 @@ def fetch_detail_row(http, row: Dict[str, Any], detail: Dict[str, Any]) -> Dict[
             url = tr["prefix"] + url
         elif "suffix" in tr:
             url = url + tr["suffix"]
-    resp = http.get(url, allow_html_404=detail.get("allow_html_404", True))
+    # 详情支持 POST（小米有品战例：评分/规格在 POST 网关里，body 用 {字段} 从列表行插值）
+    method = str(detail.get("method", "GET")).upper()
+    if method == "POST" and hasattr(http, "post"):
+        body = None
+        if detail.get("json_body") is not None:
+            body = _tmpl_value(detail["json_body"], row)
+        resp = http.post(url, json_data=body)
+    else:
+        resp = http.get(url, allow_html_404=detail.get("allow_html_404", True))
     html = resp.get("text", "")
     row[detail.get("url_field", "url") + "_final"] = url
     row["detail_status"] = str(resp.get("status"))
+    # 详情返回 JSON 时 extract 走 type:json（jpath 点路径，含 [name=xx] 过滤）
+    ctx_obj = None
+    if detail.get("type") == "http_json":
+        import json as _json
+        try:
+            ctx_obj = _json.loads(html)
+        except Exception:
+            ctx_obj = None
     for spec in detail.get("extract", []):
-        row[spec["name"]] = apply_extractor(spec, html, html, None)
+        row[spec["name"]] = apply_extractor(spec, html, html, ctx_obj)
     return row
 
 
