@@ -12,9 +12,12 @@ EXTRACT_TYPES = {"json", "css_text", "css_attr", "css_html", "xpath_text", "xpat
 CAPTCHA_STRATEGIES = {"auto", "ddddocr", "opencv_slider", "2captcha", "nopecha", "human", "config", "none", "external"}
 
 # ---------------------------------------------------------------- 共享常量（v2/v3 一套，杜绝 API 分裂）
-# 与 modules/pipelines.py / modules/parsers.py 实际实现对齐
+# 与 modules/pipelines.py / modules/parsers.py / engine.run_pipeline 实际实现对齐
+# 注意：parse_date/split/default/download/validate/dedup_content 仅 v3 任务包（modules/pipelines）实现；
+#       transform/template/cast/rename 等在 v2 run --config（engine.run_pipeline）实现。
 ALL_PIPELINE_TYPES = {"filter", "dedup", "dedup_content", "cast", "add", "validate",
-                      "rename", "default", "template", "split", "download", "parse_date"}
+                      "rename", "default", "template", "split", "download", "parse_date",
+                      "transform"}
 ALL_ACTION_TYPES = {"click", "type", "write", "fill", "press", "select", "wait",
                     "wait_time", "wait_for_selector", "waitfor", "scroll",
                     "exec", "js", "execute_javascript", "screenshot", "noop"}

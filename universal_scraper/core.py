@@ -36,6 +36,26 @@ CACHE_DEFAULT_TTL = 86400.0      # HTTP 响应缓存默认有效期（秒，24h�
 CACHE_MAX_FILES = 2000           # 缓存文件上限（超限删最旧）
 DEFAULT_MAX_BODY = 20 * 1024 * 1024  # 默认响应体上限（20MB，流式限读）
 
+
+def _norm_cookies(val: Any) -> Dict[str, str]:
+    """cookies 容忍 dict 或 "k=v; k2=v2" 串（cookies 命令导出的即串）。
+    文档曾按串教用户填写、实现却按 dict 消费导致必崩——两侧在此统一。"""
+    if not val:
+        return {}
+    if isinstance(val, dict):
+        return {str(k): str(v) for k, v in val.items()}
+    if isinstance(val, str):
+        out: Dict[str, str] = {}
+        for part in val.split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            k, _, v = part.partition("=")
+            if k.strip():
+                out[k.strip()] = v.strip()
+        return out
+    return {}
+
 # ---------------------------------------------------------------- 日志
 
 def log(msg: str, level: str = "INFO") -> None:
@@ -302,6 +322,7 @@ class HttpClient:
     cookies: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.cookies = _norm_cookies(self.cookies)
         self._last_ts = 0.0
         self._throttle_lock = threading.Lock()
         if self.cache_dir:
@@ -655,7 +676,7 @@ class RequestsClient:
         if proxy:
             self.session.proxies = {"http": proxy, "https": proxy}
         if cookies:
-            self.session.cookies.update(cookies)
+            self.session.cookies.update(_norm_cookies(cookies))
         self._throttle_lock = threading.Lock()
         # 连接池
         adapter = requests.adapters.HTTPAdapter(pool_connections=8, pool_maxsize=16, max_retries=0)
@@ -793,7 +814,7 @@ class CurlCffiClient:
         self.impersonate_pool = ["chrome", "safari17_0", "firefox133", "edge101"]  # impersonate="auto" 时轮换
         self._throttle_lock = threading.Lock()
         self.extra_headers = dict(extra_headers or {})
-        self.cookies = dict(cookies or {})
+        self.cookies = _norm_cookies(cookies)
         self._last_ts = 0.0
 
     def _throttle(self) -> None:

@@ -117,6 +117,42 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
         elif st == "add":
             for r in rows:
                 r[step["field"]] = step.get("value")
+        elif st == "transform":
+            # 字段变换：op=unix_to_datetime（秒/毫秒时间戳自适应）| upper | lower
+            field, op = step["field"], step.get("op", "unix_to_datetime")
+            fmt = step.get("fmt", "%Y-%m-%d %H:%M:%S")
+            changed = 0
+            for r in rows:
+                v = r.get(field)
+                if v in (None, ""):
+                    continue
+                try:
+                    if op == "unix_to_datetime":
+                        ts = float(str(v).strip())
+                        if ts > 9_999_999_999:  # 毫秒时间戳
+                            ts /= 1000.0
+                        r[field] = time.strftime(fmt, time.localtime(ts))
+                        changed += 1
+                    elif op == "upper":
+                        r[field] = str(v).upper(); changed += 1
+                    elif op == "lower":
+                        r[field] = str(v).lower(); changed += 1
+                except (ValueError, TypeError, OSError):
+                    pass
+            log(f"{log_prefix}transform[{field} {op}]: {changed} 条已变换")
+        elif st == "template":
+            # 用已有字段拼新字段：tmpl 里 {字段名} 占位，如 "https://www.bilibili.com/video/{bvid}"
+            name, tmpl = step["field"], step.get("tmpl", "")
+            for r in rows:
+                out = tmpl
+                for k, v in r.items():
+                    if "{" + str(k) + "}" in out:
+                        out = out.replace("{" + str(k) + "}", str(v))
+                r[name] = out
+        else:
+            # 未知/未实现类型必须可见（parse_date/split/download 等属 v3 任务包执行器），
+            # 静默跳过会让用户以为生效了——零结果时排查不到原因
+            log(f"{log_prefix}⚠️ pipeline 类型 '{st}' 在 run --config 执行器中未实现，已跳过")
     return rows
 
 

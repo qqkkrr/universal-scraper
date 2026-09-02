@@ -21,8 +21,13 @@ OPTIONAL_PY = ["pandas", "requests", "ddddocr", "cv2"]
 
 
 def _py_ok(name: str) -> bool:
+    """导入探测：静默重定向 stdout/stderr——可选依赖（如 anaconda 的 pandas/numpy
+    兼容性警告）的 Traceback 不许刷屏淹没真实结论。"""
+    import contextlib
+    import io
     try:
-        __import__(name)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            __import__(name)
         return True
     except Exception:
         return False
