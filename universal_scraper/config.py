@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 SOURCE_TYPES = {"http_json", "http_html", "browser_script", "browser"}
 PAGINATION_STRATEGIES = {"page_param", "offset", "next_url", "none", "template"}
@@ -126,7 +126,6 @@ def collect_warnings(cfg: Dict[str, Any]) -> "List[str]":
     src = cfg.get("source", {}) or {}
     stype = src.get("type", "")
     rec = cfg.get("record", {}) or {}
-    pag = cfg.get("pagination", {}) or {}
     # 微博战例：source.fields 提取了、record.fields 空映射 → 输出被丢弃
     # （v1.8 起运行时会自动按 source 字段映射；此提示改为确认口径/改名指引）
     if stype in ("http_html", "browser") and (src.get("fields") or src.get("row_css")) \

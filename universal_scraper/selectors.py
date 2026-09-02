@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, List
+from typing import Any, Dict, List
 
 try:
     from lxml import html as _lxml_html
