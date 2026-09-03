@@ -310,11 +310,81 @@ def download_pdf(site: Dict[str, str], art: Dict[str, Any], out_dir: Path,
 
 
 # ---------------------------------------------------------------------------
+def _resume_pdfs_batch(site: Dict[str, str], out_root: Path, workers: int,
+                       cdp: str, log=print, batch_size: int = 150) -> Dict[str, Any]:
+    """断点续传批抓 PDF（登录态 CDP 模式）：读论文清单 CSV，跳过已有，
+    分批 fetch_pdfs_batch（每批后可换 IP），完成后统一重命名为标准文件名。"""
+    import csv as _csv
+    from .fetchers import BrowserFetcher
+    meta_dir = out_root / "元数据"
+    pdf_dir = out_root / "PDF"
+    csv_path = meta_dir / f"{site['name']}_论文清单.csv"
+    if not csv_path.exists():
+        return {"error": f"清单不存在（先跑 --list-only 生成）: {csv_path}"}
+    rows = list(_csv.DictReader(open(csv_path, encoding="utf-8-sig")))
+    log(f"📋 清单 {len(rows)} 篇")
+
+    def _std_name(r):
+        safe = re.sub(r'[\\/:*?"<>|\r\n]+', "_", r.get("title", ""))[:80] or r.get("article_id", "0")
+        return f"{r.get('year','')}-V{r.get('vol','')}I{r.get('issue','')}-{r.get('article_id','0')}-{safe}.pdf"
+
+    def _has_pdf(r):
+        if (pdf_dir / _std_name(r)).exists() and (pdf_dir / _std_name(r)).stat().st_size > 10 * 1024:
+            return True
+        legacy = pdf_dir / f"pdf_{r.get('article_id','')}.pdf"
+        return legacy.exists() and legacy.stat().st_size > 10 * 1024
+
+    todo = [r for r in rows if not _has_pdf(r)]
+    log(f"⬇️ 断点续传：已有 {len(rows) - len(todo)}，待抓 {len(todo)}")
+    if not todo:
+        # 统一重命名 legacy 命名
+        for r in rows:
+            legacy = pdf_dir / f"pdf_{r.get('article_id','')}.pdf"
+            if legacy.exists():
+                legacy.rename(pdf_dir / _std_name(r))
+        return {"ok": True, "downloaded": 0, "total": len(rows)}
+
+    bf = BrowserFetcher({"type": "browser", "url": site["base"],
+                         "cdp": cdp or "http://127.0.0.1:9222", "headless": False},
+                        {}, {}, out_root)
+    total_ok = 0
+    stopped = False
+    for bi in range(0, len(todo), batch_size):
+        batch = todo[bi:bi + batch_size]
+        items = [{"id": r.get("article_id", ""), "article_url": r.get("url", "")} for r in batch if r.get("article_id")]
+        if not items:
+            continue
+        r = bf.fetch_pdfs_batch(items, pdf_dir, base_url=site["base"],
+                                wait_ms=500, block_limit=25)
+        total_ok += len(r["ok"])
+        log(f"  本批成功 {len(r['ok'])}/{len(items)}，累计 {total_ok}", flush=True)
+        if not r.get("done", True):
+            log("⚠️ 连续登录墙——配额/会话失效。请换 IP 或明日重跑本命令继续。")
+            stopped = True
+            break
+        if bi + batch_size < len(todo):
+            time.sleep(20)
+    # 统一重命名 pdf_{id}.pdf → 标准名
+    renamed = 0
+    by_id = {r.get("article_id", ""): r for r in rows}
+    for legacy in pdf_dir.glob("pdf_*.pdf"):
+        aid = legacy.stem.replace("pdf_", "")
+        r = by_id.get(aid)
+        if r:
+            legacy.rename(pdf_dir / _std_name(r))
+            renamed += 1
+    log(f"{'⚠️ 提前停止' if stopped else '✅ 完成'}：本轮新下 {total_ok} 篇，重命名 {renamed}，"
+        f"总覆盖 {len(rows) - len([r for r in rows if not _has_pdf(r)])}/{len(rows)}")
+    return {"ok": True, "downloaded": total_ok, "stopped": stopped, "total": len(rows)}
+
+
+# ---------------------------------------------------------------------------
 # 5) 主流程编排
 # ---------------------------------------------------------------------------
 def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str] = None,
         workers: int = DEFAULT_WORKERS, with_meta: bool = True,
-        min_interval: float = MIN_INTERVAL, log=print, list_only: bool = False) -> Dict[str, Any]:
+        min_interval: float = MIN_INTERVAL, log=print, list_only: bool = False,
+        pdf_batch_resume: bool = False, cdp: str = "") -> Dict[str, Any]:
     if site_name not in KNOWN_JOURNALS:
         raise SystemExit(f"未知期刊站点 {site_name}，可用: {list(KNOWN_JOURNALS)}")
     site = KNOWN_JOURNALS[site_name]
@@ -323,6 +393,9 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
     meta_dir = out_root / "元数据"
     pdf_dir.mkdir(parents=True, exist_ok=True)
     meta_dir.mkdir(parents=True, exist_ok=True)
+
+    if pdf_batch_resume:
+        return _resume_pdfs_batch(site, out_root, workers, cdp=cdp, log=log)
 
     log(f"📚 {site['name']}（{site['base']}） 起始年份 {since_year}")
 

@@ -196,6 +196,9 @@ def main() -> int:
     jp.add_argument("--no-meta", action="store_true", help="跳过摘要/关键词拉取（更快）")
     jp.add_argument("--fulltext", action="store_true", help="科研管理模式：官方 PDF 受限时追加公开 MAG XML 全文 PDF")
     jp.add_argument("--list-only", action="store_true", help="只出论文清单（标题/作者/期次/DOI，不拉摘要不下载PDF）")
+    jp.add_argument("--pdf-batch-resume", action="store_true",
+                    help="断点续传批抓 PDF（登录态 CDP 模式；需清单已生成+调试 Chrome 已登录；每 IP 日配额约20篇，换 IP 重跑即可续）")
+    jp.add_argument("--cdp", default="http://127.0.0.1:9222", help="CDP 调试 Chrome 地址（配 --pdf-batch-resume）")
 
     pr_p = sub.add_parser("proxy", help="🔄 免费代理池自动构建（抓取+验证+入库）")
     rp_p = sub.add_parser("report", help="📊 爬取CSV → 自动可视化报告（概览/统计/分组/分布图）")
@@ -606,7 +609,8 @@ def main() -> int:
         from .journals import run as journal_run
         summary = journal_run(args.site, since_year=args.since, out_dir=args.out or None,
                               workers=args.workers, with_meta=not args.no_meta,
-                              list_only=args.list_only)
+                              list_only=args.list_only,
+                              pdf_batch_resume=args.pdf_batch_resume, cdp=args.cdp)
         if summary.get("error"):
             print(f"❌ {summary['error']}", file=sys.stderr)
             return 1
