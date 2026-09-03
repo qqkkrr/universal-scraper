@@ -18,8 +18,11 @@ import argparse
 import concurrent.futures as cf
 import csv
 import html
+import ipaddress
 import json
 import re
+import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -27,6 +30,18 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+
+def _assert_http_url(url: str) -> str:
+    """SSRF 边界：仅 http/https；host 解析到私网/环回/保留地址即拒绝。"""
+    sp = urllib.parse.urlsplit(url)
+    if sp.scheme not in ("http", "https"):
+        raise ValueError(f"仅允许 http/https URL: {url}")
+    for info in socket.getaddrinfo(sp.hostname, None):
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+            raise ValueError(f"拒绝私有/保留地址: {sp.hostname} -> {ip}")
+    return url
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
       "(KHTML, like Gecko) Version/18.6 Safari/605.1.15")
@@ -69,6 +84,7 @@ MAX_RETRIES = 3
 
 
 def _http_get(url: str, referer: str = "", timeout: int = 25) -> Tuple[int, bytes]:
+    url = _assert_http_url(url)  # SSRF 边界：协议/私网校验后才发起请求
     headers = {"User-Agent": UA, "Accept-Language": "zh-CN,zh-Hans;q=0.9",
                "Accept-Encoding": "identity"}
     if referer:
@@ -79,6 +95,7 @@ def _http_get(url: str, referer: str = "", timeout: int = 25) -> Tuple[int, byte
 
 
 def _http_post(url: str, data: Dict[str, Any], referer: str = "", timeout: int = 25) -> Tuple[int, bytes]:
+    url = _assert_http_url(url)  # SSRF 边界
     headers = {"User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded",
                "Accept-Language": "zh-CN,zh-Hans;q=0.9"}
     if referer:
@@ -297,7 +314,7 @@ def download_pdf(site: Dict[str, str], art: Dict[str, Any], out_dir: Path,
 # ---------------------------------------------------------------------------
 def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str] = None,
         workers: int = DEFAULT_WORKERS, with_meta: bool = True,
-        min_interval: float = MIN_INTERVAL, log=print) -> Dict[str, Any]:
+        min_interval: float = MIN_INTERVAL, log=print, list_only: bool = False) -> Dict[str, Any]:
     if site_name not in KNOWN_JOURNALS:
         raise SystemExit(f"未知期刊站点 {site_name}，可用: {list(KNOWN_JOURNALS)}")
     site = KNOWN_JOURNALS[site_name]
@@ -328,6 +345,29 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
             except Exception as e:
                 log(f"  ❌ {i['label']}: {type(e).__name__}: {e}")
             time.sleep(min_interval)
+
+    # 2.5) 清单模式：只落论文清单（标题/作者/期次/DOI，从期次列表提取，无需登录）
+    #      ——《科研管理》战例：官网 PDF 已登录墙化，元数据逐篇拉取慢且限流；
+    #         全期次清单是核心交付物，等网站冷却后另跑 PDF/元数据。
+    if list_only:
+        list_records: List[Dict[str, Any]] = []
+        for a in all_arts:
+            list_records.append({
+                "year": a.get("year", ""), "vol": a.get("vol", ""), "issue": a.get("issue", ""),
+                "期次": a.get("issue_label", ""), "title": a.get("title", ""),
+                "authors": a.get("authors", ""), "doi": a.get("doi", ""),
+                "url": a.get("url", ""), "article_id": a.get("id", ""),
+                "pages": a.get("vol_pages", ""),
+            })
+        list_records.sort(key=lambda x: (x["year"], x["vol"], x["issue"]))
+        lcsv = meta_dir / f"{site['name']}_论文清单.csv"
+        if list_records:
+            with open(lcsv, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.DictWriter(f, fieldnames=list(list_records[0].keys()))
+                w.writeheader()
+                w.writerows(list_records)
+        log(f"📋 清单模式完成：{len(list_records)} 篇 -> {lcsv}")
+        return {"ok": True, "articles": len(list_records), "csv": str(lcsv)}
 
     # 3) 元数据（可选，增量缓存：中断后已拉取的不会重拉）
     meta_cache = meta_dir / ".meta_cache.jsonl"
