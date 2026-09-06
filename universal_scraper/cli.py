@@ -208,6 +208,10 @@ def main() -> int:
     pr_p.add_argument("--refresh", action="store_true", help="抓取公开源代理并验证")
     pr_p.add_argument("--out", default="outputs/proxies.txt", help="输出文件")
     pr_p.add_argument("--workers", type=int, default=30)
+    pr_p.add_argument("--target-url", default="", help="目标站真实页面URL（战训：通用靶可用率与目标站无关，必须打目标站）")
+    pr_p.add_argument("--marker", default="", help="目标页唯一文案标记（如站名），断言命中才算可用")
+    pr_p.add_argument("--sample", type=int, default=600, help="每轮抽样校验数")
+    pr_p.add_argument("--status", action="store_true", help="查看三态账本统计（fresh/alive/dead/burned）")
 
     sub.add_parser("doctor", help="🩺 自检：依赖/Node/浏览器/端口/仓库/输出目录")
 
@@ -467,13 +471,27 @@ def main() -> int:
         return 0
 
     if args.cmd == "proxy":
+        from pathlib import Path as _PP
+        if args.status:
+            from .proxy_fetch import PoolState
+            st = PoolState(_PP(args.out).with_suffix(".pool.json"))
+            stats = st.stats()
+            print(json.dumps({"pool_file": str(st.path), "stats": stats,
+                              "usable_now": len(st.usable())}, ensure_ascii=False))
+            return 0
         if args.refresh:
             from .proxy_fetch import refresh as _pf_refresh
-            r = _pf_refresh(out=args.out, workers=args.workers)
+            r = _pf_refresh(out=args.out, workers=args.workers,
+                            target_url=args.target_url or None,
+                            marker=args.marker or None, sample=args.sample)
             print(json.dumps(r, ensure_ascii=False))
+            if args.target_url:
+                print("（目标站校验模式：可用率即真实可用率，可直接投入任务）", file=sys.stderr)
+            else:
+                print("（通用连通校验：对有门禁的站点可用率会虚高，建议 --target-url + --marker）",
+                      file=sys.stderr)
             return 0 if r.get("ok", 0) > 0 else 1
         # 无 --refresh：显示现有代理池（不抓取）
-        from pathlib import Path as _PP
         p = _PP(args.out)
         if p.exists():
             lines = [l for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -644,7 +662,7 @@ def main() -> int:
         return 0
 
     if args.cmd == "ip":
-        from .net import detect_ip
+        from .net import detect_ip, detect_system_proxy, power_source
         d = detect_ip()
         if d.get("error"):
             print(f"❌ {d['error']}")
@@ -653,6 +671,17 @@ def main() -> int:
         print(f"   运营商: {d.get('isp')}")
         print(f"   地区: {d.get('city')} {d.get('region')}")
         print(f"   类型: {d.get('org')}")
+        # 战训（2026-09 科研管理战役）：系统代理劫持直连 = 烧错配额/换IP无效
+        sp = detect_system_proxy()
+        if sp.get("enabled") or sp.get("processes"):
+            print(f"⚠️  系统代理: 开启（{', '.join(sp['sources']) or '本机进程'}）"
+                  f" 出口可能被劫持到 {sp.get('http_proxy') or '本机代理节点'}:{sp.get('port') or '?'}")
+            print(f"   本机代理进程: {', '.join(sp['processes']) or '未检出'}")
+            print(f"   {sp['warning']}")
+        else:
+            print("   系统代理: 未检出（直连出口即真实出口）")
+        pw = power_source()
+        print(f"🔋 电源: {pw.get('source')} {('- ' + pw['caffeinate_hint']) if pw.get('caffeinate_hint') else ''}")
         return 0
 
     if args.cmd == "verify":

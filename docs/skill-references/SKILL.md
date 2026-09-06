@@ -8,7 +8,7 @@ description: >
   样本先行确认、0 结果强制诊断。当用户想抓取/采集/爬取/下载网页数据、
   提到爬虫/scraper/crawler/spider/数据采集，或点名 universal-scraper 时使用。
 metadata:
-  version: "1.9.1"
+  version: "1.11.0"
   source_project: "universal-scraper (10 轮审计, 164 测试)"
 ---
 
@@ -210,11 +210,15 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | SPA 找接口 | `jsrecon <url>`（下载 JS 包自动提候选端点）；`fetch` 对 SPA 壳会自动提示 |
 | 登录站复用登录态 | `cookies`（用户登录一次 → 导出直抓串）；`cdp --login-state/--list-tabs` 查调试 Chrome |
 | 强风控电商（淘宝系/盒马） | R17：mtop+登录关卡+RGV587 冷却+desc 图 OCR |
-| 免费代理池 | `proxy` |
+| 免费代理池 | `proxy --refresh --target-url <目标站重页面> --marker <站名>`（目标站校验+三态账本，R19） |
+| 下载/详情按 IP 限量 | R19 配额收割：代理池 + 切片分工（`quota_ledger`）+ 边际余量 0.75 |
+| 配额锁死/进得来拿不到 | playbook 第七章：四类配额判别 → 冷却账本 → 通道组合（R21） |
+| 学术文献（有机构身份） | R20：机构 VPN + 知网 `navi.cnki.net` 期刊导航 + CDP 下载捕获 |
+| 无人值守长跑 | R22 自检清单（电源/防睡眠/原子状态/看门狗/胜利退出） |
 | 定时重复采集 | `schedule --task --every <秒>` |
 | 监控网页变化 | `monitor --task --every <秒>` |
 | 结果复核/报表 | `verify` / `report` |
-| 环境/出口 IP | `doctor.py` / `ip` |
+| 环境/出口 IP | `doctor.py`（含网络链路体检）/ `ip`（出口+系统代理+电源） |
 
 ## 遇到阻断
 
