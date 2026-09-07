@@ -37,6 +37,22 @@ CACHE_MAX_FILES = 2000           # 缓存文件上限（超限删最旧）
 DEFAULT_MAX_BODY = 20 * 1024 * 1024  # 默认响应体上限（20MB，流式限读）
 
 
+def _budget_auto_mark(url: str, status: int, hours: float = 24.0):
+    """batch1600 战训：被 403/421/52x 拒绝时自动记账域名封锁台账（跨运行可查）。
+    幂等：同域已冷却中则只刷新不重复写盘；任何异常静默（台账绝不拖垮抓取）。"""
+    try:
+        from urllib.parse import urlsplit
+        host = urlsplit(url).hostname or ""
+        if not host:
+            return
+        from . import domain_budget as _db
+        if _db.check(host)["in_cooldown"]:
+            return
+        _db.mark(host, hours=hours, note=f"HTTP {status} 自动记账")
+    except Exception:
+        pass
+
+
 def _norm_cookies(val: Any) -> Dict[str, str]:
     """cookies 容忍 dict 或 "k=v; k2=v2" 串（cookies 命令导出的即串）。
     文档曾按串教用户填写、实现却按 dict 消费导致必崩——两侧在此统一。"""
@@ -759,6 +775,13 @@ class RequestsClient:
                 if proxy:
                     kw["proxies"] = {"http": proxy, "https": proxy}
                 resp = self.session.request(method.upper(), url, **kw)
+                # batch1600 战训（P1）：403/421/52x 自动记入域名封锁台账（budget --list 可查）。
+                # best-effort：台账故障绝不影响抓取主流程；已冷却中则不重复记账。
+                try:
+                    if resp.status_code in (403, 421) or 520 <= resp.status_code <= 529:
+                        _budget_auto_mark(url, resp.status_code)
+                except Exception:
+                    pass
                 if resp.status_code == 429:
                     _t = smart_decode(resp.content, {k.lower(): v for k, v in resp.headers.items()})
                     return {"ok": False, "status": 429, "body": resp.content, "text": _t,

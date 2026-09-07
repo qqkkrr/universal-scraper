@@ -672,7 +672,10 @@ class BrowserFetcher(BaseFetcher):
 
     def _records_from_capture_all(self, out_dir: Path) -> List[Dict[str, Any]]:
         """从 capture_all.json（浏览器自动捕获的所有 JSON 响应）生成记录。
-        每条记录 = {_api_url, data}，交给 LLM/解析器事后挑字段。"""
+        每条记录 = {_api_url, data}，交给 LLM/解析器事后挑字段。
+        batch1600 战训（P0）：桥侧早已落盘 method/post_data（改写 http_json 配置的
+        关键参数），Python 侧此前转记录时丢弃——现已透传 _method/_post_data/
+        _request_content_type，去重键同步纳入请求体（同 URL 不同体的 POST 不再误并）。"""
         f = out_dir / "capture_all.json"
         if not f.exists():
             return []
@@ -684,12 +687,21 @@ class BrowserFetcher(BaseFetcher):
         for item in data:
             if not isinstance(item, dict):
                 continue
-            recs.append({"_api_url": item.get("url", ""), "data": item.get("json")})
-        # 去重（同一接口多次响应）
+            rec = {"_api_url": item.get("url", ""), "data": item.get("json")}
+            if item.get("method"):
+                rec["_method"] = item["method"]
+            if item.get("post_data"):
+                rec["_post_data"] = item["post_data"]
+            if item.get("request_content_type"):
+                rec["_request_content_type"] = item["request_content_type"]
+            recs.append(rec)
+        # 去重（同一接口多次响应；POST 同 URL 不同请求体视为不同记录）
         seen = set()
         out = []
         for r in recs:
-            k = str(r.get("_api_url", "")) + ":" + json.dumps(r.get("data"), ensure_ascii=False)[:200]
+            k = (str(r.get("_api_url", "")) + ":" + str(r.get("_method", "GET")) + ":"
+                 + str(r.get("_post_data", ""))[:200] + ":"
+                 + json.dumps(r.get("data"), ensure_ascii=False)[:200])
             if k in seen:
                 continue
             seen.add(k)

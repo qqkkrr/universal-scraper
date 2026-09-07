@@ -49,14 +49,36 @@ async function renderPage(context, req, stealthApplied) {
 }
 
 async function main() {
-  const browser = await loadChromium().launch({
-    headless: process.env.US_HEADLESS !== "0",
-    executablePath: CHROMIUM_EXE,
-    args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-blink-features=AutomationControlled"],
-  });
+  // batch1600 战训：headless-shell 缺失时池进程直接退出，而 9222 调试 Chrome 常在。
+  // 启动失败 → 探测本机 9222 → 活着就降级 attach（真实浏览器 + 登录态，更稳）。
+  let browser;
+  let isCdpFallback = false;
+  try {
+    browser = await loadChromium().launch({
+      headless: process.env.US_HEADLESS !== "0",
+      executablePath: CHROMIUM_EXE,
+      args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-blink-features=AutomationControlled"],
+    });
+  } catch (launchErr) {
+    const fallbackCdp = "http://127.0.0.1:9222";
+    let fbOk = false;
+    try {
+      const http = require("http");
+      fbOk = await new Promise((resolve) => {
+        const req = http.get(fallbackCdp + "/json/version", { timeout: 2500 }, (r) => resolve(r.statusCode === 200));
+        req.on("error", () => resolve(false));
+        req.on("timeout", () => { req.destroy(); resolve(false); });
+      });
+    } catch (e) {}
+    if (!fbOk) throw launchErr;
+    process.stderr.write("[pool] 浏览器启动失败(" + String(launchErr.message || launchErr).slice(0, 100)
+      + ") → 降级连接 9222 调试 Chrome\n");
+    browser = await loadChromium().connectOverCDP(fallbackCdp, { timeout: 15000 });
+    isCdpFallback = true;
+  }
   const ss = process.env.US_STORAGE_STATE;
   const ctxOpts = { viewport: { width: 1440, height: 900 } };
-  if (ss && fs.existsSync(ss)) ctxOpts.storageState = ss;
+  if (ss && fs.existsSync(ss) && !isCdpFallback) ctxOpts.storageState = ss;  // CDP 附带模式忽略外部会话（用真实登录态）
   const proxy = parseProxy(process.env.US_PROXY);
   if (proxy) ctxOpts.proxy = proxy;
   const context = await browser.newContext(ctxOpts);

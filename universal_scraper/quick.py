@@ -155,6 +155,7 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
 
     found: Dict[str, List[str]] = {}
     base_urls: List[str] = []  # axios/fetch baseURL 优先单列（改写 http_json 的锚点）
+    frags: List[str] = []      # batch1600 战训：压缩包里散落的路径碎片（低置信，agent 自行拼接）
     checked = 0
     for su in urls:
         if checked >= max_scripts:
@@ -173,6 +174,11 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
                 c = _clean_hit(bm.group(1))
                 if _plausible(c):
                     base_urls.append(c)
+            # 路径碎片：带 ≥2 段的引号路径（拼接产物 "/a/b"），与已确认 hits 去重
+            for fm in re.finditer(r'["\'](/[A-Za-z0-9_\-]+(?:/[A-Za-z0-9_\-./]+){1,4})["\']', body):
+                f = _clean_hit(fm.group(1))
+                if _plausible(f) and f not in hits and not f.endswith((".js", ".css", ".png", ".svg")):
+                    frags.append(f)
             if hits:
                 found[su.rsplit("/", 1)[-1][:48] or su] = hits
         except Exception:
@@ -180,6 +186,7 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
     all_hits = sorted({h for v in found.values() for h in v})
     result = {"url": url, "scripts_checked": checked, "api_candidates": all_hits,
               "base_urls": sorted(set(base_urls))[:20],
+              "path_fragments": sorted(set(frags))[:40],
               "by_script": found, "hint": "候选端点需逐个探测验证（带 UA/Referer/cookie 预热）"}
     if out:
         import os as _os

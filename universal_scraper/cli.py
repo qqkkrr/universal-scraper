@@ -263,6 +263,17 @@ def main() -> int:
     bd_p.add_argument("--list", action="store_true", help="列出全部台账")
     bd_p.add_argument("--file", default=None, help="台账文件路径（默认 ~/.universal_scraper/domain_budget.json）")
 
+    c2p = sub.add_parser("capture2config", help="⚡ 捕获→可重放 http_json 配置（POST体/方法/翻页模板一步到位）")
+    c2p.add_argument("capture", help="捕获文件：capture_all.json 或声明式 <name>.json")
+    c2p.add_argument("--referer", default="", help="原页面 URL（写进配置的 Referer 头）")
+    c2p.add_argument("--out", default="", help="输出 JSON（默认 <捕获文件>_configs.json）")
+
+    pdf_p = sub.add_parser("pdf", help="📎 附件批量下载 + 表格型 PDF 结构化（pdfplumber/pypdf）")
+    pdf_p.add_argument("--download", default=None, help="下载清单 JSON（[{url,name}] 或 [url]）")
+    pdf_p.add_argument("--tables", default=None, help="提取某 PDF 的表格 → JSON")
+    pdf_p.add_argument("--out", default="", help="输出目录/文件")
+    pdf_p.add_argument("--interval", type=float, default=1.0, help="下载间隔秒（礼貌限速）")
+
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
     vp.add_argument("--file", required=True, help="结果 JSON 文件，如 outputs/xxx.json")
     vp.add_argument("--network", action="store_true", help="联网抽样重抓对比（默认只做本地检查）")
@@ -666,6 +677,39 @@ def main() -> int:
         print(json.dumps({"marked": it.get("id"), "status": it.get("status"), **st},
                          ensure_ascii=False))
         return 0
+
+    if args.cmd == "capture2config":
+        from .capture_gen import generate
+        out = args.out or str(Path(args.capture).with_suffix("").resolve()) + "_configs.json"
+        r = generate(args.capture, referer=args.referer, out=out)
+        for c in r.get("configs", [])[:10]:
+            src = c["source"]
+            print(f"  {src.get('method','GET'):4s} {src['url'][:80]}  records_path={c['pagination']['records_path'] or '?'}")
+        if r.get("saved"):
+            print(f"✅ {r['count']} 份配置草案 → {r['saved']}（先 --limit 2 小样验证）")
+        return 0 if r.get("count") else 1
+
+    if args.cmd == "pdf":
+        if args.download:
+            from .pdf_attach import download_attachments
+            r = download_attachments(args.download, args.out or "attachments", interval=args.interval)
+            print(json.dumps({k: r[k] for k in ("total", "ok", "skipped", "failed", "dir")},
+                             ensure_ascii=False))
+            return 0 if not r["failed"] else 1
+        if args.tables:
+            from .pdf_attach import extract_tables
+            try:
+                tables = extract_tables(args.tables)
+            except (ImportError, ValueError, FileNotFoundError) as e:
+                print(f"❌ {e}", file=sys.stderr)
+                return 1
+            out = args.out or str(Path(args.tables).with_suffix(".tables.json").resolve())
+            Path(out).write_text(json.dumps(tables, ensure_ascii=False, indent=1), encoding="utf-8")
+            n = sum(len(t["rows"]) for t in tables)
+            print(f"✅ {len(tables)} 页表格 / {n} 行 → {out}")
+            return 0
+        print("用法：--download <清单.json> --out <目录> / --tables <pdf>", file=sys.stderr)
+        return 1
 
     if args.cmd == "budget":
         from . import domain_budget as db
