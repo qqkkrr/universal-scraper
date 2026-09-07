@@ -247,7 +247,21 @@ def main() -> int:
     jr_p = sub.add_parser("jsrecon", help="🔍 接口侦察：下载页面 JS 包自动提取候选 API 端点（SPA 先于 capture 使用）")
     jr_p.add_argument("url", help="目标页面 URL")
     jr_p.add_argument("--max-scripts", type=int, default=6, help="最多分析的 JS 包数（默认 6）")
-    jr_p.add_argument("--out", default=None, help="结果 JSON 保存路径")
+    jr_p.add_argument("--out", default=None, help="结果 JSON 保存路径（目录自动补 jsrecon.json）")
+
+    bt_p = sub.add_parser("batch", help="🗂️ 批量任务队列：next/done/fail/status（断点续跑，agent 批处理状态机）")
+    bt_p.add_argument("--queue", required=True, help="队列 JSON 文件（[{id,text,status,attempts,result}]）")
+    bt_p.add_argument("action", choices=["next", "done", "fail", "blocked", "status"], help="队列操作")
+    bt_p.add_argument("item_id", nargs="?", default=None, help="任务 id（done/fail/blocked 时必填）")
+    bt_p.add_argument("--result", default="", help="核对结论/失败原因（写入台账）")
+
+    bd_p = sub.add_parser("budget", help="🚧 域名礼貌预算/封锁台账：mark/check/list（跨运行持久）")
+    bd_p.add_argument("--mark", default=None, help="登记封锁事件：域名")
+    bd_p.add_argument("--hours", type=float, default=24.0, help="冷却小时数（默认 24）")
+    bd_p.add_argument("--note", default="", help="备注（现象/处置）")
+    bd_p.add_argument("--check", default=None, help="查询某域名是否冷却中")
+    bd_p.add_argument("--list", action="store_true", help="列出全部台账")
+    bd_p.add_argument("--file", default=None, help="台账文件路径（默认 ~/.universal_scraper/domain_budget.json）")
 
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
     vp.add_argument("--file", required=True, help="结果 JSON 文件，如 outputs/xxx.json")
@@ -618,10 +632,62 @@ def main() -> int:
               f"提取 {len(r.get('api_candidates', []))} 个候选端点")
         for ep in r.get("api_candidates", [])[:40]:
             print(f"  {ep}")
+        if r.get("base_urls"):
+            print(f"📍 baseURL 锚点: {', '.join(r['base_urls'][:8])}")
         if r.get("saved"):
             print(f"✅ 已保存: {r['saved']}")
         print("（候选端点需逐个探测验证：带 UA/Referer/cookie 预热，见反爬手册）")
         return 0
+
+    if args.cmd == "batch":
+        from .batch import BatchQueue
+        try:
+            q = BatchQueue(args.queue)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        if args.action == "next":
+            it = q.next()
+            if not it:
+                st = q.status()
+                print(json.dumps({"done": True, **st}, ensure_ascii=False))
+                return 0
+            print(json.dumps(it, ensure_ascii=False))
+            return 0
+        if args.action == "status":
+            print(json.dumps(q.status(), ensure_ascii=False))
+            return 0
+        if not args.item_id:
+            print("❌ done/fail/blocked 需要任务 id", file=sys.stderr)
+            return 1
+        status_map = {"done": "done", "fail": "failed", "blocked": "blocked"}
+        it = q.mark(args.item_id, status_map[args.action], args.result)
+        st = q.status()
+        print(json.dumps({"marked": it.get("id"), "status": it.get("status"), **st},
+                         ensure_ascii=False))
+        return 0
+
+    if args.cmd == "budget":
+        from . import domain_budget as db
+        if args.mark:
+            r = db.mark(args.mark, hours=args.hours, note=args.note, path=args.file)
+            print(json.dumps(r, ensure_ascii=False))
+            return 0
+        if args.check:
+            r = db.check(args.check, path=args.file)
+            print(json.dumps(r, ensure_ascii=False))
+            return 0 if not r["in_cooldown"] else 2
+        if args.list:
+            r = db.listing(path=args.file)
+            if not r:
+                print("（台账为空）")
+                return 0
+            for d, v in sorted(r.items()):
+                mark = "🚫" if v["in_cooldown"] else "✅"
+                print(f"  {mark} {d:32s} 剩 {v['remaining_sec']//3600}h（{v['last_event']} {v['note'][:40]}）")
+            return 0
+        print("用法：--mark <域名> [--hours 24 --note ...] / --check <域名> / --list", file=sys.stderr)
+        return 1
 
     if args.cmd == "journal":
         from .journals import run as journal_run

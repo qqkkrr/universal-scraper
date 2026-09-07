@@ -295,9 +295,37 @@ function centerCaptcha(page) {
       page = context.pages()[0] || await context.newPage();
       if (arg("headless", "0") === "0") focusWindowMac();  // 有头：窗口居中放大
     } else {
-      browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox", "--ignore-certificate-errors"] });
-      context = await browser.newContext(ctxOpts);
-      page = await context.newPage();
+      // batch1401 战训：headless-shell 缺失时池直接崩，而 9222 调试 Chrome 往往可用。
+      // 启动失败 → 自动探测本机 9222 CDP，活着就降级附加（真实浏览器反而更稳）。
+      try {
+        browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox", "--ignore-certificate-errors"] });
+        context = await browser.newContext(ctxOpts);
+        page = await context.newPage();
+      } catch (launchErr) {
+        const fallbackCdp = "http://127.0.0.1:9222";
+        let fbOk = false;
+        try {
+          const http = require("http");
+          fbOk = await new Promise((resolve) => {
+            const req = http.get(fallbackCdp + "/json/version", { timeout: 2500 }, (r) => resolve(r.statusCode === 200));
+            req.on("error", () => resolve(false));
+            req.on("timeout", () => { req.destroy(); resolve(false); });
+          });
+        } catch (e) {}
+        if (fbOk) {
+          out({ type: "diag", message: "浏览器启动失败(" + String(launchErr.message || launchErr).slice(0, 120) + ") → 降级连接 9222 调试 Chrome" });
+          try {
+            browser = await chromium.connectOverCDP(fallbackCdp, { timeout: 15000 });
+            context = browser.contexts()[0] || await browser.newContext();
+            page = await context.newPage();
+            ownPages.push(page);
+          } catch (e2) {
+            throw launchErr;  // 降级也失败：抛原始启动错误（诊断信息更准）
+          }
+        } else {
+          throw launchErr;
+        }
+      }
     }
     // 控制台/页面错误捕获（诊断"页面为什么没加载数据"的关键）
     // 节流：每类最多输出 50 条，防止 JS 重页面刷爆协议流
@@ -374,7 +402,19 @@ function centerCaptcha(page) {
           const r2 = await jsonMaybe(res);
           const arr = (capturedBy[key] = capturedBy[key] || []);
           if (arr.length < 5000) {  // 命名捕获上限，防长任务内存爆炸
-            arr.push(r2.json !== undefined ? { url: u, json: r2.json } : { url: u, raw: r2.raw });
+            // 声明式捕获同样落盘 method/请求体（batch1401 战训：chinamoney/xkz/NAFMII
+            // 三次"接口捕到、参数拿不到"都栽在这里——没有 post_data 就无法改写 http_json 配置）
+            let _pd = "", _m = "GET", _ct = "";
+            try {
+              const rq = res.request();
+              _m = rq.method();
+              _pd = rq.postData() || "";
+              _ct = (rq.headers() || {})["content-type"] || "";
+            } catch (e) {}
+            const rec = { url: u, method: _m,
+                          post_data: _pd || undefined, request_content_type: _ct || undefined };
+            arr.push(r2.json !== undefined ? Object.assign(rec, { json: r2.json })
+                                            : Object.assign(rec, { raw: r2.raw }));
           }
           if (c.save && arr.length % (c.save_every || 5) === 0) {
             const f = path.join(outDir, `${key}.json`);

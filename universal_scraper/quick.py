@@ -136,7 +136,25 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
         r'(?:["\'])(/[A-Za-z0-9_\-]*/(?:api|service|gateway|rest|query|search|inquiry)[/\w\-./]*'
         r'|https?://[\w.\-]+/(?:api|gateway|service)[/\w\-./]*'
         r'|baseURL[:\s]*["\']([^"\']{4,120})["\'])')
+    # batch1401 战训：webpack 压缩包会吐 "baseURL\"),E=i(\" 这类拼接噪声。
+    # 过滤规则：剥离转义引号后必须是"看起来像 URL/路径"的串。
+    def _clean_hit(h: str) -> str:
+        h = h.replace('\\"', '').replace("\\'", "").strip()
+        return h
+
+    def _plausible(h: str) -> bool:
+        h2 = _clean_hit(h)
+        if len(h2) < 4:
+            return False
+        # 必须以 / 或协议开头，或含域名特征；拒绝残留代码符号的拼接噪声
+        if not (h2.startswith(("/", "http://", "https://", "${"))):
+            return False
+        if re.search(r'[=;{}()<>]', h2):  # 代码残渣
+            return False
+        return True
+
     found: Dict[str, List[str]] = {}
+    base_urls: List[str] = []  # axios/fetch baseURL 优先单列（改写 http_json 的锚点）
     checked = 0
     for su in urls:
         if checked >= max_scripts:
@@ -147,18 +165,28 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
             if not body:
                 continue
             checked += 1
-            hits = sorted(set(m[0] or m[1] or "" for m in api_pat.findall(body)))[:60]
-            hits = [h for h in hits if h]
+            raw_hits = api_pat.findall(body)
+            hits = sorted({_clean_hit(m[0] or m[1] or "") for m in raw_hits})
+            hits = [h for h in hits if h and _plausible(h)][:60]
+            # axios 实例 baseURL（baseURL:"/api" 或 baseURL:"https://x"）单独收集
+            for bm in re.finditer(r'baseURL\s*[:=]\s*["\']([^"\']{4,120})["\']', body):
+                c = _clean_hit(bm.group(1))
+                if _plausible(c):
+                    base_urls.append(c)
             if hits:
                 found[su.rsplit("/", 1)[-1][:48] or su] = hits
         except Exception:
             continue
     all_hits = sorted({h for v in found.values() for h in v})
     result = {"url": url, "scripts_checked": checked, "api_candidates": all_hits,
+              "base_urls": sorted(set(base_urls))[:20],
               "by_script": found, "hint": "候选端点需逐个探测验证（带 UA/Referer/cookie 预热）"}
     if out:
         import os as _os
         p = Path(_os.path.expanduser(out))
+        if p.is_dir():  # batch1401 战训：--out 传目录不再抛 IsADirectoryError
+            p = p / "jsrecon.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
         result["saved"] = str(p)
     return result

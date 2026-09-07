@@ -8,7 +8,7 @@ description: >
   样本先行确认、0 结果强制诊断。当用户想抓取/采集/爬取/下载网页数据、
   提到爬虫/scraper/crawler/spider/数据采集，或点名 universal-scraper 时使用。
 metadata:
-  version: "1.11.0"
+  version: "1.11.1"
   source_project: "universal-scraper (10 轮审计, 164 测试)"
 ---
 
@@ -215,6 +215,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 配额锁死/进得来拿不到 | playbook 第七章：四类配额判别 → 冷却账本 → 通道组合（R21） |
 | 学术文献（有机构身份） | R20：机构 VPN + 知网 `navi.cnki.net` 期刊导航 + CDP 下载捕获 |
 | 无人值守长跑 | R22 自检清单（电源/防睡眠/原子状态/看门狗/胜利退出） |
+| 批量任务队列 | `batch --queue tasks.json next/done/fail/status`（断点续跑状态机） |
+| 域名封锁台账 | `budget --mark 域名 --hours 24`（跨运行冷却账本；被 421/断连先记账） |
 | 定时重复采集 | `schedule --task --every <秒>` |
 | 监控网页变化 | `monitor --task --every <秒>` |
 | 结果复核/报表 | `verify` / `report` |
