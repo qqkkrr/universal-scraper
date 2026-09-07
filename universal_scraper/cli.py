@@ -249,10 +249,11 @@ def main() -> int:
     jr_p.add_argument("--max-scripts", type=int, default=6, help="最多分析的 JS 包数（默认 6）")
     jr_p.add_argument("--out", default=None, help="结果 JSON 保存路径（目录自动补 jsrecon.json）")
 
-    bt_p = sub.add_parser("batch", help="🗂️ 批量任务队列：next/done/fail/status（断点续跑，agent 批处理状态机）")
-    bt_p.add_argument("--queue", required=True, help="队列 JSON 文件（[{id,text,status,attempts,result}]）")
-    bt_p.add_argument("action", choices=["next", "done", "fail", "blocked", "status"], help="队列操作")
-    bt_p.add_argument("item_id", nargs="?", default=None, help="任务 id（done/fail/blocked 时必填）")
+    bt_p = sub.add_parser("batch", help="🗂️ 批量任务队列：next/done/fail/nodata/retry/status（断点续跑+优先级）")
+    bt_p.add_argument("--queue", required=True, help="队列 JSON 文件（[{id,text,status,attempts,result,priority?}]）")
+    bt_p.add_argument("action", choices=["next", "done", "fail", "blocked", "nodata", "retry", "status"],
+                      help="队列操作（nodata=数据不存在于公开渠道，区别于爬取失败）")
+    bt_p.add_argument("item_id", nargs="?", default=None, help="任务 id（done/fail/blocked/nodata/retry 时必填）")
     bt_p.add_argument("--result", default="", help="核对结论/失败原因（写入台账）")
 
     bd_p = sub.add_parser("budget", help="🚧 域名礼貌预算/封锁台账：mark/check/list（跨运行持久）")
@@ -671,7 +672,8 @@ def main() -> int:
         if not args.item_id:
             print("❌ done/fail/blocked 需要任务 id", file=sys.stderr)
             return 1
-        status_map = {"done": "done", "fail": "failed", "blocked": "blocked"}
+        status_map = {"done": "done", "fail": "failed", "blocked": "blocked",
+                      "nodata": "nodata", "retry": "retry"}
         it = q.mark(args.item_id, status_map[args.action], args.result)
         st = q.status()
         print(json.dumps({"marked": it.get("id"), "status": it.get("status"), **st},

@@ -32,7 +32,7 @@ def test_mark_and_resume_across_restart(queue_file):
     q2 = BatchQueue(queue_file)  # 模拟崩溃后重启：断点续跑
     assert q2.next()["id"] == 1403
     st = q2.status()
-    assert st == {"total": 3, "done": 2, "failed": 0, "blocked": 0, "pending": 1}
+    assert st == {"total": 3, "done": 2, "failed": 0, "blocked": 0, "nodata": 0, "pending": 1}
 
 
 def test_all_done_signals_finished(queue_file):
@@ -86,3 +86,51 @@ def test_budget_listing(tmp_path, monkeypatch):
     rows = db.listing()
     assert "szse.cn" in rows
     assert rows["szse.cn"]["in_cooldown"] is True
+
+
+# ---------------- batch1700 新增：优先级 / nodata / retry ----------------
+def test_batch_priority_ordering(tmp_path):
+    f = tmp_path / "q.json"
+    f.write_text(json.dumps([
+        {"id": 1, "text": "低优先", "status": "pending", "priority": 10},
+        {"id": 2, "text": "高优先", "status": "pending", "priority": 1},
+        {"id": 3, "text": "无优先", "status": "pending"},
+    ], ensure_ascii=False), encoding="utf-8")
+    q = BatchQueue(f)
+    assert q.next()["id"] == 2          # priority 小者优先
+    q.mark(2, "done")
+    assert q.next()["id"] == 1          # 剩余中有 priority 的仍优先
+
+
+def test_batch_nodata_distinct_from_failed(tmp_path):
+    f = tmp_path / "q.json"
+    f.write_text(json.dumps([{"id": 1419, "text": "x", "status": "pending"}], ensure_ascii=False), encoding="utf-8")
+    q = BatchQueue(f)
+    q.mark(1419, "nodata", "当日无披露,WebSearch已交叉验证")
+    st = q.status()
+    assert st["nodata"] == 1 and st["failed"] == 0   # 严格区分
+    assert q.next() is None                            # 终态不回流
+
+
+def test_batch_retry_resets_terminal_state(tmp_path):
+    f = tmp_path / "q.json"
+    f.write_text(json.dumps([{"id": 7, "text": "x", "status": "pending"}], ensure_ascii=False), encoding="utf-8")
+    q = BatchQueue(f)
+    q.mark(7, "failed", "登录墙")
+    assert q.next() is None
+    q.mark(7, "retry", "用户已登录,重试")
+    assert q.next()["id"] == 7                       # 回到队列
+    assert q.next()["attempts"] == 1                 # attempts 保留累计
+    q.mark(7, "done")
+    with pytest.raises(ValueError):                  # retry 不能用于 done
+        q.mark(7, "retry")
+
+
+def test_batch_preserves_rich_metadata(tmp_path):
+    f = tmp_path / "q.json"
+    f.write_text(json.dumps([{"id": 9, "text": "x", "status": "pending",
+                              "custom_field": "保留我", "notes": ["a"]}], ensure_ascii=False), encoding="utf-8")
+    q = BatchQueue(f)
+    q.mark(9, "done", "ok")
+    data = json.loads(f.read_text(encoding="utf-8"))
+    assert data[0]["custom_field"] == "保留我" and data[0]["notes"] == ["a"]

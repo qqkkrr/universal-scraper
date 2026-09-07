@@ -360,3 +360,24 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli report "<任务目录
 - [ ] **磁盘探测**：每轮写探针文件，外接盘休眠/掉线时暂停且**不烧代理**；
 - [ ] **日志**：`print(flush=True)` 直写文件，别过管道（管道缓冲会吞日志误导排障）；
 - [ ] **有产出即重置耐心**：池耗尽自动刷新重试，但连续 N 轮零产出要退出汇报。
+
+## R23 · 数据型任务 API 优先动线（batch1700 战训：400 项实测约 60% 数据在 API）
+
+适用：目标是数值/行情/名单/统计类数据（汇率、指数、成交排名、登记名单、月度宏观数据）。
+这类站几乎清一色"JS 壳 + POST JSON 接口"（chinamoney/xkz/NAFMII/AMAC 全是），
+HTML+选择器是最后手段。标准动线：
+
+1. **判型侦察**：`fetch <url>` 看是壳还是数据页；壳页直接进 2。
+2. **jsrecon**：拿 `base_urls` 锚点与 `path_fragments`（v1.12 起）——axios 实例的
+   baseURL 是改写配置的锚。
+3. **capture_all**（browser+cdp 配置）：页面自然操作一轮，所有 JSON 响应连同
+   **POST 体/方法/Content-Type** 落盘（v1.12 起主路径全透传）。
+4. **capture2config capture_all.json**：一键生成 http_json 配置草案——
+   翻页参数自动模板化 `{{page}}`，records_path 已猜好。
+5. **小样 → 全量**：`run --limit 2` 验证字段映射与翻页，再放 max_pages。
+6. **翻页上限未知 → 倍增探测**：max_pages 从 2→4→8→16 翻倍直到空页/重复页
+   （比逐页试探快一个数量级；比二分实现简单）。总页数 = 最后一个非空页。
+7. **0 结果分叉**：先按 playbook 六·一判定"数据不存在(nodata)"还是"没抓到(failed)"——
+   400 项实测里 failed 近半其实是 nodata，别修一个没有修复对象的问题。
+
+禁忌：不要在没做 2/3 之前就写 CSS 选择器解析 HTML 表格——那是对 API 站最贵的误解。
