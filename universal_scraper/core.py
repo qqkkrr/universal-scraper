@@ -55,6 +55,23 @@ def _budget_auto_mark(url: str, status: int, hours: float = 24.0):
         pass
 
 
+# batch2200 战训（P3）：跨客户端共享的连续网络失败计数——
+# 达到阈值时升级为一次性的"网络路径可能已变化"大声提示（每次连击只提示一次）
+_NET_FAIL_STREAK = {"count": 0, "warned_at": 0}
+
+
+def _note_net_result(ok: bool):
+    """每次网络请求结束后调用：ok=False 累计连击，ok=True 清零。"""
+    if ok:
+        _NET_FAIL_STREAK["count"] = 0
+        return
+    _NET_FAIL_STREAK["count"] += 1
+    if _NET_FAIL_STREAK["count"] == 3 and time.time() - _NET_FAIL_STREAK["warned_at"] > 1800:
+        _NET_FAIL_STREAK["warned_at"] = time.time()
+        log("🌐 连续 3 次网络失败——出口/系统代理可能已变化（如退出 Clash/切换 VPN），"
+            "建议运行 scripts/doctor.py 的网络链路体检复查", "WARN")
+
+
 def _norm_cookies(val: Any) -> Dict[str, str]:
     """cookies 容忍 dict 或 "k=v; k2=v2" 串（cookies 命令导出的即串）。
     文档曾按串教用户填写、实现却按 dict 消费导致必崩——两侧在此统一。"""
@@ -462,6 +479,7 @@ class HttpClient:
                                         max_size=max_size)
         finally:
             pass
+        _note_net_result(bool(result and result.get("ok")))
         return result
 
     def _request_once(self, url, body_bytes, method, headers, use_cache,
@@ -581,6 +599,7 @@ class HttpClient:
         if result is None:
             # batch1800 战训（P3）：连续网络失败常因出口/系统代理变化（用户退 Clash/切 VPN）——
             # 附 doctor 复查提示，别让 agent 在错误诊断方向空转
+            _note_net_result(False)
             return {"ok": False, "status": last_status, "body": b"", "text": last_err, "json": None, "url": url,
                     "headers": last_headers,
                     "hint": "连续网络失败：出口/系统代理可能已变化，可运行 scripts/doctor.py（网络链路组）复查"}
@@ -595,6 +614,7 @@ class HttpClient:
                         _old.unlink(missing_ok=True)
             except Exception:
                 pass
+        _note_net_result(bool(result and result.get("ok")))
         return result
 
     def get(self, url: str, **kw) -> Dict[str, Any]:
@@ -843,6 +863,7 @@ class RequestsClient:
                 wait = self.backoff_base ** attempt
                 log(f"  网络异常: {e}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
                 time.sleep(wait)
+        _note_net_result(False)
         return {"ok": False, "status": last_status, "body": b"", "text": last_err, "json": None, "url": url,
                 "headers": {},
                 "hint": "连续网络失败：出口/系统代理可能已变化，可运行 scripts/doctor.py（网络链路组）复查"}
@@ -1004,6 +1025,7 @@ class CurlCffiClient:
                 wait = self.backoff_base ** attempt
                 log(f"  curl_cffi 网络异常: {e}，{wait:.1f}s 后重试", "WARN")
                 time.sleep(wait)
+        _note_net_result(False)
         return {"ok": False, "status": last_status, "body": b"", "text": last_err,
                 "json": None, "url": url, "headers": {},
                 "hint": "连续网络失败：出口/系统代理可能已变化，可运行 scripts/doctor.py（网络链路组）复查"}
