@@ -58,12 +58,19 @@ class QuotaLedger:
             return
         try:
             self.data = json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            # 审查修复：静默清零冷却账本 = 重新武装"自伤"行为（被拒不退款是本模块
+            # 存在的理由）。出声 + 时间戳隔离，绝不覆盖前一份证据。
+            import sys
+            print(f"⚠️ 配额账本损坏（{type(e).__name__}），隔离后从零重建: {self.path}",
+                  file=sys.stderr)
             try:
-                self.path.rename(self.path.with_suffix(".corrupt"))
+                self.path.rename(self.path.with_suffix(f".corrupt.{int(time.time())}"))
             except Exception:
                 pass
             self.data = {}
+        # 注意：load-modify-save 无跨进程锁——按单进程假设设计（agent 串行驱动）。
+        # 多进程并发写会互相覆盖（last-writer-wins），需要时外层自加 flock。
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)

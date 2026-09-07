@@ -45,7 +45,9 @@ def _guard_url(url: str) -> str:
 def download_attachments(urls_file: str | Path, out_dir: str | Path,
                          interval: float = 1.0, retries: int = 3,
                          min_kb: int = 10, log=print) -> Dict[str, Any]:
-    """批量下载附件。断点续传：同名且 >min_kb 的文件跳过；原子写入防半文件。"""
+    """批量下载附件。断点续传：同名且 >min_kb 的文件跳过；原子写入防半文件。
+    审查修复：重试策略由外层循环独占（内层客户端 max_retries=1，避免 3×3=9 次放大）；
+    _guard_url 的 ValueError（私网/坏协议）是确定性失败，直接记账不重试。"""
     from .core import make_http_client
     data = json.loads(Path(urls_file).expanduser().read_text(encoding="utf-8"))
     items = []
@@ -57,7 +59,7 @@ def download_attachments(urls_file: str | Path, out_dir: str | Path,
     out = Path(out_dir).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     client = make_http_client({"min_interval": interval, "timeout": 60,
-                               "http_backend": "auto", "max_retries": retries})
+                               "http_backend": "auto", "max_retries": 1})
     ok, skip, fail = [], [], []
     for it in items:
         url, name = it["url"], (it.get("name") or "").strip()
@@ -70,10 +72,16 @@ def download_attachments(urls_file: str | Path, out_dir: str | Path,
         if dest.exists() and dest.stat().st_size > min_kb * 1024:
             skip.append(name)
             continue
+        # 安全边界失败（私网/环回/坏协议）是确定性的：不进入重试循环
+        try:
+            _guard_url(url)
+        except ValueError as e:
+            fail.append({"name": name, "error": f"{type(e).__name__}: {e}"})
+            log(f"  ✗ {name}: {e}")
+            continue
         last_err = ""
         for attempt in range(1, retries + 1):
             try:
-                _guard_url(url)
                 r = client.get(url)
                 body = r.get("body") or b""
                 if r.get("ok") and body[:4] == b"%PDF" and len(body) > min_kb * 1024:
@@ -86,7 +94,8 @@ def download_attachments(urls_file: str | Path, out_dir: str | Path,
                 last_err = f"HTTP {r.get('status')} / 非PDF({body[:4]!r}) {len(body)}B"
             except Exception as e:
                 last_err = f"{type(e).__name__}: {str(e)[:60]}"
-            time.sleep(interval * attempt)
+            if attempt < retries:
+                time.sleep(interval * attempt)
         else:
             fail.append({"name": name, "error": last_err})
             log(f"  ✗ {name}: {last_err}")
@@ -98,21 +107,26 @@ def download_attachments(urls_file: str | Path, out_dir: str | Path,
 def extract_tables(pdf_path: str | Path, pages: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     """表格型 PDF → 行记录（每页一个 {page, rows:[{列名:值}]}）。
 
-    pdfplumber 优先（几何还原表格，列名取首行）；未安装降级 pypdf 文本启发式
-    （按行拆 + 空白分列，列名为 col_1..col_n）。两者都没有时抛出可安装指引。
+    pdfplumber 优先（几何还原表格，列名取首行）；未安装降级 pypdf 文本启发式。
+    审查修复：ImportError 只允许发生在 import 本身——pdfplumber 装了但用起来崩
+    （缺 pdfminer.six 等）必须大声抛出，绝不静默降级到列名更差的 pypdf。
     """
     fp = Path(pdf_path).expanduser()
     if not fp.exists():
         raise FileNotFoundError(f"PDF 不存在: {fp}")
     if fp.read_bytes()[:4] != b"%PDF":
         raise ValueError(f"不是有效 PDF: {fp}")
+    pages = [p for p in (pages or []) if p >= 1]  # 审查修复：0/负页码曾静默读成最后一页
 
     try:
         import pdfplumber  # type: ignore
+    except ImportError:
+        pdfplumber = None  # 未安装 → 走 pypdf 降级（这是唯一允许的降级情形）
+
+    if pdfplumber is not None:
         results = []
         with pdfplumber.open(str(fp)) as pdf:
-            target = pages or range(1, len(pdf.pages) + 1)
-            for pno in target:
+            for pno in pages or range(1, len(pdf.pages) + 1):
                 page = pdf.pages[pno - 1] if pno - 1 < len(pdf.pages) else None
                 if page is None:
                     continue
@@ -130,28 +144,25 @@ def extract_tables(pdf_path: str | Path, pages: Optional[List[int]] = None) -> L
                         rows.append(row)
                     results.append({"page": pno, "rows": rows})
         return results
-    except ImportError:
-        pass
 
     try:
         from pypdf import PdfReader  # type: ignore
-        reader = PdfReader(str(fp))
-        results = []
-        target = pages or range(1, len(reader.pages) + 1)
-        for pno in target:
-            if pno - 1 >= len(reader.pages):
-                continue
-            text = reader.pages[pno - 1].extract_text() or ""
-            lines = [l.strip() for l in text.splitlines() if l.strip()]
-            if not lines:
-                continue
-            ncol = max(len(re.split(r"\s{2,}", l)) for l in lines)
-            rows = []
-            for l in lines:
-                cells = re.split(r"\s{2,}", l)
-                cells += [""] * (ncol - len(cells))
-                rows.append({f"col_{i+1}": c for i, c in enumerate(cells)})
-            results.append({"page": pno, "rows": rows, "_hint": "pypdf 文本启发式（建议装 pdfplumber 获得精确列名）"})
-        return results
     except ImportError:
         raise ImportError("需要 pdfplumber（推荐）或 pypdf：pip install pdfplumber")
+    reader = PdfReader(str(fp))
+    results = []
+    for pno in pages or range(1, len(reader.pages) + 1):
+        if pno - 1 >= len(reader.pages):
+            continue
+        text = reader.pages[pno - 1].extract_text() or ""
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        if not lines:
+            continue
+        ncol = max(len(re.split(r"\s{2,}", l)) for l in lines)
+        rows = []
+        for l in lines:
+            cells = re.split(r"\s{2,}", l)
+            cells += [""] * (ncol - len(cells))
+            rows.append({f"col_{i+1}": c for i, c in enumerate(cells)})
+        results.append({"page": pno, "rows": rows, "_hint": "pypdf 文本启发式（建议装 pdfplumber 获得精确列名）"})
+    return results

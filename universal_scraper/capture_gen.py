@@ -17,7 +17,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlsplit, parse_qsl
+from urllib.parse import urlsplit
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
@@ -94,8 +94,14 @@ def one_config(item: Dict[str, Any], referer: str = "") -> Optional[Dict[str, An
                     src["json_body"] = body_obj
                 headers["Content-Type"] = "application/json"
             except Exception:
-                src["body"] = re.sub(r'(["&?])(page|pageNo|currentPage|pageIndex|pageNum)("?)=("\\?|)?\d+',
-                                     lambda m: m.group(0), pd)
+                # JSON 解析失败（拼接/非常规转义/截断）：按文本做键级翻页模板
+                # 审查修复：覆盖 JSON 风格（"page":1 / 'page':1）与 JS 字面量（page:3）
+                b = pd
+                for key in ("pageNo", "currentPage", "pageIndex", "pageNum", "page"):
+                    b = re.sub(rf'([?&]{key}=)\d+', r"\g<1>{{page}}", b)
+                    b = re.sub(rf"(^|&){key}=\d+", r"\g<1>" + key + "={{page}}", b)
+                    b = re.sub(rf'(["\']{key}["\']\s*:\s*)\d+', r'\g<1>"{{page}}"', b)
+                src["body"] = b
                 headers["Content-Type"] = req_ct or "application/x-www-form-urlencoded"
         else:
             b = pd
@@ -105,14 +111,15 @@ def one_config(item: Dict[str, Any], referer: str = "") -> Optional[Dict[str, An
             src["body"] = b
             if req_ct:
                 headers["Content-Type"] = req_ct
-    # GET：url 查询串翻页参数模板化
+    # GET：查询串翻页参数模板化。审查修复：不走 parse_qsl 重建（会把 %E5%85%AC
+    # 解码成裸中文再拼回，带关键词过滤的分页接口查询串被静默破坏）——
+    # 直接在原始查询串上做正则替换。
     if method == "GET":
-        sp = urlsplit(url)
-        q = parse_qsl(sp.query, keep_blank_values=True)
-        qd = _page_param_holders({k: v for k, v in q})
-        if qd != dict(q):
-            new_q = "&".join(f"{k}={v}" for k, v in qd.items())
-            src["url"] = sp._replace(query=new_q).geturl()
+        for key in ("pageNo", "currentPage", "pageIndex", "pageNum", "page"):
+            new_url = re.sub(rf"([?&]{key}=)\d+", r"\g<1>{{page}}", url)
+            if new_url != url:
+                src["url"] = new_url
+                break
     src["headers"] = headers
     return src
 
@@ -120,9 +127,16 @@ def one_config(item: Dict[str, Any], referer: str = "") -> Optional[Dict[str, An
 def generate(capture_file: str | Path, referer: str = "",
              out: Optional[str] = None, log=print) -> Dict[str, Any]:
     fp = Path(capture_file).expanduser()
-    data = json.loads(fp.read_text(encoding="utf-8"))
-    if isinstance(data, dict):  # 声明式 <name>.json 兼容
+    try:
+        data = json.loads(fp.read_text(encoding="utf-8", errors="replace"))
+    except Exception as e:
+        return {"error": f"捕获文件解析失败（{type(e).__name__}: {str(e)[:80]}）: {fp}"}
+    if isinstance(data, dict):
         data = data.get("items") or []
+        if not data:
+            log("⚠️ 捕获文件是 dict 但无 items 键——若是声明式捕获请直接传 <name>.json 的数组内容")
+    if not isinstance(data, list):
+        return {"error": f"捕获文件顶层应为 list，实际 {type(data).__name__}"}
     configs = []
     seen = set()
     for item in data:

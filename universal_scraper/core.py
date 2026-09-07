@@ -39,7 +39,9 @@ DEFAULT_MAX_BODY = 20 * 1024 * 1024  # 默认响应体上限（20MB，流式限�
 
 def _budget_auto_mark(url: str, status: int, hours: float = 24.0):
     """batch1600 战训：被 403/421/52x 拒绝时自动记账域名封锁台账（跨运行可查）。
-    幂等：同域已冷却中则只刷新不重复写盘；任何异常静默（台账绝不拖垮抓取）。"""
+    幂等：同域已冷却中则直接跳过（不刷新时间戳也不写盘）；任何异常静默
+    （台账绝不拖垮抓取）。注：在首次拒绝即记账（保守口径），后续成功不回滚——
+    台账是建议性信息，供 budget --list / doctor 参考，不拦截请求。"""
     try:
         from urllib.parse import urlsplit
         host = urlsplit(url).hostname or ""
@@ -526,6 +528,12 @@ class HttpClient:
                 raw = e.read((max_size + 1) if max_size else None) if max_size else e.read()
                 if max_size and len(raw) > max_size:
                     raw = raw[:max_size]
+                # batch1600 战训：403/421/52x 自动记账（urllib 兜底后端同样覆盖）
+                try:
+                    if e.code in (403, 421) or 520 <= e.code <= 529:
+                        _budget_auto_mark(url, e.code)
+                except Exception:
+                    pass
                 # urllib 不自动解压 gzip：HTTPError 路径的 raw 仍是压缩字节，不解码全乱码
                 if raw[:2] == b"\x1f\x8b":
                     import gzip as _gz
@@ -931,6 +939,13 @@ class CurlCffiClient:
             try:
                 resp = cffi.request(method.upper(), url, params=params,
                                     data=data, json=json_data, **kw)
+                # batch1600 战训：403/421/52x 自动记账（须覆盖全部后端——curl_cffi 是默认后端，
+                # v1.12.0 曾只挂在 RequestsClient 导致默认路径静默失效）
+                try:
+                    if resp.status_code in (403, 421) or 520 <= resp.status_code <= 529:
+                        _budget_auto_mark(url, resp.status_code)
+                except Exception:
+                    pass
                 if max_size:
                     # 流式限读：读满 max_size+1 即停，避免超大响应占满内存
                     chunks = []

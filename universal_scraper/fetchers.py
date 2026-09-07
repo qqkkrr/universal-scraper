@@ -680,8 +680,15 @@ class BrowserFetcher(BaseFetcher):
         if not f.exists():
             return []
         try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except Exception:
+            data = json.loads(f.read_text(encoding="utf-8", errors="replace"))
+        except Exception as e:
+            # 审查修复：解析失败绝不能静默当 0 条（整轮登录/验证码/配额都花了，
+            # 却与"本来就没捕获到"无法区分——agent 会误判成 nodata）
+            log(f"  ⚠️ capture_all.json 解析失败（{type(e).__name__}: {str(e)[:80]}），按 0 条处理，"
+                "请检查文件是否被截断", "WARN")
+            return []
+        if not isinstance(data, list):
+            log(f"  ⚠️ capture_all.json 结构异常（顶层 {type(data).__name__}，预期 list），按 0 条处理", "WARN")
             return []
         recs = []
         for item in data:

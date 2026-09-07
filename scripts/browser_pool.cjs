@@ -128,30 +128,50 @@ async function main() {
   for (let i = 0; i < POOL_SIZE; i++) workers.push(worker());
 
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const shutdown = () => {
+    if (closing) return;
+    closing = true;
+    // 审查修复：close 后必须排空停在 pop() 上的 worker（否则 done 永不 resolve，
+    // 进程挂到被 Python 3s 强杀——优雅退出路径形同虚设）
+    waiters.splice(0).forEach((w) => w(null));
+  };
   rl.on("line", (line) => {
     line = line.trim();
     if (!line) return;
     try {
       const req = JSON.parse(line);
-      if (req.type === "close" || req.close) { closing = true; return; }
+      if (req.type === "close" || req.close) { shutdown(); return; }
       push(req);
     } catch (e) {
       out({ id: null, error: "请求解析失败: " + String(e) });
     }
   });
-  rl.on("close", () => { closing = true; });
+  rl.on("close", () => { shutdown(); });
 
   const done = Promise.all(workers);
   // 空闲超时退出（US_POOL_IDLE_MS，默认 120s）：只在"无活跃渲染 && 队列空"时退出，
   // 绝不在页面渲染中途 kill（修复 30s 硬定时器杀活池的 bug）。
   const idleTimer = setInterval(() => {
-    if (closing) return;
+    if (closing && active === 0) {
+      // 审查修复：closing 后主动收尾（此前 closing 直接 return，定时器空转永不退）
+      waiters.splice(0).forEach((w) => w(null));
+      clearInterval(idleTimer);
+      (isCdpFallback ? browser.disconnect().catch(() => {}) : browser.close().catch(() => {}));
+      process.exit(0);
+      return;
+    }
     if (active === 0 && queue.length === 0 && waiters.length === 0 && Date.now() - lastActivity >= IDLE_MS) {
-      closing = true;
+      shutdown();
       process.exit(0);
     }
   }, 2000);
-  done.then(() => { clearInterval(idleTimer); browser.close().catch(() => {}); process.exit(0); });
+  // CDP 附加模式 disconnect() 只断连接（close() 对 connected 浏览器同样是断开语义，
+  // 这里显式用 disconnect 表达"绝不拥有这个浏览器"）
+  done.then(() => {
+    clearInterval(idleTimer);
+    (isCdpFallback ? browser.disconnect().catch(() => {}) : browser.close().catch(() => {}));
+    process.exit(0);
+  });
 }
 
 main().catch((e) => {

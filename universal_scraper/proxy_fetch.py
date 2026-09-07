@@ -127,7 +127,9 @@ def fetch_all(timeout: int = 12, log=print) -> List[str]:
 
 # ---------------------------------------------------------------- 校验
 def _fetch_via(proxy: str, url: str, timeout: int, marker: Optional[str] = None) -> Tuple[bool, int]:
-    """经代理 GET url；marker 给定时断言响应含标记内容。返回 (ok, latency_ms)。"""
+    """经代理 GET url；marker 给定时断言响应含标记内容。返回 (ok, latency_ms)。
+    审查修复：curl_cffi 缺失不再逐代理吞 ImportError（表现为沉默的"0 可用"）——
+    先探测一次，缺失则降级 requests 并大声提示。"""
     import curl_cffi.requests as cffi
     p = {"http": proxy, "https": proxy}
     t0 = time.time()
@@ -138,6 +140,21 @@ def _fetch_via(proxy: str, url: str, timeout: int, marker: Optional[str] = None)
         ok = marker.encode("utf-8") in r.content or marker in r.text
     if ok and not marker:
         # 无标记时至少要求是真实页面而非拦截页（>5KB 或 JSON）
+        ok = len(r.content) > 5120 or r.content[:1] in (b"{", b"[")
+    return ok, int((time.time() - t0) * 1000)
+
+
+def _fetch_via_requests(proxy: str, url: str, timeout: int, marker: Optional[str] = None) -> Tuple[bool, int]:
+    """curl_cffi 不可用时的降级通道（requests 指纹，对 TLS 门禁站可用率会偏低，但可用性判断诚实）。"""
+    import requests as _rq
+    p = {"http": proxy, "https": proxy}
+    t0 = time.time()
+    r = _rq.get(url, timeout=timeout, proxies=p, allow_redirects=False,
+                headers={"User-Agent": UA})
+    ok = r.status_code == 200
+    if ok and marker:
+        ok = marker in r.text or marker.encode("utf-8") in r.content
+    if ok and not marker:
         ok = len(r.content) > 5120 or r.content[:1] in (b"{", b"[")
     return ok, int((time.time() - t0) * 1000)
 
@@ -204,15 +221,20 @@ class PoolState:
             return
         try:
             self.data = json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception:
-            # 损坏自动重建（战训：状态文件被杀时写坏绝不能让进程起不来）
+        except Exception as e:
+            # 损坏自动重建，但必须出声 + 带时间戳隔离（审查修复：静默清零 burned
+            # 等于把烧尽代理重新放回战场；二次损坏曾覆盖前一份证据）
+            import sys as _sys
+            print(f"⚠️ 代理池状态损坏（{type(e).__name__}），隔离后从零重建: {self.path}",
+                  file=_sys.stderr)
             try:
-                self.path.rename(self.path.with_suffix(".corrupt"))
+                self.path.rename(self.path.with_suffix(f".corrupt.{int(time.time())}"))
             except Exception:
                 pass
             self.data = {}
 
     def save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)  # 审查修复：首跑新目录曾直接崩
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8")
         tmp.replace(self.path)
@@ -277,7 +299,12 @@ def refresh(out: str = "outputs/proxies.txt", workers: int = 30,
     for px, ms in good.items():
         st.mark(px, "alive", latency_ms=ms)
     for px in batch:
-        if px not in good and px not in st.data:
+        if px in good:
+            continue
+        prev = st.data.get(px, {}).get("state")
+        # 审查修复：本轮验证失败且此前 alive → 降级 dead（否则 stats 永久虚高）；
+        # burned 不降级（当日配额烧尽是另一回事，保留到次日）
+        if prev != "burned":
             st.mark(px, "dead")
     st.save()
 

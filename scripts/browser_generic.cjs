@@ -313,7 +313,7 @@ function centerCaptcha(page) {
           });
         } catch (e) {}
         if (fbOk) {
-          out({ type: "diag", message: "浏览器启动失败(" + String(launchErr.message || launchErr).slice(0, 120) + ") → 降级连接 9222 调试 Chrome" });
+          out({ type: "diag", message: "浏览器启动失败(" + String(launchErr.message || launchErr).slice(0, 120) + ") → 降级连接 9222 调试 Chrome（注意：proxy/指纹/storageState 配置不生效，走真实 Chrome 出口与登录态）" });
           try {
             browser = await chromium.connectOverCDP(fallbackCdp, { timeout: 15000 });
             context = browser.contexts()[0] || await browser.newContext();

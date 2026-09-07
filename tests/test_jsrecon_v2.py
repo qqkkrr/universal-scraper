@@ -13,15 +13,16 @@ class _FakeClient:
     def get(self, url):
         self.calls.append(url)
         if url.endswith("/list.html"):
-            return {"text": '<html><script src="/static/app.js"></script>'
-                    '<script src="https://cdn.example.com/vendor.js"></script></html>',
-                    "status": 200}
+            return {"ok": True, "status": 200,
+                    "text": '<html><script src="/static/app.js"></script>'
+                            '<script src="https://cdn.example.com/vendor.js"></script></html>'}
         if url.endswith("app.js"):
-            return {"text": 'axios.create({baseURL:"/api/prod"});'
-                    'fetch("/svc/query/notice-list?page=1");'
-                    'var e=i("baseURL\\\"),E=i(\\\"x\\\"),n=[=;{}()'  # 压缩噪声
-                    , "status": 200}
-        return {"text": "", "status": 200}
+            return {"ok": True, "status": 200,
+                    "text": 'axios.create({baseURL:"/api/prod"});'
+                            'fetch("/svc/query/notice-list?page=1");'
+                            'var e=i("baseURL\\\"),E=i(\\\"x\\\"),n=[=;{}()'  # 压缩噪声
+                    }
+        return {"ok": True, "status": 200, "text": ""}
 
 
 def test_jsrecon_filters_noise_and_extracts_baseurl(monkeypatch):

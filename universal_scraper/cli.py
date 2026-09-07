@@ -670,11 +670,15 @@ def main() -> int:
             print(json.dumps(q.status(), ensure_ascii=False))
             return 0
         if not args.item_id:
-            print("❌ done/fail/blocked 需要任务 id", file=sys.stderr)
+            print("❌ done/fail/blocked/nodata/retry 需要任务 id", file=sys.stderr)
             return 1
         status_map = {"done": "done", "fail": "failed", "blocked": "blocked",
                       "nodata": "nodata", "retry": "retry"}
-        it = q.mark(args.item_id, status_map[args.action], args.result)
+        try:
+            it = q.mark(args.item_id, status_map[args.action], args.result)
+        except (KeyError, ValueError) as e:  # 审查修复：手滑 id 不该甩栈
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
         st = q.status()
         print(json.dumps({"marked": it.get("id"), "status": it.get("status"), **st},
                          ensure_ascii=False))
@@ -684,6 +688,9 @@ def main() -> int:
         from .capture_gen import generate
         out = args.out or str(Path(args.capture).with_suffix("").resolve()) + "_configs.json"
         r = generate(args.capture, referer=args.referer, out=out)
+        if r.get("error"):
+            print(f"❌ {r['error']}", file=sys.stderr)
+            return 1
         for c in r.get("configs", [])[:10]:
             src = c["source"]
             print(f"  {src.get('method','GET'):4s} {src['url'][:80]}  records_path={c['pagination']['records_path'] or '?'}")
@@ -702,8 +709,8 @@ def main() -> int:
             from .pdf_attach import extract_tables
             try:
                 tables = extract_tables(args.tables)
-            except (ImportError, ValueError, FileNotFoundError) as e:
-                print(f"❌ {e}", file=sys.stderr)
+            except Exception as e:  # 审查修复：pypdf 的 PdfStreamError 等曾甩裸栈
+                print(f"❌ {type(e).__name__}: {e}", file=sys.stderr)
                 return 1
             out = args.out or str(Path(args.tables).with_suffix(".tables.json").resolve())
             Path(out).write_text(json.dumps(tables, ensure_ascii=False, indent=1), encoding="utf-8")

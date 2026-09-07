@@ -127,6 +127,11 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
     from .core import make_http_client
     client = make_http_client({"min_interval": 0.5, "timeout": 20, "http_backend": "auto"})
     res = client.get(url)
+    # 审查修复：核心客户端失败时 text 非空（装着错误信息），按 text 判永远不报错——
+    # 被 WAF 拦的页面曾返回"成功形态的 0 候选"误导侦察方向。必须按 ok 门控。
+    if not res.get("ok"):
+        return {"error": f"页面获取失败: HTTP {res.get('status')} "
+                f"{str(res.get('text', ''))[:120]}"}
     html = res.get("text", "")
     if not html:
         return {"error": f"页面获取失败: HTTP {res.get('status')}"}
@@ -180,7 +185,7 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
                 if _plausible(f) and f not in hits and not f.endswith((".js", ".css", ".png", ".svg")):
                     frags.append(f)
             if hits:
-                found[su.rsplit("/", 1)[-1][:48] or su] = hits
+                found[su[:96]] = hits  # 审查修复：按完整 URL 键控（同名 main.js 曾互相覆盖丢端点）
         except Exception:
             continue
     all_hits = sorted({h for v in found.values() for h in v})
@@ -191,7 +196,7 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
     if out:
         import os as _os
         p = Path(_os.path.expanduser(out))
-        if p.is_dir():  # batch1401 战训：--out 传目录不再抛 IsADirectoryError
+        if p.is_dir() or not p.suffix:  # 目录（含尚不存在/无后缀路径）自动补 jsrecon.json
             p = p / "jsrecon.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")

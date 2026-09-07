@@ -27,7 +27,9 @@ class BatchQueue:
         self.path = Path(path).expanduser()
         if not self.path.exists():
             raise FileNotFoundError(f"队列文件不存在: {self.path}（格式见模块 docstring）")
-        self.items: List[Dict] = json.loads(self.path.read_text(encoding="utf-8"))
+        self.items = json.loads(self.path.read_text(encoding="utf-8"))
+        if not isinstance(self.items, list):
+            raise ValueError(f"队列文件顶层必须是 list，实际 {type(self.items).__name__}")
 
     def _save(self):
         tmp = self.path.with_suffix(".json.tmp")
@@ -56,14 +58,20 @@ class BatchQueue:
             raise ValueError(f"非法状态: {status}（可用: {terminal}）")
         for it in self.items:
             if str(it.get("id")) == str(item_id):
+                was_pending = it.get("status") == "pending"
                 if status == "retry":
                     if it.get("status") not in ("failed", "blocked", "nodata"):
                         raise ValueError(f"retry 仅用于 failed/blocked/nodata，当前 {it.get('status')}")
                     it["status"] = "pending"
                 else:
                     it["status"] = status
-                    it["attempts"] = int(it.get("attempts", 0)) + (1 if status != "pending" else 0)
-                it["result"] = result[:500] or it.get("result", "")
+                    # 审查修复：仅从 pending 出发才计一次 attempt（终态重复 mark
+                    # 不再虚增轮次）
+                    if status != "pending" and was_pending:
+                        it["attempts"] = int(it.get("attempts", 0)) + 1
+                # 审查修复：result 永远如实覆盖（空即空）——failed 项挂着旧的
+                # 成功文案会误导断点续跑的 agent
+                it["result"] = result[:500]
                 self._save()
                 return it
         raise KeyError(f"队列中无此 id: {item_id}")

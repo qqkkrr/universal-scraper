@@ -72,8 +72,9 @@ def detect_system_proxy() -> Dict[str, Any]:
                 out["http_proxy"] = p.group(1) if p else ""
                 out["port"] = int(port.group(1)) if port else 0
                 out["sources"].append("scutil(macOS系统代理)")
-        except Exception:
-            pass
+        except Exception as e:
+            # 审查修复：诊断器自身失败绝不能伪装成"没开代理"的确定答案
+            out["sources"].append(f"scutil检测失败({type(e).__name__})，结果不可信")
     # 3) 常见本机代理进程（Clash/V2Ray/sing-box 等）
     if shutil.which("ps"):
         try:
@@ -81,8 +82,8 @@ def detect_system_proxy() -> Dict[str, Any]:
             for name in ("clash", "mihomo", "verge", "v2ray", "sing-box", "surge"):
                 if re.search(name, ps, re.I):
                     out["processes"].append(name)
-        except Exception:
-            pass
+        except Exception as e:
+            out["sources"].append(f"进程检测失败({type(e).__name__})，结果不可信")
     if out["enabled"] or out["processes"]:
         out["warning"] = ("检测到系统代理/本机代理进程：'直连'请求可能被劫持到代理节点出口。"
                           "诊断配额/IP 问题前先确认真实出口（detect_ip），必要时关闭系统代理或用 no_proxy 锁定直连。")
@@ -103,8 +104,8 @@ def power_source() -> Dict[str, Any]:
                 out["source"] = "BATT"
                 out["caffeinate_hint"] = ("电池模式：合盖即睡且 caffeinate 无效，"
                                           "无人值守任务请接电源")
-        except Exception:
-            pass
+        except Exception as e:
+            out["source"] = f"unknown（pmset 失败: {type(e).__name__}）"
     return out
 
 
