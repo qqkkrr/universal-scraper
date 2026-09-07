@@ -16,8 +16,12 @@ agent 的批处理状态机：队列文件 + 断点续跑 + 逐项状态。执�
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Dict, Optional
+
+# running 超过该秒数未更新 → 视为代理崩溃，任务自动回 pending（batch2400）
+STALE_RUNNING_SEC = 1800
 
 
 class BatchQueue:
@@ -38,7 +42,16 @@ class BatchQueue:
 
     def next(self) -> Optional[Dict]:
         """下一个 pending。batch1700 战训：priority 字段小的优先（缺省=文件顺序）；
-        富元数据（result/attempts/自定义字段）原样保留，agent 不必再自建状态文件。"""
+        富元数据（result/attempts/自定义字段）原样保留，agent 不必再自建状态文件。
+        batch2400（多代理）：过期 running 自动回收回 pending（agent 崩溃不丢任务）。"""
+        now = time.time()
+        changed = False
+        for it in self.items:
+            if it.get("status") == "running" and now - it.get("running_ts", 0) > STALE_RUNNING_SEC:
+                it["status"] = "pending"
+                changed = True
+        if changed:
+            self._save()
         pend = [it for it in self.items if it.get("status") == "pending"]
         if not pend:
             return None
@@ -47,21 +60,36 @@ class BatchQueue:
             return min(pend, key=lambda it: (float(it.get("priority", 100)),))
         return pend[0]
 
+    def claim(self) -> Optional[Dict]:
+        """多代理模式：原子地"取下一个 pending → 标 running"。
+        崩溃的任务由 next() 的 stale 回收（STALE_RUNNING_SEC=30 分钟）自动归还。"""
+        it = self.next()
+        if not it:
+            return None
+        import time
+        it["status"] = "running"
+        it["running_ts"] = int(time.time())
+        self._save()
+        return it
+
     def mark(self, item_id, status: str, result: str = "") -> Dict:
-        """状态机：done/failed/blocked/nodata/pending/retry。
+        """状态机：done/failed/blocked/nodata/pending/retry/running。
 
         nodata（batch1700 战训）：与 failed 严格区分——数据本身不存在于公开渠道
         （已用 WebSearch 交叉验证过），不是爬取失败，不值得修工具重试。
-        retry：failed/blocked → pending 重置（attempts 保留累计）。"""
-        terminal = ("done", "failed", "blocked", "nodata", "pending", "retry")
+        retry：failed/blocked/nodata/running → pending 重置（attempts 保留累计）。
+        多代理（batch2400）：claim 产生的 running 由终态覆盖；崩溃的任务由
+        next() 的 stale 回收归还。"""
+        terminal = ("done", "failed", "blocked", "nodata", "pending", "retry", "running")
         if status not in terminal:
             raise ValueError(f"非法状态: {status}（可用: {terminal}）")
         for it in self.items:
             if str(it.get("id")) == str(item_id):
                 was_pending = it.get("status") == "pending"
                 if status == "retry":
-                    if it.get("status") not in ("failed", "blocked", "nodata"):
-                        raise ValueError(f"retry 仅用于 failed/blocked/nodata，当前 {it.get('status')}")
+                    if it.get("status") not in ("failed", "blocked", "nodata", "running"):
+                        raise ValueError(f"retry 仅用于 failed/blocked/nodata/running，"
+                                         f"当前 {it.get('status')}")
                     it["status"] = "pending"
                 else:
                     it["status"] = status
@@ -72,6 +100,7 @@ class BatchQueue:
                 # 审查修复：result 永远如实覆盖（空即空）——failed 项挂着旧的
                 # 成功文案会误导断点续跑的 agent
                 it["result"] = result[:500]
+                it.pop("running_ts", None)   # 离开 running 态即清理
                 self._save()
                 return it
         raise KeyError(f"队列中无此 id: {item_id}")
@@ -81,4 +110,5 @@ class BatchQueue:
         c = Counter(it.get("status", "pending") for it in self.items)
         return {"total": len(self.items), "done": c.get("done", 0),
                 "failed": c.get("failed", 0), "blocked": c.get("blocked", 0),
-                "nodata": c.get("nodata", 0), "pending": c.get("pending", 0)}
+                "nodata": c.get("nodata", 0),
+                "running": c.get("running", 0), "pending": c.get("pending", 0)}

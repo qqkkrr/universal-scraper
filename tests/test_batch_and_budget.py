@@ -32,7 +32,8 @@ def test_mark_and_resume_across_restart(queue_file):
     q2 = BatchQueue(queue_file)  # 模拟崩溃后重启：断点续跑
     assert q2.next()["id"] == 1403
     st = q2.status()
-    assert st == {"total": 3, "done": 2, "failed": 0, "blocked": 0, "nodata": 0, "pending": 1}
+    assert st == {"total": 3, "done": 2, "failed": 0, "blocked": 0, "nodata": 0,
+                  "running": 0, "pending": 1}
 
 
 def test_all_done_signals_finished(queue_file):

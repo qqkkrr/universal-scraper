@@ -8,7 +8,7 @@ description: >
   样本先行确认、0 结果强制诊断。当用户想抓取/采集/爬取/下载网页数据、
   提到爬虫/scraper/crawler/spider/数据采集，或点名 universal-scraper 时使用。
 metadata:
-  version: "1.13.1"
+  version: "1.14.1"
   source_project: "universal-scraper (10 轮审计, 164 测试)"
 ---
 
@@ -168,6 +168,14 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 
 **用户确认前，绝不全量跑。** 字段被要求修改 → 改配置 → 重新出样本（第二轮起免表格，贴前 2 条即可）。
 
+### 数据型任务的替代验证（batch2400 战训）
+
+目标是官方 API/统计页/月报等**数据型任务**且运行在自主模式（模式 B/并行子代理）
+时，逐个等人工确认不现实。替代验证三件套（缺一不可，全部通过等同样本门槛通过）：
+①字段完整率 ≥0.9；②数值在常识范围且报告期与任务一致；③与第二个独立来源交叉一致。
+达不到 → 按第六章 0 结果分叉处置。**人工确认通道永远保留**——子代理遇到"拿不准"
+仍应停下来问。
+
 ## 第四幕 · 全量采集
 
 ```bash
@@ -215,7 +223,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 配额锁死/进得来拿不到 | playbook 第七章：四类配额判别 → 冷却账本 → 通道组合（R21） |
 | 学术文献（有机构身份） | R20：机构 VPN + 知网 `navi.cnki.net` 期刊导航 + CDP 下载捕获 |
 | 无人值守长跑 | R22 自检清单（电源/防睡眠/原子状态/看门狗/胜利退出） |
-| 批量任务队列 | `batch --queue tasks.json next/done/fail/nodata/retry/status`（优先级+断点续跑） |
+| 批量任务队列 | `batch --queue tasks.json next/claim/done/fail/nodata/retry/status`（优先级+断点续跑+多代理原子领取） |
+| 并行子代理批次 | R25 批次编排：`guide` 生成 AGENT_GUIDE + 并发上限（LLM 子代理 ≤8）+ 证据 schema |
 | 数据型任务（行情/指数/名单/统计） | R23 API 优先动线：jsrecon → capture(POST体+认证头) → capture2config（自动带 Cookie/翻页模板）→ 小样 → 全量 |
 | 交易所/全球市场数据 | `references/data-sources-exchanges.md`（全球主要交易所数据起点索引）+ R24 |
 | 数据源陌生/不确定是否存在 | R24：WebSearch 先行（发现通道+核验），再选四模式之一 |
@@ -225,7 +234,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 附件下载+PDF表格 | `pdf --download 清单.json` / `pdf --tables x.pdf`（断点续传+%PDF校验+pdfplumber） |
 | 定时重复采集 | `schedule --task --every <秒>` |
 | 监控网页变化 | `monitor --task --every <秒>` |
-| 结果复核/报表 | `verify` / `report` |
+| 结果复核/报表 | `verify --file` / `verify --dir <任务目录>`（通用审计：任意来源） / `report` |
 | 环境/出口 IP | `doctor.py`（含网络链路体检）/ `ip`（出口+系统代理+电源） |
 
 ## 遇到阻断

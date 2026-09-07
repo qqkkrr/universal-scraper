@@ -193,6 +193,95 @@ def verify_file(path: str, network: bool = False, data_key: str = "") -> Dict[st
     return verify_rows(rows, None, sample_n=3, network=network)
 
 
+# ---------------- 通用任务目录审计（batch1800~2200 战训：verify 此前只认自家
+# config 产出的数据；异构批次（API/PDF/浏览器捕获混合）需要"任意任务目录"校验） ----------------
+_EVIDENCE_PREFIX = ("evidence_", "capture_", "recon_")
+_NON_DATA = {"report.md", "summary.json", "last_page.html", "recon_records.json"}
+
+
+def verify_dir(path: str, log=print) -> Dict[str, Any]:
+    """任意任务目录的通用审计（不要求由本工具 config 产出）：
+    - 数据文件（*.json/*.csv，排除证据/快照命名）逐个：记录数、字段完整率
+    - 证据清单：evidence_* / capture_* / summary.json 存在性
+    - summary.json 存在时核对其中 evidence 引用的文件是否落盘
+    返回 {files:[...], evidence:{...}, verdict}。verdict ∈ ok|partial|empty|no_data_files"""
+    import csv as _csv
+    root = Path(path).expanduser()
+    if not root.exists() or not root.is_dir():
+        return {"ok": False, "error": f"目录不存在: {path}"}
+    files_out = []
+    total_records = 0
+    data_files = []
+    for f in sorted(root.rglob("*")):
+        if not f.is_file():
+            continue
+        if f.name.startswith(_EVIDENCE_PREFIX) or f.name in _NON_DATA or f.suffix == ".tmp":
+            continue
+        if f.suffix.lower() in (".json", ".csv"):
+            data_files.append(f)
+    if not data_files:
+        log("⚠️ 未发现数据文件（*.json/*.csv）")
+    for f in data_files:
+        entry: Dict[str, Any] = {"file": f.name}
+        try:
+            if f.suffix.lower() == ".json":
+                vr = verify_file(str(f))
+                if vr.get("error"):
+                    raise ValueError(vr["error"])
+                n = vr.get("total") or vr.get("records") or 0
+                entry["records"] = int(n) if isinstance(n, (int, float)) else 0
+                fields = vr.get("fields") or {}
+                if fields:
+                    rates = [v.get("rate", 0) if isinstance(v, dict) else v for v in fields.values()]
+                    entry["field_complete_rate"] = round(sum(rates) / len(rates), 3)
+                total_records += entry["records"]
+            else:  # csv
+                with f.open(encoding="utf-8-sig", newline="") as fh:
+                    rows = list(_csv.DictReader(fh))
+                entry["records"] = len(rows)
+                total_records += len(rows)
+                if rows:
+                    filled = sum(1 for r in rows for v in r.values() if str(v or "").strip())
+                    cells = sum(len(r) for r in rows) or 1
+                    entry["field_complete_rate"] = round(filled / cells, 3)
+        except Exception as e:
+            entry["error"] = f"{type(e).__name__}: {str(e)[:80]}"
+        files_out.append(entry)
+    # 证据清单
+    evidence = {
+        "summary_json": (root / "summary.json").exists(),
+        "report_md": (root / "report.md").exists(),
+        "evidence_files": sorted(p.name for p in root.iterdir()
+                                 if p.is_file() and p.name.startswith("evidence_")),
+        "capture_files": sorted(p.name for p in root.iterdir()
+                                if p.is_file() and p.name.startswith("capture_")),
+    }
+    # summary.json 引用的证据文件存在性
+    summary = root / "summary.json"
+    missing_ref = []
+    if summary.exists():
+        try:
+            refs = json.loads(summary.read_text(encoding="utf-8")).get("evidence") or []
+            missing_ref = [r for r in refs if not (root / str(r)).exists()]
+        except Exception:
+            pass
+    has_data = any(f.get("records", 0) > 0 for f in files_out)
+    if not data_files:
+        verdict = "no_data_files"
+    elif has_data and not missing_ref:
+        verdict = "ok"
+    elif has_data:
+        verdict = "partial"
+    else:
+        verdict = "empty"
+    result = {"dir": str(root), "files": files_out, "total_records": total_records,
+              "evidence": evidence, "missing_evidence_refs": missing_ref,
+              "verdict": verdict}
+    log(f"🧾 目录审计 {root.name}: verdict={verdict}, 数据文件 {len(files_out)}, "
+        f"记录 {total_records}, 证据 evidence_{len(evidence['evidence_files'])} 个")
+    return result
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(0)

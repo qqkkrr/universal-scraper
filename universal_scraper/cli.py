@@ -249,10 +249,10 @@ def main() -> int:
     jr_p.add_argument("--max-scripts", type=int, default=6, help="最多分析的 JS 包数（默认 6）")
     jr_p.add_argument("--out", default=None, help="结果 JSON 保存路径（目录自动补 jsrecon.json）")
 
-    bt_p = sub.add_parser("batch", help="🗂️ 批量任务队列：next/done/fail/nodata/retry/status（断点续跑+优先级）")
+    bt_p = sub.add_parser("batch", help="🗂️ 批量任务队列：next/claim/done/fail/nodata/retry/status（多代理+断点续跑）")
     bt_p.add_argument("--queue", required=True, help="队列 JSON 文件（[{id,text,status,attempts,result,priority?}]）")
-    bt_p.add_argument("action", choices=["next", "done", "fail", "blocked", "nodata", "retry", "status"],
-                      help="队列操作（nodata=数据不存在于公开渠道，区别于爬取失败）")
+    bt_p.add_argument("action", choices=["next", "claim", "done", "fail", "blocked", "nodata", "retry", "status"],
+                      help="队列操作（claim=多代理原子领取；nodata=数据不存在于公开渠道，区别于爬取失败）")
     bt_p.add_argument("item_id", nargs="?", default=None, help="任务 id（done/fail/blocked/nodata/retry 时必填）")
     bt_p.add_argument("--result", default="", help="核对结论/失败原因（写入台账）")
 
@@ -275,8 +275,12 @@ def main() -> int:
     pdf_p.add_argument("--out", default="", help="输出目录/文件")
     pdf_p.add_argument("--interval", type=float, default=1.0, help="下载间隔秒（礼貌限速）")
 
-    vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比")
-    vp.add_argument("--file", required=True, help="结果 JSON 文件，如 outputs/xxx.json")
+    gd_p = sub.add_parser("guide", help="📖 生成并行子代理执行规范 AGENT_GUIDE.md（batch2400 战训标准件）")
+    gd_p.add_argument("--out", default="AGENT_GUIDE.md", help="输出路径（默认 ./AGENT_GUIDE.md）")
+
+    vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比；或通用目录审计")
+    vp.add_argument("--file", default=None, help="结果 JSON 文件，如 outputs/xxx.json")
+    vp.add_argument("--dir", default=None, help="任意任务目录审计（不要求由本工具产出）：记录数/字段完整率/证据存在性")
     vp.add_argument("--network", action="store_true", help="联网抽样重抓对比（默认只做本地检查）")
     vp.add_argument("--data-key", default="", help="JSON 为 dict 包装时取数组的键；未指定则自动探测 data/list/rows/items")
 
@@ -666,6 +670,10 @@ def main() -> int:
                 return 0
             print(json.dumps(it, ensure_ascii=False))
             return 0
+        if args.action == "claim":
+            it = q.claim()
+            print(json.dumps({"claimed": bool(it), "task": it}, ensure_ascii=False))
+            return 0 if it else 1
         if args.action == "status":
             print(json.dumps(q.status(), ensure_ascii=False))
             return 0
@@ -803,9 +811,39 @@ def main() -> int:
         print(f"🔋 电源: {pw.get('source')} {('- ' + pw['caffeinate_hint']) if pw.get('caffeinate_hint') else ''}")
         return 0
 
+    if args.cmd == "guide":
+        from .agent_guide import emit
+        p_ = emit(args.out)
+        print(f"📖 子代理执行规范已生成: {p_.resolve()}")
+        print("   随任务分派发给每个并行子代理，并写进调度 prompt。")
+        return 0
+
     if args.cmd == "verify":
-        from .verify import verify_file
-        rep = verify_file(args.file, network=args.network, data_key=args.data_key)
+        from .verify import verify_file, verify_dir
+        if args.dir:
+            rep = verify_dir(args.dir)
+            verdict_emoji = {"ok": "✅", "partial": "⚠️", "empty": "❌", "no_data_files": "❌"}.get(
+                rep.get("verdict"), "•")
+            print(f"🧾 目录审计 {rep.get('dir')}: {verdict_emoji} verdict={rep.get('verdict')}｜"
+                  f"数据文件 {len(rep.get('files', []))}｜记录 {rep.get('total_records', 0)}")
+            for f in rep.get("files", []):
+                if f.get("error"):
+                    print(f"  ⚠️ {f['file']}: {f['error']}")
+                else:
+                    print(f"  · {f['file']}: {f.get('records', 0)} 条"
+                          + (f"，字段完整率 {f.get('field_complete_rate')}" if f.get("field_complete_rate") is not None else ""))
+            ev = rep.get("evidence", {})
+            print(f"  证据: summary.json={'有' if ev.get('summary_json') else '无'}, "
+                  f"report.md={'有' if ev.get('report_md') else '无'}, "
+                  f"evidence_* {len(ev.get('evidence_files', []))} 个")
+            if rep.get("missing_evidence_refs"):
+                print(f"  ⚠️ summary 引用但缺失的证据: {rep['missing_evidence_refs']}")
+            return 0
+        if not args.file:
+            print("用法：verify --file <结果.json> [--network] 或 verify --dir <任务目录>", file=sys.stderr)
+            return 1
+        from .verify import verify_file as _vf
+        rep = _vf(args.file, network=args.network, data_key=args.data_key)
         print(f"🧾 复核报告：{rep.get('total', 0)} 条｜{'✅ 全部通过' if rep.get('ok') else '⚠️ 存在问题'}")
         for c in rep.get("checks", []):
             mark = "✅" if c.get("pass", True) else "❌"
