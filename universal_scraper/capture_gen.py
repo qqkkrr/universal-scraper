@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -39,9 +39,8 @@ def _guess_records_path(obj: Any, depth: int = 0) -> str:
         return "." if depth == 0 else ""
     if not isinstance(obj, dict):
         return ""
-    best = ""
     for k in ("data", "list", "rows", "items", "records", "result", "resultList",
-              "datas", "content", "page", "records"):
+              "datas", "content", "page"):
         if k in obj:
             v = obj[k]
             if isinstance(v, list) and v and isinstance(v[0], dict):

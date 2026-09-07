@@ -11,6 +11,7 @@ import os
 import re
 import signal
 import time
+import json  # recon 路径写 recon_records.json 用（曾漏 import，跑到即 NameError）
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
