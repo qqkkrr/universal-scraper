@@ -533,10 +533,20 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             return {"recon": True, "records": len(rows_raw), "evidence": [str(p) for p in ev]}
 
         # 智联战例：record.fields 未声明曾静默丢字段——自动按 source 字段映射（保留原始列名）
+        # batch1800 战训修复：此前只看第一行的键——首行是 GET 时，后续 POST 记录的
+        # _post_data/_method 在映射时被静默丢弃（capture 主路径的 POST 体修复被这层吃掉）。
+        # 改为前 20 行的键并集（异构记录的完整列集）。
         rec_fields = (config.get("record", {}) or {}).get("fields")
         if not rec_fields and rows_raw and isinstance(rows_raw[0], dict):
-            rec_fields = {k: {"from": k} for k in rows_raw[0]}
-            logger.info(f"record.fields 未声明——已自动映射 {len(rec_fields)} 列（字段名=列名，需改名请在 record.fields 声明）")
+            _keys: list = []
+            for _r in rows_raw[:20]:
+                if isinstance(_r, dict):
+                    for _k in _r:
+                        if _k not in _keys:
+                            _keys.append(_k)
+            rec_fields = {k: {"from": k} for k in _keys}
+            logger.info(f"record.fields 未声明——已按前 {min(len(rows_raw), 20)} 行键并集"
+                        f"自动映射 {len(rec_fields)} 列（需改名请在 record.fields 声明）")
         rows = [map_record(r, rec_fields) for r in rows_raw]
         if config.get("record", {}).get("keep_raw"):
             for raw, mapped in zip(rows_raw, rows):

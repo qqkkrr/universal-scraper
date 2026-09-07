@@ -404,15 +404,17 @@ function centerCaptcha(page) {
           if (arr.length < 5000) {  // 命名捕获上限，防长任务内存爆炸
             // 声明式捕获同样落盘 method/请求体（batch1401 战训：chinamoney/xkz/NAFMII
             // 三次"接口捕到、参数拿不到"都栽在这里——没有 post_data 就无法改写 http_json 配置）
-            let _pd = "", _m = "GET", _ct = "";
+            let _pd = "", _m = "GET", _ct = "", _rh = {};
             try {
               const rq = res.request();
               _m = rq.method();
               _pd = rq.postData() || "";
-              _ct = (rq.headers() || {})["content-type"] || "";
+              _rh = rq.headers() || {};
+              _ct = _rh["content-type"] || "";
             } catch (e) {}
             const rec = { url: u, method: _m,
                           post_data: _pd || undefined, request_content_type: _ct || undefined };
+            if (_rh && Object.keys(_rh).length) rec.request_headers = _rh;  // batch1800：认证头随捕获落盘
             arr.push(r2.json !== undefined ? Object.assign(rec, { json: r2.json })
                                             : Object.assign(rec, { raw: r2.raw }));
           }
@@ -427,19 +429,23 @@ function centerCaptcha(page) {
         if (capturedAll.length < 2000) {
           try {
             // 小米有品战例：同时落盘请求体/方法/关键头——一次浏览器侦察即可改写成 http_json 配置
+            // batch1800：request_headers 整包落盘（认证头是重放的最后一公里）
             const r2 = await jsonMaybe(res);
             let post_data = "";
             let method = "GET";
             let req_ct = "";
+            let req_headers = null;
             try {
               const rq = res.request();
               method = rq.method();
               post_data = rq.postData() || "";
               const hh = rq.headers();
               req_ct = hh["content-type"] || "";
+              if (hh && Object.keys(hh).length) req_headers = hh;
             } catch (e) {}
             const rec = { url: u, method, post_data: post_data || undefined,
                           request_content_type: req_ct || undefined };
+            if (req_headers) rec.request_headers = req_headers;
             capturedAll.push(r2.json !== undefined
               ? Object.assign(rec, { json: r2.json })
               : Object.assign(rec, { raw: r2.raw }));

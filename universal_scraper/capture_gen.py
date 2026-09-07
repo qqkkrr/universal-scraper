@@ -121,6 +121,14 @@ def one_config(item: Dict[str, Any], referer: str = "") -> Optional[Dict[str, An
                 src["url"] = new_url
                 break
     src["headers"] = headers
+    # batch1800 战训（根本建议#2/#3）：认证类请求头随配置携带——重放接口常缺的就是它
+    _AUTH_KEYS = ("cookie", "authorization", "x-requested-with", "x-csrf-token", "token")
+    rh = item.get("request_headers") or {}
+    carried = {k: v for k, v in rh.items()
+               if k.lower() in _AUTH_KEYS and isinstance(v, str) and v}
+    if carried:
+        src["headers"].update(carried)
+        src["_auth_hint"] = "已携带捕获时的认证头（Cookie/Token 会过期，失效重抓一次捕获或换 cookies 命令导出）"
     return src
 
 

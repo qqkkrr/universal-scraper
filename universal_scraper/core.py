@@ -579,8 +579,11 @@ class HttpClient:
                 time.sleep(wait)
 
         if result is None:
+            # batch1800 战训（P3）：连续网络失败常因出口/系统代理变化（用户退 Clash/切 VPN）——
+            # 附 doctor 复查提示，别让 agent 在错误诊断方向空转
             return {"ok": False, "status": last_status, "body": b"", "text": last_err, "json": None, "url": url,
-                    "headers": last_headers}
+                    "headers": last_headers,
+                    "hint": "连续网络失败：出口/系统代理可能已变化，可运行 scripts/doctor.py（网络链路组）复查"}
         if use_cache and result["ok"] and self.cache_dir and method == "GET" and not body_bytes:
             _cf = self.cache_dir / self._cache_key(url, b"", method)
             _cf.write_text(json.dumps(self._cache_encode(result), ensure_ascii=False), encoding="utf-8")
@@ -841,7 +844,8 @@ class RequestsClient:
                 log(f"  网络异常: {e}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
                 time.sleep(wait)
         return {"ok": False, "status": last_status, "body": b"", "text": last_err, "json": None, "url": url,
-                "headers": {}}
+                "headers": {},
+                "hint": "连续网络失败：出口/系统代理可能已变化，可运行 scripts/doctor.py（网络链路组）复查"}
 
     def get(self, url: str, **kw) -> Dict[str, Any]:
         return self.request(url, "GET", **kw)
@@ -1001,7 +1005,8 @@ class CurlCffiClient:
                 log(f"  curl_cffi 网络异常: {e}，{wait:.1f}s 后重试", "WARN")
                 time.sleep(wait)
         return {"ok": False, "status": last_status, "body": b"", "text": last_err,
-                "json": None, "url": url, "headers": {}}
+                "json": None, "url": url, "headers": {},
+                "hint": "连续网络失败：出口/系统代理可能已变化，可运行 scripts/doctor.py（网络链路组）复查"}
 
     @property
     def backoff_base(self) -> float:

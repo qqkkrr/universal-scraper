@@ -8,7 +8,7 @@ description: >
   样本先行确认、0 结果强制诊断。当用户想抓取/采集/爬取/下载网页数据、
   提到爬虫/scraper/crawler/spider/数据采集，或点名 universal-scraper 时使用。
 metadata:
-  version: "1.12.2"
+  version: "1.12.3"
   source_project: "universal-scraper (10 轮审计, 164 测试)"
 ---
 
@@ -216,7 +216,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 学术文献（有机构身份） | R20：机构 VPN + 知网 `navi.cnki.net` 期刊导航 + CDP 下载捕获 |
 | 无人值守长跑 | R22 自检清单（电源/防睡眠/原子状态/看门狗/胜利退出） |
 | 批量任务队列 | `batch --queue tasks.json next/done/fail/nodata/retry/status`（优先级+断点续跑） |
-| 数据型任务（行情/指数/名单/统计） | R23 API 优先动线：jsrecon → capture(POST体) → capture2config → 小样 → 全量 |
+| 数据型任务（行情/指数/名单/统计） | R23 API 优先动线：jsrecon → capture(POST体+认证头) → capture2config（自动带 Cookie/翻页模板）→ 小样 → 全量 |
+| 交付时间口径 | 数据源只有当前值时必须标注"当前值，非任务日期快照"（playbook 六·一） |
 | 域名封锁台账 | `budget --mark 域名 --hours 24`（跨运行冷却账本；403/421/52x 已自动记账） |
 | 捕获→配置一键转换 | `capture2config capture_all.json`（POST体/方法/翻页模板/records_path 草案） |
 | 附件下载+PDF表格 | `pdf --download 清单.json` / `pdf --tables x.pdf`（断点续传+%PDF校验+pdfplumber） |
