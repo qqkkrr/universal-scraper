@@ -262,7 +262,10 @@ class HttpFetcher(BaseFetcher):
                     log("  返回不是 JSON，停止", "ERROR")
                     break
                 rp = pagination.get("records_path")
-                if rp:
+                if src.get("single_record"):
+                    # batch2200：单对象响应模式（GraphQL getQuote 类）——整个响应体作为一条记录
+                    recs = [obj] if obj is not None else []
+                elif rp:
                     recs = jpath(obj, rp, []) or []
                 elif isinstance(obj, list):
                     recs = obj

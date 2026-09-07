@@ -120,6 +120,12 @@ def one_config(item: Dict[str, Any], referer: str = "") -> Optional[Dict[str, An
                 src["url"] = new_url
                 break
     src["headers"] = headers
+    # batch2200：响应为单对象（GraphQL getQuote 类）→ 标记 single_record，
+    # 引擎把整个响应体作为一条记录（records_path 的数组模型不适用）。
+    # 判据：dict 响应里找不到"记录数组"路径（复用 _guess_records_path）。
+    _j = item.get("json")
+    if isinstance(_j, dict) and not _guess_records_path(_j):
+        src["single_record"] = True
     # batch1800 战训（根本建议#2/#3）：认证类请求头随配置携带——重放接口常缺的就是它
     _AUTH_KEYS = ("cookie", "authorization", "x-requested-with", "x-csrf-token", "token")
     rh = item.get("request_headers") or {}
@@ -158,11 +164,22 @@ def generate(capture_file: str | Path, referer: str = "",
             continue
         seen.add(key)
         rp = _guess_records_path(item.get("json"))
+        # batch2200 审查修复：仅当确实模板化了 {{page}} 才启用 template 翻页——
+        # 无翻页参数的端点配 max_pages:5 会把同一页重复抓 5 遍（most_traded 7×5=35 全重）。
+        paginated = "{{page}}" in json.dumps(src.get("json_body") or "") or \
+            "{{page}}" in (src.get("body") or "") or "{{page}}" in src["url"]
+        is_single = bool(src.get("single_record"))
+        if is_single:
+            pag = {"strategy": "none"}
+        elif paginated:
+            pag = {"strategy": "template", "max_pages": 5, "records_path": rp}
+        else:
+            pag = {"strategy": "none", "records_path": rp} if rp else {"strategy": "none"}
         cfg = {"name": urlsplit(src["url"]).path.rsplit("/", 1)[-1][:40] or "api",
                "source": src,
-               "pagination": {"strategy": "template", "max_pages": 5, "records_path": rp},
-               "_hint": ("先 run --limit 2 小样：records_path 为空则从响应顶层键里找列表；"
-                         "翻页参数未模板化时改 url/body 里的页码为 {{page}}")}
+               "pagination": pag,
+               "_hint": ("先 run --limit 2 小样：单对象响应加 source.single_record=true；"
+                         "需要翻页时在 url/body 里把页码改为 {{page}} 并配 max_pages")}
         configs.append(cfg)
     result = {"capture_file": str(fp), "count": len(configs), "configs": configs}
     log(f"⚡ 生成 {len(configs)} 份 http_json 配置草案（含方法/请求体/翻页模板，先小样再全量）")

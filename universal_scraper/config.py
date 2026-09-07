@@ -79,10 +79,18 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
         raise ConfigError("source.bridge", "browser_script 需要 bridge 脚本路径",
                           '例如: "../scripts/ggzy_bridge.cjs"')
     if stype == "http_json" and not (cfg.get("pagination", {}) or {}).get("records_path"):
-        # 战例：B站接口 200 + 38 条数据，因缺 records_path 静默 page+0
-        raise ConfigError("pagination.records_path",
-                          "http_json 需要 records_path 指向记录数组（缺了会静默 0 条）",
-                          '例如: {"strategy": "none", "records_path": "data.list"}')
+        # 战例：B站接口 200 + 38 条数据，因缺 records_path 静默 page+0。
+        # batch2200 审查放宽：runtime 已支持空 records_path（自动识别常见键/根数组），
+        # 且单对象响应（GraphQL getQuote 类）应配 single_record=true 整响应一条记录。
+        # 保留告警：既无 records_path 又无 single_record 的"多页翻页"配置仍会静默 0 条。
+        pag0 = cfg.get("pagination", {}) or {}
+        if not cfg.get("source", {}).get("single_record") and str(
+                pag0.get("strategy", "none")) != "none":
+            raise ConfigError("pagination.records_path",
+                              "http_json 翻页抓取需要 records_path 指向记录数组"
+                              "（单对象响应请加 source.single_record=true）",
+                              '例如: {"strategy": "template", "records_path": "data.list"} 或 '
+                              '{"strategy": "none", "single_record": true}')
 
     pag = cfg.get("pagination", {})
     if pag:

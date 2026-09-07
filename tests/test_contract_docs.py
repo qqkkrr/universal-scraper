@@ -110,8 +110,10 @@ def test_semantic_rules_fire():
     warns = collect_warnings(cfg)
     assert any("record.fields" in w for w in warns), "双层字段空映射必须告警"
 
+    # v1.12.3 契约更新：strategy=none + 空 records_path 允许（runtime 自动识别常见键
+    # /根数组/根对象，未命中会 WARN）；多页翻页（template）缺 records_path 仍拦截
     bad = {"name": "t", "source": {"type": "http_json", "url": "https://api.x.example/"},
-           "pagination": {"strategy": "none"}}
+           "pagination": {"strategy": "template", "max_pages": 5}}
     with pytest.raises(ConfigError):
         validate(bad), "http_json 缺 records_path 必须报错"
 
