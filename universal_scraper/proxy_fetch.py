@@ -25,6 +25,7 @@ import argparse
 import concurrent.futures as cf
 import ipaddress
 import json
+import os
 import re
 import sys
 import time
@@ -220,12 +221,22 @@ class PoolState:
         if not self.path.exists():
             return
         try:
-            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            # 边界复现：合法 JSON 但结构错（顶层 list/string、记录值非 dict）曾绕过
+            # 损坏隔离直接崩在 mark/read——必须在载入时就走隔离+重建路径
+            if not isinstance(data, dict):
+                raise ValueError(f"顶层应为 dict，实际 {type(data).__name__}")
+            for px, rec in data.items():
+                if not isinstance(rec, dict):
+                    raise ValueError(f"代理记录非 dict: {px}")
+                if rec.get("state") not in ("fresh", "alive", "dead", "burned", None):
+                    raise ValueError(f"未知代理状态: {px}={rec.get('state')}")
+            self.data = data
         except Exception as e:
             # 损坏自动重建，但必须出声 + 带时间戳隔离（审查修复：静默清零 burned
             # 等于把烧尽代理重新放回战场；二次损坏曾覆盖前一份证据）
             import sys as _sys
-            print(f"⚠️ 代理池状态损坏（{type(e).__name__}），隔离后从零重建: {self.path}",
+            print(f"⚠️ 代理池状态损坏（{type(e).__name__}: {str(e)[:60]}），隔离后从零重建: {self.path}",
                   file=_sys.stderr)
             try:
                 self.path.rename(self.path.with_suffix(f".corrupt.{int(time.time())}"))
@@ -235,9 +246,11 @@ class PoolState:
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)  # 审查修复：首跑新目录曾直接崩
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(self.path)
+        import tempfile as _tf
+        fd, tmpname = _tf.mkstemp(dir=str(self.path.parent), suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(self.data, ensure_ascii=False, indent=1))
+        os.replace(tmpname, self.path)
 
     def mark(self, proxy: str, state: str, latency_ms: int = -1):
         rec = self.data.setdefault(proxy, {"state": "fresh", "ok": 0, "blocked": 0,
@@ -257,6 +270,8 @@ class PoolState:
         now = int(time.time())
         out = []
         for px, rec in self.data.items():
+            if not isinstance(rec, dict):
+                continue
             st = rec.get("state")
             if st == "alive":
                 out.append(px)
@@ -264,7 +279,9 @@ class PoolState:
                 out.append(px)
             elif st == "dead" and now - rec.get("ts", 0) > 1800:  # 死代理 30 分钟后可复活重试
                 out.append(px)
-            elif st == "burned" and not exclude_burned:
+            elif st == "burned":
+                # 边界复现修复：过期检查曾被嵌在 not exclude_burned 之内——
+                # burned 代理到期后永不复活，可用池单调萎缩
                 if now > rec.get("burned_until", 0):
                     out.append(px)
         return out

@@ -58,6 +58,7 @@ def download_attachments(urls_file: str | Path, out_dir: str | Path,
             items.append(it)
     out = Path(out_dir).expanduser()
     out.mkdir(parents=True, exist_ok=True)
+    retries = max(1, int(retries))
     client = make_http_client({"min_interval": interval, "timeout": 60,
                                "http_backend": "auto", "max_retries": 1})
     ok, skip, fail = [], [], []

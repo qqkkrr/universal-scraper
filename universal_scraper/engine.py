@@ -84,12 +84,17 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
             elif op == "not_contains":
                 rows = [r for r in rows if value not in str(r.get(field) or "")]
             elif op == "between":
-                try:
-                    lo = float(step.get("min", float("-inf")))
-                    hi = float(step.get("max", float("inf")))
-                    rows = [r for r in rows if lo <= float(str(r.get(field)).replace(",", "")) < hi]
-                except (ValueError, TypeError):
-                    rows = []
+                # batch2400 审查修复：一条脏值（"N/A"等）曾把全部行清空——逐行容错
+                lo = float(step.get("min", float("-inf")))
+                hi = float(step.get("max", float("inf")))
+                kept = []
+                for r in rows:
+                    try:
+                        if lo <= float(str(r.get(field)).replace(",", "")) < hi:
+                            kept.append(r)
+                    except (ValueError, TypeError):
+                        continue
+                rows = kept
             log(f"{log_prefix}filter[{field} {op} {value}]: {before} -> {len(rows)}")
         elif st == "dedup":
             key = step.get("key", "id")
@@ -276,19 +281,10 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
         (logger or Logger()).info(f"详情(browser)：批抓 {got}/{len(todo)} 页成功")
         return rows
 
-    backend = anti.get("http_backend", "requests")
-    from .core import RequestsClient, HttpClient
-    if backend == "requests":
-        try:
-            http = RequestsClient(min_interval=interval, timeout=timeout,
-                                  rotate_ua=anti.get("rotate_ua", True),
-                                  proxy=anti.get("proxy"), cookies=anti.get("cookies"))
-        except Exception:
-            http = HttpClient(min_interval=interval, timeout=timeout,
-                              use_system_proxy=anti.get("use_system_proxy", False))
-    else:
-        http = HttpClient(min_interval=interval, timeout=timeout,
-                          use_system_proxy=anti.get("use_system_proxy", False))
+    # batch2400 审查修复：详情/下载与列表共用同一 HTTP 栈（make_http_client 透传
+    # anti 的 curl_cffi 指纹/verify/代理），否则"列表成功详情 403"且难排查
+    from .core import make_http_client
+    http = make_http_client({**anti, "min_interval": interval, "timeout": timeout})
 
     def _work(r):
         fetch_detail_row(http, r, detail)
@@ -357,11 +353,10 @@ def download_files(rows, dl_cfg, anti, out_dir: Path, logger: Optional[Logger] =
     dest_dir.mkdir(parents=True, exist_ok=True)
     size_limit = int(dl_cfg.get("size_limit", 50 * 1024 * 1024))
     concurrency = int(dl_cfg.get("concurrency", 4))
-    backend = anti.get("http_backend", "requests")
-    from .core import RequestsClient, HttpClient
-    http = RequestsClient(min_interval=dl_cfg.get("interval", 0.3), timeout=60,
-                          rotate_ua=anti.get("rotate_ua", True)) if backend == "requests" else \
-        HttpClient(min_interval=dl_cfg.get("interval", 0.3), timeout=60)
+    # batch2400 审查修复：与列表/detail 共用同一 HTTP 栈（make_http_client），
+    # 避免列表走 TLS 伪装、下载掉到无伪装栈的指纹分裂
+    from .core import make_http_client
+    http = make_http_client({**anti, "min_interval": dl_cfg.get("interval", 0.3), "timeout": 60})
     done = 0
 
     def _dl(r) -> int:

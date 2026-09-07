@@ -68,6 +68,7 @@ FIELD_FORMATS: Dict[str, Dict[str, str]] = {
     },
     "pagination.records_path": {
         "accepts": "str(点路径)",
-        "doc": "http_json 必填——缺了会静默 0 条（validate 现已强制）",
+        "doc": "推荐显式声明；缺省时自动识别常见键(records/items/list/results/data)与根数组，"
+               "未命中会 WARN。多页翻页(template/page_param)强烈建议声明",
     },
 }

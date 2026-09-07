@@ -26,7 +26,16 @@ const _cands = _nps.map((p) => _path.join(p, "playwright")).concat(["patchright"
 for (const _c of _cands) {
   try { chromium = require(_c).chromium; break; } catch (e) { /* 下一个 */ }
 }
-if (!chromium) throw new Error("找不到 playwright/patchright");
+if (!chromium) {
+  // 夜间强化：模块加载期失败也必须走 JSON 错误协议（Python 侧靠 stdout JSON 解析错误，
+  // 裸栈会变成 EOF 无诊断）。浏览器方案不可用时 HTTP 直抓路线不受影响。
+  process.stdout.write(JSON.stringify({
+    type: "error",
+    message: "找不到 playwright/patchright——浏览器方案不可用。修复: bash "
+      + _path.join(__dirname, "setup.sh") + "（HTTP 直抓路线不受影响）",
+  }) + "\n");
+  process.exit(1);
+}
 
 const os = require("node:os");
 const HOME = process.env.HOME || os.homedir() || "/tmp";

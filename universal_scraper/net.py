@@ -69,7 +69,9 @@ def detect_system_proxy() -> Dict[str, Any]:
             port = re.search(r"HTTPPort\s*:\s*(\d+)", txt)
             if m:
                 out["enabled"] = True
-                out["http_proxy"] = p.group(1) if p else ""
+                gp = p.group(1) if p else ""
+                # 边界复现：scutil 输出 "(null)" 曾被误当代理主机名
+                out["http_proxy"] = "" if gp in ("(null)", "-", "") else gp
                 out["port"] = int(port.group(1)) if port else 0
                 out["sources"].append("scutil(macOS系统代理)")
         except Exception as e:

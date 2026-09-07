@@ -57,12 +57,21 @@ class QuotaLedger:
         if not self.path.exists():
             return
         try:
-            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            # 边界复现：合法 JSON 但结构错（顶层 list/string、dim 值非 dict）曾绕过
+            # 损坏隔离直接崩在 touch/read——必须在载入时就走隔离+重建路径
+            if not isinstance(data, dict):
+                raise ValueError(f"顶层应为 dict，实际 {type(data).__name__}")
+            bad = [k for k, v in data.items()
+                   if k != "notes" and not isinstance(v, dict)]
+            if bad:
+                raise ValueError(f"维度值非 dict: {bad[:3]}")
+            self.data = data
         except Exception as e:
             # 审查修复：静默清零冷却账本 = 重新武装"自伤"行为（被拒不退款是本模块
             # 存在的理由）。出声 + 时间戳隔离，绝不覆盖前一份证据。
             import sys
-            print(f"⚠️ 配额账本损坏（{type(e).__name__}），隔离后从零重建: {self.path}",
+            print(f"⚠️ 配额账本损坏（{type(e).__name__}: {str(e)[:60]}），隔离后从零重建: {self.path}",
                   file=sys.stderr)
             try:
                 self.path.rename(self.path.with_suffix(f".corrupt.{int(time.time())}"))

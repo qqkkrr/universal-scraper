@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 TEMPLATE = """# 子代理执行规范（AGENT_GUIDE）
 
 > 由 universal-scraper 生成。并行批次的每个子代理必须遵守本文件。

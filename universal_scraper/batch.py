@@ -15,7 +15,11 @@ agent 的批处理状态机：队列文件 + 断点续跑 + 逐项状态。执�
 """
 from __future__ import annotations
 
+import fcntl
 import json
+import math
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, Optional
@@ -24,53 +28,102 @@ from typing import Dict, Optional
 STALE_RUNNING_SEC = 1800
 
 
+def _as_ts(v) -> float:
+    """running_ts 容错取值（batch2200 战训："yesterday" 字符串曾让调度器每次
+    next() 都 TypeError 崩溃；JS Date.now() 毫秒曾让 stale 回收永不生效）。
+    非法/缺失 → 0（最旧，优先回收）。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    if f > 1e12:        # 毫秒时间戳 → 秒
+        f /= 1000.0
+    return f
+
+
+def _prio(it) -> float:
+    """priority 容错取值：None/非数字/NaN/inf → 缺省 100（"high" 字符串曾
+    让 next() 裸栈并永久卡死整个队列）。"""
+    try:
+        f = float(it.get("priority", 100))
+        if math.isnan(f) or math.isinf(f):
+            raise ValueError
+        return f
+    except (TypeError, ValueError):
+        return 100.0
+
+
 class BatchQueue:
-    """队列文件格式: [{id, text, status: pending|done|failed|blocked, attempts, result}]"""
+    """队列文件格式: [{"id", "text", "status", "attempts", "result", ...}]"""
 
     def __init__(self, path: str | Path):
         self.path = Path(path).expanduser()
         if not self.path.exists():
             raise FileNotFoundError(f"队列文件不存在: {self.path}（格式见模块 docstring）")
-        self.items = json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            self.items = json.loads(self.path.read_text(encoding="utf-8-sig", errors="replace"))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"队列文件不是合法 JSON（可能被截断）: {self.path} ({e})") from e
         if not isinstance(self.items, list):
             raise ValueError(f"队列文件顶层必须是 list，实际 {type(self.items).__name__}")
 
     def _save(self):
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self.items, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(self.path)
+        # 边界复现修复：固定 .json.tmp 在并发/双实例下互踩；改 mkstemp（不可预测名）
+        fd, tmpname = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(self.items, ensure_ascii=False, indent=1))
+        os.replace(tmpname, self.path)
 
     def next(self) -> Optional[Dict]:
-        """下一个 pending。batch1700 战训：priority 字段小的优先（缺省=文件顺序）；
-        富元数据（result/attempts/自定义字段）原样保留，agent 不必再自建状态文件。
-        batch2400（多代理）：过期 running 自动回收回 pending（agent 崩溃不丢任务）。"""
+        """下一个 pending。batch1700：priority 小者优先（缺省/坏值=100）；
+        富元数据原样保留。batch2400（多代理）：过期 running 自动回收
+        （agent 崩溃不丢任务）；非 dict 元素跳过。"""
         now = time.time()
         changed = False
         for it in self.items:
-            if it.get("status") == "running" and now - it.get("running_ts", 0) > STALE_RUNNING_SEC:
+            if not isinstance(it, dict):
+                continue
+            if it.get("status") == "running" and now - _as_ts(it.get("running_ts", 0)) > STALE_RUNNING_SEC:
                 it["status"] = "pending"
                 changed = True
         if changed:
             self._save()
-        pend = [it for it in self.items if it.get("status") == "pending"]
+        pend = [it for it in self.items
+                if isinstance(it, dict) and it.get("status") == "pending"]
         if not pend:
             return None
-        has_prio = any("priority" in it for it in pend)
-        if has_prio:
-            return min(pend, key=lambda it: (float(it.get("priority", 100)),))
+        if any("priority" in it for it in pend):
+            return min(pend, key=_prio)
         return pend[0]
 
     def claim(self) -> Optional[Dict]:
-        """多代理模式：原子地"取下一个 pending → 标 running"。
-        崩溃的任务由 next() 的 stale 回收（STALE_RUNNING_SEC=30 分钟）自动归还。"""
-        it = self.next()
-        if not it:
-            return None
-        import time
-        it["status"] = "running"
-        it["running_ts"] = int(time.time())
-        self._save()
-        return it
+        """多代理模式：原子领取（文件锁 + 锁内重读最新账本 → 标 running）。
+        崩溃的任务由 next() 的 stale 回收自动归还。"""
+        fd, lock_name = tempfile.mkstemp(
+            dir=str(self.path.parent), prefix=".batch-", suffix=".lock")
+        try:
+            lf = os.fdopen(fd, "w")
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                # 锁内重读最新队列（其他进程可能已改）
+                self.items = json.loads(self.path.read_text(encoding="utf-8-sig"))
+                it = self.next()
+                if not it:
+                    return None
+                it["status"] = "running"
+                it["running_ts"] = int(time.time())
+                self._save()
+                return it
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+                lf.close()
+                os.unlink(lock_name)
+        except Exception:
+            try:
+                os.unlink(lock_name)
+            except OSError:
+                pass
+            raise
 
     def mark(self, item_id, status: str, result: str = "") -> Dict:
         """状态机：done/failed/blocked/nodata/pending/retry/running。

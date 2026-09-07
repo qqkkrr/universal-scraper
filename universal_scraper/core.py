@@ -598,8 +598,7 @@ class HttpClient:
 
         if result is None:
             # batch1800 战训（P3）：连续网络失败常因出口/系统代理变化（用户退 Clash/切 VPN）——
-            # 附 doctor 复查提示，别让 agent 在错误诊断方向空转
-            _note_net_result(False)
+            # 附 doctor 复查提示，别让 agent 在错误诊断方向空转（连击计数在最外层统一记）
             return {"ok": False, "status": last_status, "body": b"", "text": last_err, "json": None, "url": url,
                     "headers": last_headers,
                     "hint": "连续网络失败：出口/系统代理可能已变化，可运行 scripts/doctor.py（网络链路组）复查"}
@@ -614,7 +613,6 @@ class HttpClient:
                         _old.unlink(missing_ok=True)
             except Exception:
                 pass
-        _note_net_result(bool(result and result.get("ok")))
         return result
 
     def get(self, url: str, **kw) -> Dict[str, Any]:

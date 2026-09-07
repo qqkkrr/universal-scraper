@@ -70,11 +70,11 @@ def _page_param_holders(params: Dict[str, Any]) -> Dict[str, Any]:
 def one_config(item: Dict[str, Any], referer: str = "") -> Optional[Dict[str, Any]]:
     """单条捕获 → 一份 http_json source 配置草案；无意义响应返回 None。"""
     url = item.get("url", "")
-    if not url or NOISE_URL_PAT.search(url):
+    if not isinstance(url, str) or not url or NOISE_URL_PAT.search(url):
         return None
     if item.get("json") is None and not item.get("raw"):
         return None
-    method = (item.get("method") or "GET").upper()
+    method = str(item.get("method") or "GET").upper()
     src: Dict[str, Any] = {"type": "http_json", "method": method, "url": url}
     headers = {"User-Agent": UA}
     if referer:
@@ -82,7 +82,9 @@ def one_config(item: Dict[str, Any], referer: str = "") -> Optional[Dict[str, An
     # POST 体：json 可解析 → json_body（dict 深拷贝并模板化翻页参数）；
     # 表单/其他 → body 字符串（翻页数字做文本级模板替换）
     pd = item.get("post_data") or ""
-    req_ct = item.get("request_content_type") or ""
+    if not isinstance(pd, str):        # 边界复现：post_data=123 曾 TypeError 毁掉整批
+        pd = json.dumps(pd, ensure_ascii=False) if pd is not None else ""
+    req_ct = str(item.get("request_content_type") or "")
     if method != "GET" and pd:
         if "json" in req_ct.lower():
             try:
@@ -152,10 +154,14 @@ def generate(capture_file: str | Path, referer: str = "",
         return {"error": f"捕获文件顶层应为 list，实际 {type(data).__name__}"}
     configs = []
     seen = set()
-    for item in data:
+    for idx, item in enumerate(data):
         if not isinstance(item, dict):
             continue
-        src = one_config(item, referer=referer)
+        try:
+            src = one_config(item, referer=referer)
+        except Exception as e:
+            log(f"⚠️ 捕获记录[{idx}] 转换失败已跳过: {type(e).__name__}: {str(e)[:60]}")
+            continue
         if not src:
             continue
         key = src["url"] + "|" + src.get("method", "GET") + "|" + json.dumps(

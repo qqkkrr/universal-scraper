@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 SOURCE_TYPES = {"http_json", "http_html", "browser_script", "browser"}
-PAGINATION_STRATEGIES = {"page_param", "offset", "next_url", "none", "template"}
+# next_url 曾收录但从未实现（HTML 下一页请用 next_selector）——batch2400 战训移除，
+# 避免 validate 放行一个会"同页重复抓"的死策略
+PAGINATION_STRATEGIES = {"page_param", "offset", "none", "template"}
 EXTRACT_TYPES = {"json", "css_text", "css_attr", "css_html", "xpath_text", "xpath_attr", "regex", "regex_all", "constant"}
 CAPTCHA_STRATEGIES = {"auto", "ddddocr", "opencv_slider", "2captcha", "nopecha", "human", "config", "none", "external"}
 
@@ -75,6 +77,14 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
                           f"可选: {', '.join(sorted(SOURCE_TYPES))}")
     if stype in ("http_json", "http_html", "browser") and "url" not in src:
         raise ConfigError("source.url", "该 source.type 需要 url", "例如: \"https://api.example.com/list\"")
+    # 类型守卫（审查修复：字段存在但类型错曾甩 AttributeError 裸栈）
+    for fname, ftype, example in (("pagination", dict, '{"strategy": "none"}'),
+                                  ("anti_bot", dict, '{"min_interval": 1.0}'),
+                                  ("detail", dict, '{"url_field": "url"}'),
+                                  ("record", dict, '{"fields": {...}}')):
+        v = cfg.get(fname)
+        if v is not None and not isinstance(v, dict):
+            raise ConfigError(fname, f"{fname} 应为 dict，实际 {type(v).__name__}", example)
     if stype == "browser_script" and not src.get("bridge"):
         raise ConfigError("source.bridge", "browser_script 需要 bridge 脚本路径",
                           '例如: "../scripts/ggzy_bridge.cjs"')
@@ -103,17 +113,29 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
                               '例如: {"strategy": "page_param", "page_param": "page"}')
         # records_path 只对 http_json 强制（html 行来自 row_css，与策略无关）——见下方按类型校验
 
-    for i, step in enumerate(cfg.get("pipeline", [])):
+    pipeline = cfg.get("pipeline", [])
+    if isinstance(pipeline, str):
+        raise ConfigError("pipeline", "pipeline 应为步骤数组",
+                          '例如: "pipeline": [{"type": "dedup", "key": "url"}]')
+    for i, step in enumerate(pipeline if isinstance(pipeline, list) else []):
+        if not isinstance(step, dict):
+            raise ConfigError(f"pipeline[{i}]", f"流水线步骤应为 dict，实际 {type(step).__name__}")
         pt = step.get("type")
         if pt not in PIPELINE_TYPES:
             raise ConfigError(f"pipeline[{i}].type", f"未知流水线类型 '{pt}'",
                               f"可选: {', '.join(sorted(PIPELINE_TYPES))}")
 
-    for i, spec in enumerate(cfg.get("detail", {}).get("extract", [])):
-        et = spec.get("type")
-        if et not in EXTRACT_TYPES:
-            raise ConfigError(f"detail.extract[{i}].type", f"未知提取类型 '{et}'",
-                              f"可选: {', '.join(sorted(EXTRACT_TYPES))}")
+    detail = cfg.get("detail", {})
+    if detail is not None and not isinstance(detail, dict):
+        raise ConfigError("detail", f"detail 应为 dict，实际 {type(detail).__name__}")
+    if isinstance(detail, dict):
+        for i, spec in enumerate(detail.get("extract", []) or []):
+            if not isinstance(spec, dict):
+                raise ConfigError(f"detail.extract[{i}]", "extract 步骤应为 dict")
+            et = spec.get("type")
+            if et not in EXTRACT_TYPES:
+                raise ConfigError(f"detail.extract[{i}].type", f"未知提取类型 '{et}'",
+                                  f"可选: {', '.join(sorted(EXTRACT_TYPES))}")
 
     rec_fields = (cfg.get("record", {}) or {}).get("fields")
     if rec_fields is not None and not isinstance(rec_fields, dict):
@@ -122,7 +144,15 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
                           f"record.fields 应为 dict {{列名: {{from: 字段}}}}，当前为 {type(rec_fields).__name__}",
                           '例如: {"标题": {"from": "title"}}')
 
-    cap = cfg.get("anti_bot", {}).get("captcha", {})
+    ab = cfg.get("anti_bot", {})
+    if ab is not None and not isinstance(ab, dict):
+        raise ConfigError("anti_bot", f"anti_bot 应为 dict，实际 {type(ab).__name__}",
+                          '例如: "anti_bot": {"min_interval": 1.0}')
+    ab = ab if isinstance(ab, dict) else {}
+    cap = ab.get("captcha", {})
+    if cap is not None and not isinstance(cap, dict):
+        raise ConfigError("anti_bot.captcha", f"captcha 应为 dict，实际 {type(cap).__name__}")
+    cap = cap if isinstance(cap, dict) else {}
     cs = cap.get("strategy", "auto")
     if cs not in CAPTCHA_STRATEGIES:
         raise ConfigError("anti_bot.captcha.strategy", f"未知验证码策略 '{cs}'",

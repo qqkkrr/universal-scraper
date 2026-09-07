@@ -260,7 +260,8 @@ def main() -> int:
     bd_p.add_argument("--mark", default=None, help="登记封锁事件：域名")
     bd_p.add_argument("--hours", type=float, default=24.0, help="冷却小时数（默认 24）")
     bd_p.add_argument("--note", default="", help="备注（现象/处置）")
-    bd_p.add_argument("--check", default=None, help="查询某域名是否冷却中")
+    bd_p.add_argument("--check", default=None,
+                      help="查询某域名是否冷却中（退出码：0=可访问，2=冷却中）")
     bd_p.add_argument("--list", action="store_true", help="列出全部台账")
     bd_p.add_argument("--file", default=None, help="台账文件路径（默认 ~/.universal_scraper/domain_budget.json）")
 
@@ -417,6 +418,11 @@ def main() -> int:
     if args.cmd == "auto":
         from .auto import run_auto_cli
         out = run_auto_cli(" ".join(args.desc), limit=args.limit)
+        if isinstance(out, dict) and out.get("error"):
+            print(f"❌ {out['error']}", file=sys.stderr)
+            return 1
+        print(json.dumps(out, ensure_ascii=False, default=str))
+        return 0
 
     if args.cmd == "agent":
         from .agent import run_agent_cli
@@ -701,7 +707,8 @@ def main() -> int:
             return 1
         for c in r.get("configs", [])[:10]:
             src = c["source"]
-            print(f"  {src.get('method','GET'):4s} {src['url'][:80]}  records_path={c['pagination']['records_path'] or '?'}")
+            rp = c.get("pagination", {}).get("records_path") or "?"
+            print(f"  {src.get('method','GET'):4s} {src['url'][:80]}  records_path={rp}")
         if r.get("saved"):
             print(f"✅ {r['count']} 份配置草案 → {r['saved']}（先 --limit 2 小样验证）")
         return 0 if r.get("count") else 1
@@ -761,6 +768,7 @@ def main() -> int:
             return 1
         if args.fulltext:
             import os, subprocess
+            from pathlib import Path as _P
             script = _P(__file__).resolve().parent.parent / "scripts" / "kygl_fulltext_download.py"
             env = os.environ.copy()
             if args.out:
@@ -776,7 +784,12 @@ def main() -> int:
         from .dianping import run
         cookie = args.cookie
         if args.cookie_file:
-            cookie = Path(args.cookie_file).read_text(encoding="utf-8").strip()
+            from pathlib import Path as _P
+            try:
+                cookie = _P(args.cookie_file).read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                print(f"❌ cookie 文件不存在: {args.cookie_file}", file=sys.stderr)
+                return 1
         r = run(args.keyword, city=args.city, cookie=cookie, limit=args.limit,
                 proxy=args.proxy or None, out_name=args.out or None)
         if r.get("error"):
@@ -819,9 +832,13 @@ def main() -> int:
         return 0
 
     if args.cmd == "verify":
-        from .verify import verify_file, verify_dir
+        from .verify import verify_dir
         if args.dir:
             rep = verify_dir(args.dir)
+            if rep.get("error"):
+                # 审查修复：审计不存在的目录曾打印 verdict=None 垃圾且 exit 0
+                print(f"❌ {rep['error']}", file=sys.stderr)
+                return 1
             verdict_emoji = {"ok": "✅", "partial": "⚠️", "empty": "❌", "no_data_files": "❌"}.get(
                 rep.get("verdict"), "•")
             print(f"🧾 目录审计 {rep.get('dir')}: {verdict_emoji} verdict={rep.get('verdict')}｜"
@@ -838,7 +855,8 @@ def main() -> int:
                   f"evidence_* {len(ev.get('evidence_files', []))} 个")
             if rep.get("missing_evidence_refs"):
                 print(f"  ⚠️ summary 引用但缺失的证据: {rep['missing_evidence_refs']}")
-            return 0
+            # 退出码即验收门禁：agent_guide 依赖它做自动化判定
+            return 0 if rep.get("verdict") == "ok" else 1
         if not args.file:
             print("用法：verify --file <结果.json> [--network] 或 verify --dir <任务目录>", file=sys.stderr)
             return 1

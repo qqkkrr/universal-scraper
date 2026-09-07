@@ -637,23 +637,33 @@ class EngineV3:
         for r in rows:
             r["_parser"] = "bridge"
         kept = []
+        marks = []          # batch2400 审查修复：mark 延迟到 storage.write 成功后
         for item in rows:
             item = self.pipeline.process(item)
-            if item is not None and self._seen_store is not None:
+            if item is None:
+                continue
+            if self._seen_store is not None:
                 from .storage import record_key
                 k = record_key(item, self._inc_key)
                 if k and self._seen_store.is_seen(k):
                     continue
                 if k:
-                    self._seen_store.mark(k)
-            if item is not None:
-                kept.append(item)
+                    marks.append(k)
+            kept.append(item)
         self._all_items = kept
         self.stats["items"] = len(kept)
         self.storage.open(self.storage_name)
         for item in kept:
             self.storage.write(item)
         self.storage.close()
+        # 写盘全部成功后才标记已见（写失败 → 下次重跑不会被去重吞掉）
+        if self._seen_store is not None:
+            from .storage import record_key
+            fields = self.config.get("record", {}).get("fields", {})
+            for item in kept:
+                k = record_key(item, self._inc_key)
+                if k:
+                    self._seen_store.mark(k)
         self._finalize()
         try:
             urls = sorted({str(r.get("_url", r.get("url", ""))) for r in kept if r.get("_url") or r.get("url")})

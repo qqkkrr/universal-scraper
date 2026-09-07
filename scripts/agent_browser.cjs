@@ -27,9 +27,12 @@ const nps = (process.env.NODE_PATH || "").split(":").filter(Boolean);
 const cands = nps.map(p => path.join(p, "playwright")).concat(["patchright", "playwright"]);
 let chromium = null;
 for (const c of cands) { try { chromium = require(c).chromium; break; } catch(e){} }
-if (!chromium) throw new Error("找不到 playwright/patchright");
-
 const out = (obj) => console.log(JSON.stringify(obj));
+if (!chromium) {
+  // 夜间强化：加载期失败走 JSON 错误协议（裸栈会让 Python 侧拿不到可诊断信息）
+  out({ type: "error", message: "找不到 playwright/patchright——浏览器方案不可用。修复: bash scripts/setup.sh（HTTP 直抓路线不受影响）" });
+  process.exit(1);
+}
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const EXE = process.env.PW_EXECUTABLE || "/Users/kairanqin/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell";
 

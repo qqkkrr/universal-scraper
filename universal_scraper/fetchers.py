@@ -262,8 +262,8 @@ class HttpFetcher(BaseFetcher):
                     log("  返回不是 JSON，停止", "ERROR")
                     break
                 rp = pagination.get("records_path")
-                if src.get("single_record"):
-                    # batch2200：单对象响应模式（GraphQL getQuote 类）——整个响应体作为一条记录
+                # batch2200：单对象响应模式（GraphQL getQuote 类）——整个响应体作为一条记录
+                if self.source.get("single_record"):
                     recs = [obj] if obj is not None else []
                 elif rp:
                     recs = jpath(obj, rp, []) or []
@@ -287,7 +287,13 @@ class HttpFetcher(BaseFetcher):
                 if strat == "none":
                     break
                 if total is not None:
-                    if not recs or len(records) >= int(total):
+                    # batch2400 审查修复：total 为 "1,024"/"12.0" 字符串曾 ValueError
+                    # 且丢失本轮已抓记录
+                    try:
+                        _t = int(float(str(total).replace(",", "").strip()))
+                    except (ValueError, TypeError):
+                        _t = None
+                    if _t is not None and (not recs or len(records) >= _t):
                         break
                 elif not recs:
                     break
