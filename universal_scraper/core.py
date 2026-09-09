@@ -852,6 +852,7 @@ class RequestsClient:
                 # （"百度安全验证"曾被误判为页面结构变化）。一律走 smart_decode 从 raw 解。
                 _text = (smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()})
                          if raw else (resp.text or ""))
+                _note_net_result(True)
                 return {"ok": True, "status": resp.status_code, "body": raw,
                         "text": _text, "json": parsed, "url": resp.url,
                         "headers": {k.lower(): v for k, v in resp.headers.items()},
@@ -1013,6 +1014,7 @@ class CurlCffiClient:
                 # （"百度安全验证"曾被误判为页面结构变化）。一律走 smart_decode 从 raw 解。
                 _text = (smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()})
                          if raw else (resp.text or ""))
+                _note_net_result(True)
                 return {"ok": True, "status": resp.status_code, "body": raw,
                         "text": _text,
                         "json": parsed,

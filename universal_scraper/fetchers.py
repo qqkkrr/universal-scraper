@@ -214,6 +214,21 @@ class HttpFetcher(BaseFetcher):
         s = self.source
         stype = s.get("type", "http_json")
         strat = pagination.get("strategy", "none")
+        # --- robots.txt 合规检查（batch2400 战训：把已有 robots.py 模块串入主路径） ---
+        url0 = s.get("url", "")
+        if url0:
+            try:
+                from .robots import RobotsTxt
+                if not hasattr(self, "_robots_checker"):
+                    self._robots_checker = RobotsTxt(user_agent="universal-scraper/1.0")
+                if not self._robots_checker.allowed(url0):
+                    raise PermissionError(
+                        f"robots.txt 禁止抓取 {url0}——请更换目标或确认你有合法访问权"
+                    )
+            except PermissionError:
+                raise
+            except Exception:
+                pass  # robots 检测本身失败不阻塞
         # sitemap 种子：http_html 依次抓取每个种子页
         seeds = s.get("sitemap_urls") or []
         if stype == "http_html" and seeds:
