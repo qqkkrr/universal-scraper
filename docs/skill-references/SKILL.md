@@ -8,7 +8,7 @@ description: >
   样本先行确认、0 结果强制诊断。当用户想抓取/采集/爬取/下载网页数据、
   提到爬虫/scraper/crawler/spider/数据采集，或点名 universal-scraper 时使用。
 metadata:
-  version: "1.14.2"
+  version: "1.14.3"
   source_project: "universal-scraper (10 轮审计, 164 测试)"
 ---
 

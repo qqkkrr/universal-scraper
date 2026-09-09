@@ -102,6 +102,16 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
                               '例如: {"strategy": "template", "records_path": "data.list"} 或 '
                               '{"strategy": "none", "single_record": true}')
 
+    # batch2400 美团战训：template 翻页仅支持 http_json（json_body/url 的 {{page}} 替换）。
+    # http_html 的翻页走 next_selector / page_param，与 template 互斥；
+    # 配了 template 的 http_html 会在 validate 通过后"只抓第 1 页就静默结束"。
+    _pag_strat = (cfg.get("pagination", {}) or {}).get("strategy", "none")
+    if _pag_strat == "template" and stype == "http_html":
+        raise ConfigError(
+            "pagination.strategy",
+            f"翻页策略 'template' 仅支持 http_json，不支持 http_html",
+            "http_html 翻页请用 browser + pagination.type=click，或 page_param + page_param_name")
+
     pag = cfg.get("pagination", {})
     if pag:
         strat = pag.get("strategy", "none")

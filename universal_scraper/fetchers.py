@@ -259,6 +259,14 @@ class HttpFetcher(BaseFetcher):
             if stype == "http_json":
                 obj = resp.get("json")
                 if obj is None:
+                    # batch2400 美团战训：风控页/拦截页伪装 200 → 自动识别
+                    _body = resp.get("text", "") or resp.get("body", b"").decode("utf-8", "ignore")
+                    if len(_body) < 500 and any(
+                        kw in _body for kw in ("验证", "captcha", "blocked", "forbidden", "登录")
+                    ):
+                        log(f"  ⛔ 疑似风控拦截（{len(_body)}B，含验证/拦截特征），"
+                            "已停止——请换 IP 或冷却后再试（budget --list 查台账）", "ERROR")
+                        break
                     log("  返回不是 JSON，停止", "ERROR")
                     break
                 rp = pagination.get("records_path")
@@ -298,6 +306,10 @@ class HttpFetcher(BaseFetcher):
                 elif not recs:
                     break
                 page += 1
+                # batch2400 美团战训：max_pages>1 但 page 始终为 1 → 翻页未生效
+                if page == 2 and len(records) == 0:
+                    log("  ⚠️ 翻页疑似未生效（page=2 仍 0 条），请检查 pagination 配置", "WARN")
+                    break
             else:  # http_html
                 if self.source.get("embedded_json"):
                     from .selectors import extract_embedded_json_rows
