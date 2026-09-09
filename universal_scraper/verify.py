@@ -179,7 +179,10 @@ def verify_file(path: str, network: bool = False, data_key: str = "") -> Dict[st
     fp = Path(path)
     if not fp.exists():
         return {"ok": False, "error": f"文件不存在: {path}"}
-    data = json.loads(fp.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(fp.read_text(encoding="utf-8-sig", errors="replace"))
+    except json.JSONDecodeError as e:
+        return {"ok": False, "error": f"JSON 解析失败（可能被截断）: {e}"}
     # 智联战例：支持 dict 包装（{"data": [...]} 等）——data_key 显式指定或自动探测常用键
     if isinstance(data, dict):
         if data_key:

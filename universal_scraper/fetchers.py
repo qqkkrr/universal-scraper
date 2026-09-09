@@ -334,7 +334,7 @@ class HttpFetcher(BaseFetcher):
                 records.extend(rows)
                 log(f"  page {page}: +{len(rows)}（累计 {len(records)}）")
                 if not rows and text:
-                    self._dump_debug_page(text, page)
+                    _dump_debug_page(s.get("url", ""), text, page)
                 nxt = pagination.get("next_selector") or pagination.get("next_xpath")
                 nxt_url = self._next_url(text, nxt)
                 if not rows or not nxt_url:

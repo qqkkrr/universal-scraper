@@ -17,6 +17,15 @@ from typing import Dict
 
 from .quota_ledger import QuotaLedger
 
+
+def _norm_domain(d: str) -> str:
+    """域名归一化：小写 + 去 www. 前缀。审查修复：www.chinamoney.com 和
+    chinamoney.com 曾被当成两个域名，封锁台账互通失效。"""
+    d = (d or "").strip().lower()
+    if d.startswith("www."):
+        d = d[4:]
+    return d
+
 DEFAULT_FILE = "~/.universal_scraper/domain_budget.json"
 DEFAULT_HOURS = 24.0
 
@@ -34,8 +43,8 @@ def mark(domain: str, hours: float = DEFAULT_HOURS, note: str = "",
     """登记一次封锁/超预算事件。hours 随台账持久：check/list 按
     [最后事件 + hours] 计算，绝不回退到硬编码窗口。"""
     led = ledger(path)
-    led.touch(f"domain:{domain}", dim="domain")
-    _meta(led)[domain] = {"hours": float(hours), "note": note[:200]}
+    led.touch(f"domain:{_norm_domain(domain)}", dim="domain")
+    _meta(led)[_norm_domain(domain)] = {"hours": float(hours), "note": note[:200]}
     led.save()
     until = time.time() + hours * 3600
     return {"domain": domain, "cooldown_hours": hours,
@@ -45,7 +54,7 @@ def mark(domain: str, hours: float = DEFAULT_HOURS, note: str = "",
 def check(domain: str, path: str | Path | None = None) -> Dict:
     led = ledger(path)
     key = f"domain:{domain}"
-    meta = _meta(led).get(domain, {})
+    meta = _meta(led).get(_norm_domain(domain), {})
     hours = meta.get("hours", DEFAULT_HOURS)
     last_ts = led.last(key, dim="domain")
     remaining = int(last_ts + hours * 3600 - time.time())

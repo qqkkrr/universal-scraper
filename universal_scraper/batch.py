@@ -98,11 +98,10 @@ class BatchQueue:
 
     def claim(self) -> Optional[Dict]:
         """多代理模式：原子领取（文件锁 + 锁内重读最新账本 → 标 running）。
-        崩溃的任务由 next() 的 stale 回收自动归还。"""
-        fd, lock_name = tempfile.mkstemp(
-            dir=str(self.path.parent), prefix=".batch-", suffix=".lock")
-        try:
-            lf = os.fdopen(fd, "w")
+        崩溃的任务由 next() 的 stale 回收自动归还。
+        锁文件 = 队列文件改 .lock 后缀（Path API，无字符串拼接）。"""
+        lock_path = self.path.with_suffix(".lock")
+        with open(lock_path, "a") as lf:
             fcntl.flock(lf, fcntl.LOCK_EX)
             try:
                 # 锁内重读最新队列（其他进程可能已改）
@@ -116,14 +115,6 @@ class BatchQueue:
                 return it
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
-                lf.close()
-                os.unlink(lock_name)
-        except Exception:
-            try:
-                os.unlink(lock_name)
-            except OSError:
-                pass
-            raise
 
     def mark(self, item_id, status: str, result: str = "") -> Dict:
         """状态机：done/failed/blocked/nodata/pending/retry/running。
