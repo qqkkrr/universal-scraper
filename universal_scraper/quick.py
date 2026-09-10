@@ -126,6 +126,17 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
 
     from .core import make_http_client
     client = make_http_client({"min_interval": 0.5, "timeout": 20, "http_backend": "auto"})
+
+    # batch2400 战训：fetch 也查 robots（此前仅 run 引擎查，fetch 漏了）
+    try:
+        from .robots import RobotsTxt
+        _rt = RobotsTxt(user_agent="universal-scraper/1.0")
+        if not _rt.allowed(url):
+            return {"error": f"robots.txt Disallow: {url}（如确认有合法权请忽略此限制，"
+                    "或使用 run --config 路线）"}
+    except Exception:
+        pass
+
     res = client.get(url)
     # 审查修复：核心客户端失败时 text 非空（装着错误信息），按 text 判永远不报错——
     # 被 WAF 拦的页面曾返回"成功形态的 0 候选"误导侦察方向。必须按 ok 门控。

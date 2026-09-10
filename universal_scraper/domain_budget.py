@@ -11,11 +11,18 @@ v1.12.1 前 hours 只改运行时窗口、check/list 恒按 24h 计算，48h 封
 """
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Dict
 
 from .quota_ledger import QuotaLedger
+
+# batch2400 GLM 战训：支持环境变量覆盖台账路径——A/B 测试/多代理模式不共享封锁状态
+DEFAULT_FILE = os.environ.get(
+    "UNIVERSAL_SCRAPER_LEDGER",
+    str(Path.home() / ".universal_scraper" / "domain_budget.json")
+)
 
 
 def _norm_domain(d: str) -> str:
@@ -26,7 +33,6 @@ def _norm_domain(d: str) -> str:
         d = d[4:]
     return d
 
-DEFAULT_FILE = "~/.universal_scraper/domain_budget.json"
 DEFAULT_HOURS = 24.0
 
 

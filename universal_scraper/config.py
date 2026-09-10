@@ -113,6 +113,9 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
             "http_html 翻页请用 browser + pagination.type=click，或 page_param + page_param_name")
 
     pag = cfg.get("pagination", {})
+    if pag is not None and not isinstance(pag, dict):
+        raise ConfigError("pagination", f"pagination 应为 dict，实际 {type(pag).__name__}",
+                          '例如: "pagination": {"strategy": "none"}')
     if pag:
         strat = pag.get("strategy", "none")
         if strat not in PAGINATION_STRATEGIES:
@@ -156,7 +159,7 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     ab = cfg.get("anti_bot", {})
     if ab is not None and not isinstance(ab, dict):
-        raise ConfigError("anti_bot", f"anti_bot 应为 dict，实际 {type(ab).__name__}",
+        raise ConfigError("anti_bot", "anti_bot 应为 dict",
                           '例如: "anti_bot": {"min_interval": 1.0}')
     ab = ab if isinstance(ab, dict) else {}
     cap = ab.get("captcha", {})
