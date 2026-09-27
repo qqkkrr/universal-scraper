@@ -337,9 +337,16 @@ class HttpFetcher(BaseFetcher):
         if self._archive_pairs:
             from urllib.parse import urlparse as _up
             with sess.jlock:  # R6 修复：reconcile 迭代+clear 须持锁
+                # 审查八轮（CRITICAL）：_archive_pairs 是 (name, value, secure) 三元组
+                # （见本文件 181-182 行与 seed_archive_into_jar 的 len(item) > 2 判定），
+                # 此处曾按两元组解包——任何命中已存档登录态的域每次 fetch 必抛
+                # ValueError，被上游吞成"请求失败"→ 重试 3 次 → nodata（用户被误导
+                # 去查反爬/网络）。按索引取名字，兼容二元组历史形态。
+                _ap_names = [p[0] if isinstance(p, (tuple, list)) and p else str(p)
+                             for p in self._archive_pairs]
                 _reconcile_host_only_overrides(
                     sess.jar, self._archive_domain,
-                    [n for n, _ in self._archive_pairs],
+                    _ap_names,
                     req_host=(_up(url).hostname or "").lower())
         with sess.jlock:  # CookieJar 非线程安全（审查 P2，R14）
             ck = jar_cookie_header(sess.jar, url)

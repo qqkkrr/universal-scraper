@@ -62,8 +62,16 @@ fi
 
 # ---- 幂等：同结果文件的 runner 在更新中则不重复启动 ----
 # 审查修复（H）：pgrep -f basename 曾误报——编辑器开着的同名脚本、grep 自身
-# 都会命中。加 -x 精确匹配解释器命令行，且要求进程确实是 python 解释器
-if pgrep -f "python.*$(basename "$RUNNER")" > /dev/null 2>&1; then
+# 都会命中。这里用"python + runner 名 + 结果文件名"的整条命令行正则（-f 全
+# 命令行匹配）降低误报；不能用 -x（那要求整条命令行等于模式，含 .* 时恒不匹配）。
+# 审查八轮（MEDIUM）：只匹配 runner 文件名 → 同一 runner 跑**不同 --results**
+# 的第二个目标会被误判"已在运行"而静默 exit 0（该目标永不产出结果文件，
+# cron/launchd 只看到退出码 0）。幂等键必须是"runner + 结果文件"。
+if [ -n "$RESULTS" ] && pgrep -f "python.*$(basename "$RUNNER").*$(basename "$RESULTS")" > /dev/null 2>&1; then
+  log "runner 已在运行（同一结果文件），跳过启动"
+  exit 0
+fi
+if [ -z "$RESULTS" ] && pgrep -f "python.*$(basename "$RUNNER")" > /dev/null 2>&1; then
   log "runner 已在运行，跳过启动"
   exit 0
 fi

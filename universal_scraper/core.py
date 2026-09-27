@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 CACHE_DEFAULT_TTL = 86400.0      # HTTP 响应缓存默认有效期（秒，24h）
 CACHE_MAX_FILES = 2000           # 缓存文件上限（超限删最旧）
 DEFAULT_MAX_BODY = 20 * 1024 * 1024  # 默认响应体上限（20MB，流式限读）
+_MAX_REDIRECTS = 10              # 手动跟随重定向的最大跳数（curl_cffi 逐跳复检用）
 
 
 def _budget_auto_mark(url: str, status: int, body=None, hours: float = 24.0):
@@ -610,15 +611,214 @@ def jar_cookie_header(jar, url: str) -> str:
         return ""
 
 
+class RedirectBlockedError(Exception):
+    """重定向目标被出站守卫拒绝（公网 → 私网/环回/保留段）。"""
+
+
+_HOST_PRIVATE_CACHE: Dict[str, bool] = {}
+
+
+def _host_is_private(host: str) -> bool:
+    """host 是否解析到私网/环回/保留/链路本地/组播地址（含 localhost 与尾点域名）。
+
+    与 quick.py / journals.py / rangedl.py / proxy_api.py 的入口守卫同口径；
+    空主机名按不可信处理。解析失败返回 False（交由请求层报错，不在此判死）。
+    带小缓存：该函数现在既用于重定向逐跳复检、也用于抓取入口，热路径上避免
+    同一主机重复 getaddrinfo（DNS 结果为真值时缓存，解析失败的判定不缓存）。
+    """
+    import ipaddress
+    if not host:
+        return True
+    h = host.strip().lower()
+    while h.endswith("."):          # 尾点域名（"127.0.0.1."）照样解析成回环
+        h = h[:-1]
+    if h == "localhost" or h.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+        return bool(ip.is_private or ip.is_loopback or ip.is_reserved
+                    or ip.is_link_local or ip.is_multicast)
+    except ValueError:
+        pass
+    _cached = _HOST_PRIVATE_CACHE.get(h)
+    if _cached is not None:
+        return _cached
+    try:
+        import socket as _sock
+        for info in _sock.getaddrinfo(h, None):
+            ip = ipaddress.ip_address(info[4][0])
+            if (ip.is_private or ip.is_loopback or ip.is_reserved
+                    or ip.is_link_local or ip.is_multicast):
+                if len(_HOST_PRIVATE_CACHE) > 512:
+                    _HOST_PRIVATE_CACHE.clear()
+                _HOST_PRIVATE_CACHE[h] = True
+                return True
+    except Exception:
+        return False
+    if len(_HOST_PRIVATE_CACHE) > 512:
+        _HOST_PRIVATE_CACHE.clear()
+    _HOST_PRIVATE_CACHE[h] = False
+    return False
+
+
+def _allow_private_targets() -> bool:
+    """US_ALLOW_PRIVATE=1 放行私网目标（本地测试/内网存档，与 rangedl 同口径）。"""
+    return os.environ.get("US_ALLOW_PRIVATE", "").strip() == "1"
+
+
+def redirect_guard(origin_url: str, target_url: str) -> None:
+    """重定向逐跳复检（审查八轮，HIGH）。
+
+    入口守卫（quick.fetch_url / jsrecon / journals / rangedl / pdf_attach）只校验
+    首个 URL，而三后端都开着自动重定向——公网站点 302 到 127.0.0.1 或
+    169.254.169.254（云元数据）即可绕过全部入口守卫（实测经 httpbin 302 取回
+    本机文件全文）。复检下沉到客户端层后，所有入口与所有后续跳转一并受保护。
+
+    规则：起始为公网、目标解析到私网/环回/保留段 → 抛 RedirectBlockedError；
+    起始本身就是私网（本地 mock 服务器/内网场景）时不拦，避免打断既有用法。
+    """
+    if _allow_private_targets():
+        return
+    try:
+        o_host = urllib.parse.urlsplit(origin_url or "").hostname or ""
+        t_host = urllib.parse.urlsplit(target_url or "").hostname or ""
+    except Exception:
+        raise RedirectBlockedError(f"重定向目标非法: {str(target_url)[:120]!r}")
+    if not t_host or _host_is_private(o_host):
+        return
+    if _host_is_private(t_host):
+        raise RedirectBlockedError(
+            f"出站守卫：拒绝重定向到私网/保留地址 {t_host}（起始 {o_host}）")
+
+
+def assert_public_url(url: str, context: str = "") -> str:
+    """入口出站守卫：URL 主机解析到私网/环回/保留段时拒绝（审查八轮，HIGH）。
+
+    与既有入口守卫同口径（quick.fetch_url / journals / rangedl / pdf_attach），
+    但下沉成公共函数供此前**没有守卫**的入口复用：pdf_table 附件下载、sites.run_site
+    精配路径、cli map/diagnose、js_recon 页面内脚本 URL、引擎抓取入口
+    （crawl 会顺着页面上的私网链接跑）。
+    合法返回原 URL；拒绝时抛 RedirectBlockedError（调用方按各自的错误契约处理）。
+    US_ALLOW_PRIVATE=1 放行（本地测试/内网存档，与 rangedl 同口径）。
+    """
+    if _allow_private_targets():
+        return url
+    try:
+        host = urllib.parse.urlsplit(url or "").hostname or ""
+    except Exception:
+        host = ""
+    if not host or _host_is_private(host):
+        raise RedirectBlockedError(
+            f"出站守卫：拒绝访问私网/保留地址 {host or '(空主机名)'}"
+            f"{('（' + context + '）') if context else ''}；确需内网请设 US_ALLOW_PRIVATE=1")
+    return url
+
+
+def _entry_guard_error(url: str) -> Optional[Dict[str, Any]]:
+    """客户端级抓取入口守卫（审查八轮，HIGH）——统一出口，不再逐入口打补丁。
+
+    历史教训：逐跳复检只落在 safe_http_template 一处、入口守卫只落在 quick.fetch_url
+    等少数入口，于是 map/diagnose/crawl/js_recon 页面脚本 URL/pdf_table 附件下载/
+    精配 run_site 全部漏网（实测可把内网内容取回落盘）。下沉到三个客户端 + fetch_bytes
+    的入口后，任何经 make_http_client 的路径一并受保护；crawl 顺着页面私网链接跑、
+    js_recon 抓页面内脚本等问题同源解决。
+    合法目标返回 None；拒绝时返回结构化错误字典（各后端错误契约一致，不重试）。
+    确需内网/本地 mock 服务器时设 US_ALLOW_PRIVATE=1。
+    """
+    try:
+        assert_public_url(url)
+    except RedirectBlockedError as e:
+        log(f"  ⛔ {e}", "WARN")
+        return {"ok": False, "status": 0, "body": b"", "text": str(e), "json": None,
+                "url": url, "headers": {},
+                "hint": "出站守卫：目标为私网/保留地址（内网场景请设 US_ALLOW_PRIVATE=1）"}
+    return None
+
+
+def _cffi_request_guarded(cffi, method: str, url: str, params, data, json_data, kw: Dict[str, Any],
+                          origin: Optional[str] = None):
+    """curl_cffi 请求 + **逐跳事前复检**（审查八轮补完，HIGH）。
+
+    背景：libcurl 在 C 层内部跟随重定向，Python 侧没有逐跳钩子——此前只能做事后
+    （终态）检查：请求已经打到内网才拒绝返回（盲 SSRF + 端口探测仍成立）。
+    这里改为 allow_redirects=False + 自己跟随：每一跳**发出前**过 redirect_guard，
+    与 urllib/requests 后端同口径。
+    会话用一次性 `cffi.Session`（同一次请求的多跳共享 cookie，又不跨请求共享——
+    保留"每请求独立会话"的线程安全语义）。方法语义对齐 requests：
+    303 一律转 GET；301/302 对非 GET/HEAD 转 GET；307/308 保持方法与请求体。
+    """
+    kw = dict(kw)
+    kw["allow_redirects"] = False
+    # Session.request 不接受 curl_options（那是模块级 cffi.request 的包装参数）——
+    # 手动跟随后 libcurl 的 REDIR_PROTOCOLS 不再适用，改在下面逐跳显式校验协议。
+    kw.pop("curl_options", None)
+    sess = cffi.Session()
+    try:
+        _origin = origin or url
+        cur_url, cur_method = url, method
+        cur_params, cur_data, cur_json = params, data, json_data
+        for _hop in range(_MAX_REDIRECTS + 1):
+            resp = sess.request(cur_method, cur_url, params=cur_params, data=cur_data,
+                                json=cur_json, **kw)
+            _loc = None
+            if resp.status_code in (301, 302, 303, 307, 308):
+                try:
+                    _loc = resp.headers.get("location") or resp.headers.get("Location")
+                except Exception:
+                    _loc = None
+            if not _loc:
+                return resp
+            _next = urllib.parse.urljoin(cur_url, _loc)
+            # 协议白名单（与 urllib 的 _SafeRedirectHandler 同口径）：手动跟随后
+            # libcurl 的 REDIR_PROTOCOLS 不再生效，必须自己挡 ftp:/file: 之类。
+            if urllib.parse.urlsplit(_next).scheme not in ("http", "https"):
+                raise RedirectBlockedError(f"拒绝重定向到非 http/https 协议: {_next[:90]!r}")
+            redirect_guard(_origin, _next)      # 抛 RedirectBlockedError → 客户端转结构化拒绝
+            if resp.status_code == 303 or (resp.status_code in (301, 302)
+                                           and str(cur_method).upper() not in ("GET", "HEAD")):
+                cur_method, cur_data, cur_json = "GET", None, None
+            cur_url, cur_params = _next, None   # 参数已并入首跳 URL
+            try:
+                resp.close()
+            except Exception:
+                pass
+        raise RedirectBlockedError(f"重定向超过 {_MAX_REDIRECTS} 跳，已中止: {url}")
+    finally:
+        try:
+            sess.close()
+        except Exception:
+            pass
+
+
+def _guarded_requests_session(requests_mod: Any):
+    """构造带重定向逐跳复检的 requests 会话（审查八轮，HIGH）。
+
+    为什么用子类：requests 的 `Session.resolve_redirects` 是"下一跳发出前"的唯一
+    Python 钩子（`Session.send` 在 allow_redirects=True 时调用它）——在这里复检
+    才能真拦在请求发出之前，而不是等拿到响应后发现打进了内网。
+    requests 是可选依赖，故工厂函数延迟构造子类（模块导入期不 import requests）。
+    """
+    class _GuardedRedirectsSession(requests_mod.Session):
+        def resolve_redirects(self, resp, req, **kwargs):
+            _loc = resp.headers.get("location")
+            if _loc:
+                redirect_guard(req.url, urllib.parse.urljoin(resp.url, _loc))
+            return super().resolve_redirects(resp, req, **kwargs)
+
+    return _GuardedRedirectsSession()
+
+
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     """审查修复（P1，R129）：urllib 默认重定向白名单含 ftp——公网站点 302 到
     「ftp://内网」即可绕过 HttpClient 的「仅 http/https」入口闸做内网探测。
-    重定向目标一律重新过协议白名单（与入口闸同口径）。"""
+    重定向目标一律重新过协议白名单（与入口闸同口径）。
+    审查八轮（HIGH）：协议白名单不拦 IP——补 redirect_guard 逐跳私网复检。"""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if urllib.parse.urlsplit(newurl or "").scheme not in ("http", "https"):
             raise urllib.error.HTTPError(
                 req.full_url, code, f"拒绝重定向到非 http/https 协议: {newurl!r}", headers, fp)
+        redirect_guard(req.full_url, newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -636,6 +836,14 @@ def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optio
     if urllib.parse.urlsplit(url or "").scheme not in ("http", "https"):
         fetch_bytes.last_error = f"拒绝非 http/https 协议: {url!r}"
         return None
+    # 审查八轮（HIGH）：与三客户端同口径的入口守卫 + 终态复检——fetch_bytes 被
+    # pipeline download / pdf_attach 复用，此前完全没有出站守卫（页面可控的 URL
+    # 可直接打内网）。urllib 回退路径由 _SafeRedirectHandler 逐跳复检。
+    try:
+        assert_public_url(url, context="fetch_bytes")
+    except RedirectBlockedError as e:
+        fetch_bytes.last_error = str(e)
+        return None
     _bump_request_count()  # 真实下载尝试计入任务预算
     fetch_bytes.last_error = ""
     hdrs = {"User-Agent": random.choice(UA_POOL), "Accept-Language": "zh-CN,zh;q=0.9"}
@@ -643,13 +851,26 @@ def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optio
         hdrs.update(headers)
     try:
         import curl_cffi.requests as cffi
-        from curl_cffi import CurlOpt
-        kw = {"headers": hdrs, "timeout": timeout, "impersonate": "chrome",
-              # R129 修复（P1）：同 CurlCffiClient——重定向白名单收紧为 http/https
-              "curl_options": {CurlOpt.REDIR_PROTOCOLS: 1 | 2}}
+        kw = {"headers": hdrs, "timeout": timeout, "impersonate": "chrome", "stream": True}
         if proxy:
             kw["proxies"] = {"http": proxy, "https": proxy}
-        r = cffi.get(url, allow_redirects=True, stream=True, **kw)
+        # 审查八轮（HIGH→补完）：与 CurlCffiClient 同口径——手动跟随 + 逐跳事前复检
+        # （此前是"libcurl 内部跟随 + 事后终态检查"，公网 302 到内网时请求已经发出）。
+        # fetch_bytes 是 pipeline download / pdf_attach 的下载通道，页面可控 URL 必经此地。
+        r = _cffi_request_guarded(cffi, "GET", url, None, None, None, kw, origin=url)
+        # 终态复检保留为第二道防线（含 history 里的每一跳）
+        try:
+            for _u in [getattr(_h, "url", "") for _h in (getattr(r, "history", None) or [])] + \
+                      [getattr(r, "url", "") or url]:
+                if _u:
+                    redirect_guard(url, _u)
+        except RedirectBlockedError as e:
+            try:
+                r.close()
+            except Exception:
+                pass
+            fetch_bytes.last_error = str(e)
+            return None
         try:
             chunks = []
             total = 0
@@ -731,12 +952,27 @@ def _cache_valid(path: Path, ttl: float = CACHE_DEFAULT_TTL) -> bool:
         return False
 
 
+def _clamp_retries(value: Any, default: int = 3) -> int:
+    """max_retries 下限钳制（审查八轮修复）。
+
+    语义是"**总尝试次数**"（三后端都是 `for attempt in range(1, max_retries + 1)`），
+    取值 < 1 时循环体一次都不执行——客户端一个请求都不发却返回 ok=False，
+    hint 还把用户引向"出口/系统代理可能已变化"（配置错误误诊成网络故障）。
+    非数值按 default 处理。三后端共用此函数（避免只改一处造成行为分叉）。
+    """
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return max(1, int(default))
+    return max(1, n)
+
+
 @dataclass
 class HttpClient:
     """通用 HTTP 客户端：重试 + 退避 + 限速 + UA 轮换 + 代理 + 缓存。"""
 
     min_interval: float = 1.0          # 每次请求最小间隔（秒），防限流
-    max_retries: int = 3
+    max_retries: int = 3               # 总尝试次数（含首次），最小 1
     backoff_base: float = 2.0          # 指数退避基数
     timeout: float = 20
     rotate_ua: bool = True
@@ -747,6 +983,7 @@ class HttpClient:
     cookies: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.max_retries = _clamp_retries(self.max_retries)
         self.cookies = _norm_cookies(self.cookies)
         self._last_ts = 0.0
         self._throttle_lock = threading.Lock()
@@ -822,6 +1059,9 @@ class HttpClient:
     ) -> Dict[str, Any]:
         """返回 {'ok':bool, 'status':int, 'body':bytes, 'json':dict|None, 'text':str, 'headers':dict}。
         proxy 传入时本请求走该代理（覆盖实例级 proxy，None 表示用实例配置）。"""
+        _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
+        if _blk is not None:
+            return _blk
         if params:
             url = url + ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
         # 非 ASCII URL（中文参数等）自动百分号编码，urllib 才能请求
@@ -921,7 +1161,7 @@ class HttpClient:
         last_headers: Dict[str, str] = {}
         last_status = 0
         result: Optional[Dict[str, Any]] = None
-        for attempt in range(1, self.max_retries + 1):
+        for attempt in range(1, max(self.max_retries, 1) + 1):
             self._throttle()
             req = urllib.request.Request(
                 url, data=body_bytes or None,
@@ -993,6 +1233,13 @@ class HttpClient:
                     self._at.note_latency(time.time() - _t0)
                     self._at.note_ok()
                     break
+            except RedirectBlockedError as e:
+                # 审查八轮（HIGH）：重定向逐跳复检命中——结构化失败，不重试
+                # （重试只会再被拦一次，且会污染"网络失败"连击计数）
+                log(f"  ⛔ {e}", "WARN")
+                return {"ok": False, "status": 0, "body": b"", "text": str(e), "json": None,
+                        "url": url, "headers": {},
+                        "hint": "出站守卫：重定向目标指向私网/保留地址，已拒绝跟随"}
             except urllib.error.HTTPError as e:
                 # 审查四轮（H）：max_size 缺省分支曾裸 e.read()——无上限读
                 # （与 865 行成功路径的 DEFAULT_MAX_BODY 兜底同款事故）
@@ -1281,7 +1528,7 @@ class RequestsClient:
         import requests
         self.requests = requests
         self.min_interval = min_interval
-        self.max_retries = max_retries
+        self.max_retries = _clamp_retries(max_retries)  # 审查八轮：<1 零请求（共用钳制）
         self.timeout = timeout
         self.rotate_ua = rotate_ua
         self.proxy = proxy
@@ -1292,7 +1539,7 @@ class RequestsClient:
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._last_ts = 0.0
-        self.session = requests.Session()
+        self.session = _guarded_requests_session(requests)
         # R112 修复（P2）：显式直连不读环境代理（http_proxy/https_proxy 环境变量
         # 会把 B站风控敏感流量劫进用户代理）——在会话创建后立即设置
         if not use_system_proxy:
@@ -1325,6 +1572,9 @@ class RequestsClient:
                 json_data=None, headers=None, use_cache: bool = False,
                 allow_html_404: bool = False, proxy: Optional[str] = None,
                 max_size: Optional[int] = None) -> Dict[str, Any]:
+        _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
+        if _blk is not None:
+            return _blk
         h = {"Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
              "Accept-Encoding": "gzip, deflate"}
         h.update(self.extra_headers)
@@ -1338,7 +1588,7 @@ class RequestsClient:
 
         last_err = "requests 请求失败"
         last_status = 0
-        for attempt in range(1, self.max_retries + 1):
+        for attempt in range(1, max(self.max_retries, 1) + 1):
             self._throttle()
             try:
                 kw = {"params": params, "data": data, "json": json_data,
@@ -1415,6 +1665,12 @@ class RequestsClient:
                         resp.close()
                     except Exception:
                         pass
+            except RedirectBlockedError as e:
+                # 审查八轮（HIGH）：重定向逐跳复检命中——结构化失败，不重试
+                log(f"  ⛔ {e}", "WARN")
+                return {"ok": False, "status": 0, "body": b"", "text": str(e), "json": None,
+                        "url": url, "headers": {},
+                        "hint": "出站守卫：重定向目标指向私网/保留地址，已拒绝跟随"}
             except Exception as e:
                 last_err = f"{type(e).__name__}: {e}"
                 wait = self.backoff_base ** attempt
@@ -1464,7 +1720,7 @@ class CurlCffiClient:
                  cache_dir: Optional[Path] = None):
         __import__("curl_cffi.requests")  # 可用性探测：未安装则抛 ImportError
         self.min_interval = min_interval
-        self.max_retries = max_retries
+        self.max_retries = _clamp_retries(max_retries)  # 审查八轮：<1 零请求（共用钳制）
         self.timeout = timeout
         self.use_system_proxy = use_system_proxy
         self.rotate_ua = rotate_ua
@@ -1499,6 +1755,9 @@ class CurlCffiClient:
                 json_data=None, headers=None, use_cache: bool = False,
                 allow_html_404: bool = False, proxy: Optional[str] = None,
                 max_size: Optional[int] = None) -> Dict[str, Any]:
+        _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
+        if _blk is not None:
+            return _blk
         import curl_cffi.requests as cffi
         h = {"Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"}
         h.update(self.extra_headers)
@@ -1570,12 +1829,36 @@ class CurlCffiClient:
                         h.update(_reval_cond)
         last_err = ""
         last_status = 0
-        for attempt in range(1, self.max_retries + 1):
+        for attempt in range(1, max(self.max_retries, 1) + 1):
             self._throttle()
             try:
                 _t0 = time.time()
-                resp = cffi.request(method.upper(), url, params=params,
-                                    data=data, json=json_data, **kw)
+                # 审查八轮（HIGH→补完）：改用手动跟随 + 逐跳事前复检——libcurl 内部
+                # 跟随重定向时 Python 无钩子，公网 302 → 内网的请求会**真的打出去**
+                # （只剩事后终态拦截）。现在每一跳发出前过 redirect_guard，与
+                # urllib/requests 后端同口径；下面的终态复检保留为第二道防线。
+                resp = _cffi_request_guarded(cffi, method.upper(), url, params,
+                                             data, json_data, kw, origin=url)
+                # 审查八轮（HIGH）：curl_cffi 的重定向在 libcurl 内部完成（无 Python
+                # 逐跳钩子），这里做**终态复检**：起始为公网而最终落点解析到私网/
+                # 保留段时，立即关连接并拒绝返回（响应体一个字节都不读出——盲 SSRF
+                # 仍可能发生，但内网内容不外泄，端口探测也无状态码泄漏）。
+                # urllib/requests 后端是"下一跳发出前"的事前拦截。
+                try:
+                    _fin = getattr(resp, "url", "") or url
+                    _hop_urls = [getattr(_h, "url", "") for _h in (getattr(resp, "history", None) or [])]
+                    for _u in _hop_urls + [_fin]:
+                        if _u:
+                            redirect_guard(url, _u)
+                except RedirectBlockedError as e:
+                    try:
+                        resp.close()
+                    except Exception:
+                        pass
+                    log(f"  ⛔ {e}", "WARN")
+                    return {"ok": False, "status": 0, "body": b"", "text": str(e), "json": None,
+                            "url": url, "headers": {},
+                            "hint": "出站守卫：重定向目标指向私网/保留地址，已拒绝返回内容"}
                 try:
                     if max_size:
                         # 流式限读：读满 max_size+1 即停，避免超大响应占满内存
@@ -1700,6 +1983,13 @@ class CurlCffiClient:
                         resp.close()
                     except Exception:
                         pass
+            except RedirectBlockedError as e:
+                # 审查八轮（HIGH）：逐跳守卫命中——结构化失败且不重试
+                # （重试只会再被拦一次，还会污染"网络失败"连击计数）
+                log(f"  ⛔ {e}", "WARN")
+                return {"ok": False, "status": 0, "body": b"", "text": str(e), "json": None,
+                        "url": url, "headers": {},
+                        "hint": "出站守卫：重定向目标指向私网/保留地址，已拒绝跟随"}
             except Exception as e:
                 last_err = str(e)
                 wait = self.backoff_base ** attempt
@@ -1726,9 +2016,19 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
                min_interval, max_retries, timeout, rotate_ua, proxy, cookies, headers。
     """
     backend = str(anti.get("http_backend", "auto")).lower()
+    # 审查八轮（HIGH）：max_retries < 1 曾让客户端一个请求都不发却返回 ok=False
+    # （配置"不重试"的自然写法踩中），且错误被归因成网络/代理故障。这里大声告警
+    # 并交 _clamp_retries 兜底（语义=总尝试次数，下限 1）；非数值按默认 3。
+    _mr_raw = anti.get("max_retries", 3)
+    try:
+        if int(_mr_raw) < 1:
+            log(f"  ⚠️ anti.max_retries={_mr_raw} 非法（语义为总尝试次数，最小 1）"
+                "——本次按 1 处理（只请求一次，不重试）", "WARN")
+    except (TypeError, ValueError):
+        log(f"  ⚠️ anti.max_retries={_mr_raw!r} 非数值——本次按默认 3 处理", "WARN")
     common = dict(
         min_interval=float(anti.get("min_interval", 1.0)),
-        max_retries=int(anti.get("max_retries", 3)),
+        max_retries=_clamp_retries(_mr_raw),
         timeout=float(anti.get("timeout", 20)),
         rotate_ua=bool(anti.get("rotate_ua", True)),
         proxy=anti.get("proxy"),

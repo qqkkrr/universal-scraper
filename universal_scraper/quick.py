@@ -686,14 +686,52 @@ def crawl_url(url: str, depth: int = 2, max_pages: int = 100, allow: Optional[st
 
     h = hashlib.sha256(url.encode(), usedforsecurity=False).hexdigest()[:10]
     work = Path("outputs/.crawl_tmp")
-    tdir = work / f"crawl_{h}"
-    shutil.rmtree(tdir, ignore_errors=True)
+    # 审查八轮（MEDIUM）：tdir 曾只按 URL 哈希定死、且开跑前 rmtree——并发同 URL 的
+    # crawl 会互删对方的 config 与 .running.lock（引擎互斥失效），随后共用同一
+    # outputs/items/*.jsonl 与导出文件互相覆盖。改为每轮唯一目录（pid+随机后缀）。
+    import os as _os
+    import secrets as _secrets
+    _uniq = f"{_os.getpid()}{_secrets.token_hex(2)}"
+    tdir = work / f"crawl_{h}_{_uniq}"
     (tdir / "modules").mkdir(parents=True, exist_ok=True)
     host = re.sub(r"[^A-Za-z0-9_-]", "_", urlparse(url).netloc or "site")
     base = out or f"crawl_{host}"
     # R42 修复：--out 是文件名前缀（导出固定 outputs/ 下）——传入带目录的路径
     # 时剥离目录成分，否则导出崩在 outputs/<路径>/ 不存在（曾裸栈还 exit 0）
     base = re.sub(r"[\\/]+", "_", base).strip("._") or f"crawl_{host}"
+    # 审查八轮（MEDIUM）：同 host 并发 crawl 会静默互相覆盖导出（后跑者赢，先跑者
+    # 数据无声丢失）。默认名被另一**存活**进程占用时改用带后缀的名字并明确告知；
+    # 顺序重跑（旧锁的 pid 已死）仍沿用原文件名，行为与既有文档一致。
+    _baselock = Path("outputs") / f".crawl_base_{base}.lock"
+    _lock_mine = False
+    try:
+        _baselock.parent.mkdir(parents=True, exist_ok=True)
+        _busy = False
+        if _baselock.exists():
+            try:
+                _old_pid = int((_baselock.read_text(encoding="utf-8").strip() or "0"))
+            except Exception:
+                _old_pid = 0
+            if _old_pid and _old_pid != _os.getpid():
+                try:
+                    _os.kill(_old_pid, 0)
+                    _busy = True
+                except ProcessLookupError:
+                    _busy = False
+                except PermissionError:
+                    _busy = True
+                except Exception:
+                    _busy = False
+        if _busy:
+            base = f"{base}_{_uniq[-4:]}"
+            import sys as _sys
+            print(f"⚠️ outputs/{_baselock.stem[12:]}.* 正被另一 crawl（pid 占用）——"
+                  f"本次导出改用 {base}.*，避免互相覆盖", file=_sys.stderr)
+        else:
+            _baselock.write_text(str(_os.getpid()), encoding="utf-8")
+            _lock_mine = True
+    except Exception:
+        pass
     cfg = {
         "name": f"crawl_{h}",
         "start_urls": [url],
@@ -708,7 +746,7 @@ def crawl_url(url: str, depth: int = 2, max_pages: int = 100, allow: Optional[st
             "extract_links": {"allow": allow, "deny": deny, "same_domain": same_domain},
         }},
         "pipelines": [{"type": "filter", "field": "text", "op": "non_empty"}],
-        "storage": {"type": "jsonl", "name": f"crawl_{h}"},
+        "storage": {"type": "jsonl", "name": f"crawl_{h}_{_uniq}"},
         "output": {"dir": "outputs", "base_name": base},
         "anti_bot": {"min_interval": 0.2, "max_retries": 2, "respect_robots": respect_robots},
     }
@@ -724,11 +762,17 @@ def crawl_url(url: str, depth: int = 2, max_pages: int = 100, allow: Optional[st
         result = run_task(tdir)
     finally:
         shutil.rmtree(tdir, ignore_errors=True)
-        # 临时 jsonl 也清理（异常路径不残留）
+        # 临时 jsonl 也清理（异常路径不残留；名字与本次唯一 storage.name 一致）
         try:
-            (Path("outputs/items") / f"crawl_{h}.jsonl").unlink(missing_ok=True)
+            (Path("outputs/items") / f"crawl_{h}_{_uniq}.jsonl").unlink(missing_ok=True)
         except Exception:
             pass
+        # 释放 base 占用锁（只有本进程写入的锁才删；并发时用的是别人的锁）
+        if _lock_mine:
+            try:
+                _baselock.unlink(missing_ok=True)
+            except Exception:
+                pass
     result["base_name"] = base
     # 只报真实存在的导出文件，防止"导出失败还报成功"误导
     files = {}

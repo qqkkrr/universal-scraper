@@ -199,18 +199,31 @@ def _run_engine_probe(task_dir: Path, limit: int, log: Optional[Callable[[str], 
     except Exception as e:
         return {"rows": [], "files": {}, "error": f"{type(e).__name__}: {e}"}
     out_name = (res or {}).get("name") or task_dir.name
+    total = int((res or {}).get("total") or 0)
     rows = []
     fp = ROOT / "outputs" / f"{out_name}.json"
-    if fp.exists():
+    # 审查八轮（HIGH）：此前完全忽略 res["total"]，只看导出文件是否存在——
+    # engine_v3._finalize 仅在 `if rows:` 时导出，0 条运行既不写也不删旧文件，
+    # 而输出名按 host 复用（tasks/auto_precise_<host>）→ 站点改版后 0 条试跑
+    # 会把**上一次运行的旧导出**读回来当本轮成功，坏配置照样注册进注册表。
+    # 现在只有本轮确实产出行时才认导出文件；产出行但文件读不出也如实报错。
+    if total > 0:
+        if not fp.exists():
+            return {"rows": [], "files": {}, "error": f"本轮 {total} 条但导出文件缺失: {fp.name}"}
         try:
-            rows = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception:
-            rows = []
+            rows = json.loads(fp.read_text(encoding="utf-8")) or []
+        except Exception as e:
+            return {"rows": [], "files": {},
+                    "error": f"本轮导出文件不可读（结果不可信）: {type(e).__name__}: {e}"}
+        if not rows:
+            return {"rows": [], "files": {}, "error": "本轮导出为空（结果不可信）"}
     files = {}
     for ext in ("json", "csv", "xlsx"):
         p = ROOT / "outputs" / f"{out_name}.{ext}"
-        if p.exists():
+        if p.exists() and rows:
             files[ext] = f"outputs/{out_name}.{ext}"
+    if total <= 0:
+        return {"rows": [], "files": {}, "error": "试跑 0 条（未产出记录，配置不采纳）"}
     return {"rows": rows, "files": files, "error": ""}
 
 

@@ -110,6 +110,7 @@ class ComplianceGate:
         from urllib.parse import urlparse
         parsed = urlparse(url)
         domain = parsed.hostname or ""
+        _crawl_delay = 0.0
 
         # 1) robots.txt
         # OCR R131（M）：_get_robots 的 check-then-act 同样入锁（仅首次构造走慢路径）
@@ -125,8 +126,11 @@ class ComplianceGate:
                 _cd = robots.crawl_delay(url)
             except Exception:
                 _cd = 0.0
-            if _cd > 0:
-                return {"allowed": True, "reason": "", "crawl_delay": _cd}
+            # 审查八轮（LOW）：此处曾 `if _cd > 0: return {"allowed": True, ...}` 提前
+            # 返回——robots 里带 Crawl-delay 的域会**跳过下面的域名冷却台账检查**
+            # （已封禁的域照放行，与"合规门"职责矛盾）。改为只记值、继续走冷却检查，
+            # 最终 allowed 结果里带上 crawl_delay。
+            _crawl_delay = float(_cd or 0.0)
 
         # 2) 域名封锁台账
         try:
@@ -146,7 +150,10 @@ class ComplianceGate:
                 print(f"⚠️ compliance: 域名封锁台账检查失败（{type(e).__name__}: {e}）"
                       f"——冷却封锁临时失效，请检查台账文件", file=sys.stderr, flush=True)
 
-        return {"allowed": True, "reason": ""}
+        _ret: Dict[str, Any] = {"allowed": True, "reason": ""}
+        if _crawl_delay > 0:
+            _ret["crawl_delay"] = _crawl_delay     # 审查八轮：透传（不再提前 return）
+        return _ret
 
     def record_evidence(self, url: str, kind: str, content: str):
         """留证据文件（kind: http_block / captcha / waf / network_fail）。"""

@@ -638,8 +638,16 @@ class BrowserScriptFetcher(BaseFetcher):
                     continue
                 yield obj
             rc, err = _wait_bridge(proc, errbuf)
-            if rc != 0 and not err:
-                die(f"浏览器桥退出码 {rc}")
+            # 审查八轮（HIGH）：条件曾写反为 `rc != 0 and not err`——Node 未捕获异常
+            # 必然往 stderr 打栈，于是"桥崩溃 + 有 stderr"这一最常见组合反而不报错、
+            # 静默按成功收尾（返回部分或 0 条），用户被引向"选择器写错/无数据"。
+            # 与姊妹实现 modules/fetchers.py 的口径对齐：非零退出且 stderr 有内容
+            # = 硬失败；非零退出但 stderr 为空（cleanup 阶段失败等）保留已抓到的事件。
+            if rc != 0:
+                if err.strip():
+                    die(f"浏览器桥退出码 {rc}：{err.strip()[-500:]}")
+                log(f"⚠️ 浏览器桥退出码 {rc}（stderr 为空，疑似收尾阶段失败），"
+                    "已产出的事件按原样保留", "WARN")
             _completed = True
         finally:
             # 生成器被提前终止（消费端异常/die()）时回收桥子进程，防孤儿 node/Playwright
@@ -993,9 +1001,13 @@ class BrowserFetcher(BaseFetcher):
         seen = set()
         out = []
         for r in recs:
-            _blob = (str(r.get("_api_url", "")) + "|" + str(r.get("_method", "GET")) + "|"
-                     + str(r.get("_post_data", "")) + "|"
-                     + json.dumps(r.get("data"), ensure_ascii=False, default=str))
+            # 审查八轮（LOW）：各段曾用 "|" 拼接——URL/post_data 里含 "|" 时可构造
+            # 碰撞（如 url="...?f=a|GET" + method="GET" 与 url="...?f=a" + post="GET|"）。
+            # 改用 \x1f 分隔 + 段长前缀，彻底消除歧义。
+            _parts = [str(r.get("_api_url", "")), str(r.get("_method", "GET")),
+                      str(r.get("_post_data", "")),
+                      json.dumps(r.get("data"), ensure_ascii=False, default=str)]
+            _blob = "\x1f".join(f"{len(p)}:{p}" for p in _parts)
             k = _hl.md5(_blob.encode("utf-8"), usedforsecurity=False).hexdigest()
             if k in seen:
                 continue

@@ -8,7 +8,10 @@
    - ZCode / Claude Code：`~/.agents/skills/universal-scraper/`
 2. Python 依赖（建议 3.10+，实测 3.12）：
    ```
-   pip install requests curl_cffi pymupdf pdfplumber openpyxl charset_normalizer lxml beautifulsoup4
+   pip install requests curl_cffi pymupdf pdfplumber openpyxl charset_normalizer lxml beautifulsoup4 cssselect
+   # 注意 cssselect：lxml 的 CSS 选择器支持是 extra（pip install lxml 不含它）。
+   # 缺它时 CSS 抽取会静默退化成"标签串当正文"（审查八轮实测），doctor 不报错——
+   # 建议直接 `bash scripts/setup.sh`（按 requirements.txt 装，含 cssselect）。
    # 可选增强（按需）：
    pip install patchright playwright ddddocr   # 浏览器桥/验证码（也可 node 侧装）
    ```
@@ -27,8 +30,10 @@
 
 - 最小示例配置：`configs/new_task.json`（scaffold 可再生成）
 - 跑一个任务：`python3 -m universal_scraper.cli run --config <配置.json>`
-- 单页预检：`cli dryparse <url>`；诊断封禁：`cli diagnose <url>`
-- 全部命令：`cli --help`；教学与配方：`references/`（anti-block-playbook 判型表 + recipes 案例库）
+- 单页预检（v3 任务包）：`python3 -m universal_scraper.cli dryparse --task <任务目录> --url <url>`；
+  诊断封禁：`python3 -m universal_scraper.cli diagnose <url>`
+  （审查八轮更正：旧写法 `cli dryparse <url>` 会被 argparse 拒绝——`--task`/`--url` 均为必填）
+- 全部命令：`python3 -m universal_scraper.cli --help`；教学与配方：`references/`（anti-block-playbook 判型表 + recipes 案例库）
 
 ## 三、约定与注意
 

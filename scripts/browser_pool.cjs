@@ -20,8 +20,11 @@ const STOP_FILE = process.env.US_STOP_FILE || null;
 const stopRequested = () => STOP_FILE && fs.existsSync(STOP_FILE);
 const out = (o) => console.log(JSON.stringify(o));
 
-async function renderPage(context, req, stealthApplied, blockingApplied) {
-  if (req.stealth && !stealthApplied.value) {
+async function renderPage(context, req, stealthApplied, blockingApplied, ownCtx = true) {
+  // 审查八轮（HIGH）：stealth 注入与 route 资源拦截都只对**自建 context** 生效——
+  // CDP 降级附加的是用户真实浏览器，注入 init 脚本/注册 route 会干扰用户自己的浏览
+  // （对齐 browser_generic.cjs 的 ownCtx 口径）。
+  if (ownCtx && req.stealth && !stealthApplied.value) {
     // 审查修复（H）：flag 的 check-then-act 无锁——多 worker 并发首渲染时
     // applyStealth 可能并发执行（注入的 init 脚本重复叠加）。用 await 锁串行化
     while (stealthApplied.locked) { await new Promise(r => setTimeout(r, 50)); }
@@ -33,7 +36,7 @@ async function renderPage(context, req, stealthApplied, blockingApplied) {
       } finally { stealthApplied.locked = false; }
     }
   }
-  if (!blockingApplied.value) {
+  if (ownCtx && !blockingApplied.value) {
     // 与 stealth 同款锁语义：route 重复注册会叠加 handler 层（行为仍对但浪费）
     while (blockingApplied.locked) { await new Promise(r => setTimeout(r, 50)); }
     if (!blockingApplied.value) {
@@ -53,9 +56,14 @@ async function renderPage(context, req, stealthApplied, blockingApplied) {
     if (req.remove_overlays) await dismissOverlays(page);
     await runActions(page, req.actions);
     if (req.wait) await page.waitForSelector(req.wait, { timeout: 30000 }).catch(() => {});
+    // 审查八轮（MEDIUM）：滚动等待曾写死 1500ms——Python 侧把 scroll_wait_ms 作为
+    // scrollWait 放进池请求载荷（modules/fetchers.py），池却全文不认这个字段，
+    // 懒加载列表按配置等 5s 也只在 1.5s 后取 HTML（条数偏少且无告警）。
+    // 与 browser_single.cjs / browser_generic.cjs 同口径：默认 1500。
+    const _scrollWait = parseInt(req.scrollWait, 10) > 0 ? parseInt(req.scrollWait, 10) : 1500;
     for (let s = 0; s < (req.scroll || 0); s++) {
       await page.evaluate(() => { const _h = document.documentElement ? document.documentElement.scrollHeight : (document.body ? document.body.scrollHeight : 0); window.scrollTo(0, _h); window.dispatchEvent(new Event("scroll")); });
-      await sleep(1500);
+      await sleep(_scrollWait);
     }
     const html = await page.evaluate(() => document.documentElement.outerHTML);
     // 渲染成功后把会话 cookie 回传（Python 侧按域名自动存档，下次任务自动复用）
@@ -103,7 +111,15 @@ async function main() {
   if (ss && fs.existsSync(ss) && !isCdpFallback) ctxOpts.storageState = ss;  // CDP 附带模式忽略外部会话（用真实登录态）
   const proxy = parseProxy(process.env.US_PROXY);
   if (proxy) ctxOpts.proxy = proxy;
-  const context = await browser.newContext(ctxOpts);
+  // 审查八轮（HIGH）：CDP 降级路径曾无条件 newContext()——那是浏览器内新建的
+  // **隔离上下文**，9222 真浏览器的默认上下文登录态/cookie 一个都看不到（实测：
+  // 种在默认上下文的 sid 在降级池里返回空），而 stderr 只写"降级连接 9222 调试
+  // Chrome"，让人以为"真实浏览器 + 登录态"已生效——静默抓回登录墙页面。
+  // 对齐 browser_generic.cjs：降级时用宿主默认上下文，且不注入 stealth/route。
+  const ownCtx = !isCdpFallback;
+  const context = ownCtx
+    ? await browser.newContext(ctxOpts)
+    : (browser.contexts()[0] || await browser.newContext(ctxOpts));
   const stealthApplied = { value: false, locked: false };  // locked：并发首渲染互斥
   const blockingApplied = { value: false, locked: false };  // 资源拦截一次性注册（同锁语义）
 
@@ -136,12 +152,17 @@ async function main() {
       if (stopRequested()) { closing = true; return; }
       active++;
       try {
-        const r = await renderPage(context, req, stealthApplied, blockingApplied);
+        const r = await renderPage(context, req, stealthApplied, blockingApplied, ownCtx);
         out({ id: req.id, html: r.html, url: r.url, bytes: r.bytes, cookies: r.cookies || [] });
       } catch (e) {
-        // 审查修复（H）：shutdown 排空时在途请求必须有错误应答——此前渲染中
-        // 被 shutdown 打断的请求静默消失，Python 侧 120s 等到 TimeoutError
-        out({ id: req.id, html: "", url: req.url, error: "池正在关闭，请求被中止" });
+        // 审查八轮（LOW）：曾把所有渲染异常统一改写成"池正在关闭"，真实失败原因
+        // （导航超时/选择器炸）完全不落日志，排查被引向错误方向。仅在真的在关闭时
+        // 用关停文案（Python 侧按该文案判定"池关闭"），否则如实回报渲染错误。
+        const _msg = e && e.message ? String(e.message) : String(e);
+        out({
+          id: req.id, html: "", url: req.url,
+          error: closing ? "池正在关闭，请求被中止" : ("渲染失败: " + _msg).slice(0, 300),
+        });
       } finally {
         active--;
         touch();
@@ -192,7 +213,11 @@ async function main() {
       closeThenExit();
       return;
     }
-    if (active === 0 && queue.length === 0 && waiters.length === 0 && Date.now() - lastActivity >= IDLE_MS) {
+    // 审查八轮（MEDIUM）：idle 退出条件里曾要求 waiters.length === 0 —— 而空闲时
+    // POOL_SIZE 个 worker 正停在 pop() 的 Promise 里（waiters 恒非空），条件永不成立：
+    // US_POOL_IDLE_MS 是死代码，池与 headless Chrome 只在 stdin EOF 时才退（实测
+    // 25s 纯空闲仍存活）。停等的 worker 不持有任何请求，用 active/queue 判断即可。
+    if (active === 0 && queue.length === 0 && Date.now() - lastActivity >= IDLE_MS) {
       clearInterval(idleTimer);
       // R8 修复：idle 超时曾直接 exit 跳过 browser.close——headless Chrome 成孤儿
       closeThenExit();

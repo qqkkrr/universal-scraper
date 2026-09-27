@@ -534,8 +534,12 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
                                 rows_all.append({"_pdf": _pu, "content": _t[:20000]})
                         elif res.get("error"):
                             _pdf_errors.append(f"{_pu}: {res['error'][:120]}")
-                    if _pdf_errors and not rows_all:
-                        _job_log(job, "⚠️ " + "；".join(_pdf_errors[:3]))
+                    if _pdf_errors:
+                        # 审查八轮（MEDIUM）：此前只在"全部附件都失败"时记日志——
+                        # 部分失败（如 2 个里 1 个 404）被静默吞掉，完成摘要仍写
+                        # "✅ 附件解析 N 条 / errors: 0"，用户以为附件已全部解析。
+                        _job_log(job, ("⚠️ 部分附件失败：" if rows_all else "⚠️ ")
+                                 + "；".join(_pdf_errors[:3]))
                     if rows_all:
                         import hashlib as _hl
                         _host = re.sub(r"[^0-9A-Za-z_-]", "_", urllib.parse.urlparse(_pdfs[0]).netloc)
@@ -580,8 +584,10 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
                             files["csv"] = f"outputs/{base}.csv"
                         if (ROOT / "outputs" / f"{base}.xlsx").exists():
                             files["xlsx"] = f"outputs/{base}.xlsx"
-                        summary = f"✅ 任务结束：附件解析 {len(rows_all)} 条，导出 {list(files.values())}"
-                        _job_done(job, {"total": len(rows_all), "fetched": len(_pdfs), "errors": 0, "files": files},
+                        summary = (f"✅ 任务结束：附件解析 {len(rows_all)} 条，导出 {list(files.values())}"
+                                   + (f"（{len(_pdf_errors)} 个附件失败）" if _pdf_errors else ""))
+                        _job_done(job, {"total": len(rows_all), "fetched": len(_pdfs),
+                                        "errors": len(_pdf_errors), "files": files},
                                   summary, _auto_verify(rows_all, None))
                         return
             except Exception as e:
@@ -1252,7 +1258,15 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         self._json({"ok": False, "error": "配置写入失败（目录只读？）——env 已清但持久化未生效"})
                     return
-                allowed = {k: str(body.get(k) or "").strip() for k in _LLM_ENV_KEYS}
+                # 审查八轮（HIGH）：留空 = 沿用已存值（界面 index.html:1469 的承诺）。
+                # 此前把 6 个键整体写入（缺省 ""）——用户只改模型就会把 api_key/base_url
+                # 清成空串，接口却回 ok:true「已保存并生效」，重启后配置永久丢失
+                # （实测复现：settings.json 的 api_key 由 sk-… 变 ""）。
+                _prev_cfg = _load_settings()
+                allowed = {}
+                for k in _LLM_ENV_KEYS:
+                    _v = str(body.get(k) or "").strip()
+                    allowed[k] = _v if _v else str(_prev_cfg.get(k) or "").strip()
                 _save_ok = _save_settings(allowed)
                 _apply_settings_to_env(allowed)
                 if _save_ok:

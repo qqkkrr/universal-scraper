@@ -91,6 +91,20 @@ def fetch_sitemap_urls(url: str, timeout: int = 30,
         if not res.get("ok"):
             return
         text = res.get("text", "") or ""
+        # 审查八轮（MEDIUM）：`.gz` 子 sitemap 曾被当索引递归抓——但正文是 gzip
+        # **二进制**，`<loc>` 正则零命中 → 该子 sitemap 贡献 0 条且不记错（监控恒判
+        # "抓取为空"，混合索引下还会把 gz 里全部 URL 当 removed 推假告警并覆写基线）。
+        # 这里按 gzip 魔数/扩展名解压后再扫。
+        _body = res.get("body")
+        if (isinstance(_body, (bytes, bytearray)) and bytes(_body[:2]) == b"\x1f\x8b") \
+                or u.split("?", 1)[0].lower().endswith(".gz"):
+            try:
+                import gzip as _gz
+                _raw = bytes(_body) if isinstance(_body, (bytes, bytearray)) else text.encode("utf-8", "ignore")
+                text = _gz.decompress(_raw).decode("utf-8", "ignore")
+            except Exception as _ge:
+                _fetch_errors.append(f"{u}（gzip 解压失败: {type(_ge).__name__}）")
+                return
         for m in re.finditer(r"<loc>\s*([^<]+?)\s*</loc>", text[:32 * 1024 * 1024]):
             loc = m.group(1).strip()
             if loc in seen:

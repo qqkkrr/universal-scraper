@@ -83,6 +83,10 @@ async function main() {
     out.error = e && e.message ? e.message : String(e);
     try { fs.writeFileSync(outPrefix + '.meta.json', JSON.stringify(out, null, 1)); } catch (e2) {}
     console.error('FAIL ' + out.error);
+    // 审查八轮（LOW）：失败路径曾不设退出码——catch 里只写 meta + console.error，
+    // 进程仍以 0 退出；调用方（cli.py 按 returncode != 0 决定是否告警）永远收不到
+    // "驱动失败"，该篇数据缺失被吞（对齐 browser_session_template.cjs 的同类修复）。
+    process.exitCode = 1;
   } finally {
     await browser.close();
   }

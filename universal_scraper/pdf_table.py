@@ -90,6 +90,11 @@ def extract_pdf_links(html: str, base_url: Optional[str] = None) -> List[str]:
 def download_pdf(url: str, proxy: Optional[str] = None, timeout: int = 60,
                  headers: Optional[Dict[str, str]] = None) -> Path:
     """下载 PDF 到临时文件，返回路径；失败抛 RuntimeError。"""
+    # 审查八轮（HIGH）：本通道的 URL 来自被爬页面里的附件链接（页面可控）——
+    # 此前无任何出站守卫，`<a href="http://127.0.0.1/...">` 即盲打内网。与
+    # quick.fetch_url / pdf_attach._guard_url 同口径（US_ALLOW_PRIVATE=1 可放行）。
+    from .core import assert_public_url
+    assert_public_url(url, context="pdf_table.download_pdf")
     import requests
     hdrs = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -172,6 +177,11 @@ def _merge_sparse_cols(table: List[List[Optional[str]]], drop: int,
                 row[ci - 1] = (left + " " + right).strip() if (left and right) else (left or right)
                 del row[ci]
         del empties[ci]
+        # 审查八轮（MEDIUM）：删列时曾漏删 hdr 对应列——表头比数据多一列，调用方按
+        # 位置取名时整体错位（实测 类别='100'、金额='备注X'）。合并保留的是左列标签，
+        # 因此删掉被合并掉的右列标签与行数据保持同构。
+        if hdr and ci < len(hdr):
+            del hdr[ci]
         ncols -= 1
     return table
 
@@ -233,6 +243,7 @@ def extract_tables_from_pdf(path: str) -> List[Dict[str, Any]]:
                         # 表头空单元格 = 合并单元格 → 继承左邻列名
                         hdr = []
                         inherit_pos: List[int] = []
+                        _seen_h: Dict[str, int] = {}
                         for j, c in enumerate(cells):
                             name = re.sub(r"\s+", "", c or "").strip()
                             if not name and hdr:
@@ -240,6 +251,14 @@ def extract_tables_from_pdf(path: str) -> List[Dict[str, Any]]:
                                 inherit_pos.append(j)
                             elif not name:
                                 name = f"列{j + 1}"
+                            # 审查八轮（MEDIUM）：同名表头（两列都叫「数量」/合并单元格
+                            # 继承出同名）在建 row dict 时互相覆盖 → 前者数据永久丢失。
+                            # 同名列加数字后缀（colspan 展开后两列都能保留）。
+                            if name in _seen_h:
+                                _seen_h[name] += 1
+                                name = f"{name}{_seen_h[name]}"
+                            else:
+                                _seen_h[name] = 1
                             hdr.append(name)
                         last_header = hdr
                         last_inherit = inherit_pos
@@ -430,6 +449,9 @@ def parse_xlsx(path: str, fields: Optional[List[str]] = None) -> Dict[str, Any]:
 
 def download_attachment(url: str, proxy: Optional[str] = None, timeout: int = 90) -> Path:
     """下载附件（PDF/Excel/Word）到临时文件，校验非空。"""
+    # 审查八轮（HIGH）：与 download_pdf 同源——附件 URL 由页面提供，必须过出站守卫
+    from .core import assert_public_url
+    assert_public_url(url, context="pdf_table.download_attachment")
     import requests
     hdrs = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                           "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15"}

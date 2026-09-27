@@ -24,7 +24,11 @@ def extract_article(html_text: str, min_par_len: int = 40) -> str:
     if doc is None:
         return re.sub(r"<[^>]+>", " ", html_text)
     # 移除 script/style/nav/aside/footer
-    for tag in ("script", "style", "nav", "aside", "footer", "form"):
+    # 审查八轮（HIGH）：**不再整块删除 <form>**——ASP.NET WebForms（<form id="form1"
+    # runat="server">）与大量政务老站的正文整块包在 form 里，drop_tree 会把正文
+    # 100% 丢光（实测正文全空）。表单控件（input/button/label）本身几乎不产出文本，
+    # 保留 form 带来的噪音极小，而丢正文是不可逆损失。
+    for tag in ("script", "style", "nav", "aside", "footer"):
         for el in doc.xpath(f"//{tag}"):
             el.drop_tree()
     best = None
@@ -45,6 +49,60 @@ def extract_article(html_text: str, min_par_len: int = 40) -> str:
     return re.sub(r"\s+", " ", best.text_content()).strip()
 
 
+def _merge_header_rows(trs) -> List[str]:
+    """多行表头折成逐列标签（审查八轮，MEDIUM）。
+
+    传进来的是一串 `<tr>` 元素（数据行之前的连续全 <th> 行）。rowspan/colspan
+    布局下"行内第 i 个单元格 ≠ 第 i 列"——只按位置合并会把跨列组标签塞错列
+    （实测 header [名称, 价格] + [原价, 现价] 与 3 列数据行错位）。这里按
+    colspan/rowspan 真实跨度建网格，再逐列把各层标签用空格连起来：
+    上例得 [名称, 价格 原价, 价格 现价]（3 列，与数据行对齐）。
+    同列重复标签加数字后缀（原先重复 th 会互相覆盖 → 丢列）。
+    """
+    grid: Dict[Any, str] = {}
+    occupied: set = set()
+    for ri, tr in enumerate(trs):
+        ci = 0
+        for c in tr.xpath("./th | ./td"):
+            while (ri, ci) in occupied:
+                ci += 1
+            txt = re.sub(r"\s+", " ", (c.text_content() or "")).strip()
+            try:
+                cs = max(1, int(c.get("colspan") or 1))
+            except Exception:
+                cs = 1
+            try:
+                rs = max(1, int(c.get("rowspan") or 1))
+            except Exception:
+                rs = 1
+            for dr in range(rs):
+                for dc in range(cs):
+                    grid[(ri + dr, ci + dc)] = txt
+                    if dr or dc:
+                        occupied.add((ri + dr, ci + dc))
+            ci += cs
+    ncol = max((c for _, c in grid), default=-1) + 1
+    labels: List[str] = []
+    for ci in range(ncol):
+        parts: List[str] = []
+        for ri in range(len(trs)):
+            v = grid.get((ri, ci), "")
+            if v and v not in parts:
+                parts.append(v)
+        labels.append(" ".join(parts))
+    out: List[str] = []
+    seen: Dict[str, int] = {}
+    for lb in labels:
+        key = lb or "col"
+        if key in seen:
+            seen[key] += 1
+            out.append(f"{key}{seen[key]}")
+        else:
+            seen[key] = 1
+            out.append(lb)
+    return out
+
+
 def extract_tables(html_text: str) -> List[List[Dict[str, str]]]:
     """抽取所有表格为 [{表头: 单元格}, ...]。"""
     doc = _doc(html_text)
@@ -54,6 +112,7 @@ def extract_tables(html_text: str) -> List[List[Dict[str, str]]]:
     for tbl in doc.xpath("//table"):
         rows = []
         header = []
+        _hdr_pending: List[Any] = []   # 数据行出现前的连续全 th 行（多行表头，存 tr 元素）
         # OCR R131（H）：.//tr/.//th 曾取到嵌套子表（descendant 轴）——外层表的
         # 行被内层表污染、子表行被误判表头。child 轴只取直接属性行（tbody 两种布局）
         # OCR R131 二轮（H）：thead 布局（<table><thead><tr>）的表头行曾整组漏掉
@@ -66,9 +125,13 @@ def extract_tables(html_text: str) -> List[List[Dict[str, str]]]:
             # 全 <th> 行才算表头：<th scope="row"> 数据行（每行首列 th）曾把
             # 表头反复覆盖、整表 0 数据行（审查七轮 N28）
             # 收官六轮：not header 替代 header is None——初始值是 [] 不是 None
-            if tr.xpath("./th") and not tr.xpath("./td") and not header:
-                header = cells
+            # 审查八轮：**首个数据行之前**的连续全 th 行都收作表头（多行表头合并）；
+            # 数据行之后的全 th 行（如 tfoot 合计行）仍按数据行处理。
+            if tr.xpath("./th") and not tr.xpath("./td") and not rows and not header:
+                _hdr_pending.append(tr)
                 continue
+            if _hdr_pending and not header:
+                header = _merge_header_rows(_hdr_pending)
             if header:
                 row = {header[i] if i < len(header) else f"col{i}": cells[i] if i < len(cells) else "" for i in range(max(len(header), len(cells)))}
             else:
@@ -168,6 +231,7 @@ def _escape_cell(v: str) -> str:
 def _table_md(el) -> list:
     lines = []
     header = None
+    _hp: List[Any] = []   # 多行表头暂存（rowspan/colspan，存 tr 元素）
     rows = []
     # 收官六轮（审查）：seen 全行去重曾静默丢弃合法重复数据行（N/A|N/A 出现两次
     # 第二行消失）——与 extract_tables 行为不一致，移除去重（markdown 展示层去重
@@ -176,15 +240,26 @@ def _table_md(el) -> list:
         cells = [re.sub(r"\s+", " ", (c.text_content() or "").strip()) for c in tr.xpath("./th|./td")]
         if not cells:
             continue
-        if tr.xpath("./th") and not tr.xpath("./td") and header is None:
-            header = cells
-        else:
-            rows.append(cells)
+        # 审查八轮：数据行之前的连续全 th 行都收作表头（rowspan/colspan 多行表头
+        # 曾把第二行当数据 → 表名与数据错位），与 extract_tables 同口径合并。
+        if tr.xpath("./th") and not tr.xpath("./td") and header is None and not rows:
+            _hp.append(tr)
+            continue
+        if _hp and header is None:
+            header = _merge_header_rows(_hp)
+        rows.append(cells)
     if not rows and header is None:
         return []
     if header is not None:
         lines.append("| " + " | ".join(_escape_cell(c) for c in header) + " |")
         lines.append("| " + " | ".join(["---"] * len(header)) + " |")
+    elif rows:
+        # 审查八轮（MEDIUM）：无 <th> 表头（td 当表头 / thead 里用 td）的表此前只输出
+        # 数据行、缺 GFM 分隔行 → 渲染器当成普通段落，表格语义整块丢失。补一个空表头
+        # + 分隔行（不丢任何数据行，与 pandas.to_markdown 对无表头表的口径一致）。
+        _n0 = max(len(r) for r in rows)
+        lines.append("| " + " | ".join([""] * _n0) + " |")
+        lines.append("| " + " | ".join(["---"] * _n0) + " |")
     # 列宽取最大（表头/数据行取宽），不做 [:n] 截断——超出表头宽度的数据单元格保留
     n = max([len(header)] if header is not None else []) + 0 if header is not None else 0
     n = max([n] + [len(r) for r in rows]) if (rows or header is not None) else 0
@@ -275,7 +350,9 @@ def html_to_markdown(html_text: str, base_url: Optional[str] = None,
     if doc is None:
         return re.sub(r"<[^>]+>", " ", html_text)
     body = doc.body if doc.body is not None else doc
-    for tag in ("script", "style", "nav", "aside", "footer", "form"):
+    # 审查八轮（HIGH）：同 extract_article——不再删 <form> 子树（ASP.NET/政务站
+    # 正文包在 form 里，删了 markdown 直接为空；表单控件本身几乎无文本）。
+    for tag in ("script", "style", "nav", "aside", "footer"):
         for el in body.xpath(f"//{tag}"):
             el.drop_tree()
     # OCR R6：先存旧值、finally 恢复——无条件置 None 曾在嵌套/重入调用时

@@ -38,8 +38,11 @@ function _scanPwCache(prefix, suffix) {
     const root = `${HOME}/Library/Caches/ms-playwright`;
     const names = fs.readdirSync(root)
       .filter((d) => d.startsWith(prefix))
-      .sort()
-      .reverse();  // 版本号降序，取最新
+      // 审查八轮（LOW）：曾用字典序 `sort().reverse()` 取"最新"——多修订版共存时
+      // `chromium-999` 会排在 `chromium-1000` 前面（browser_common 已改数字序，
+      // 此处漏改，两处口径不一致）。改为按数字修订号降序。
+      .sort((a, b) => (parseInt(b.replace(/\D+/g, ""), 10) || 0)
+                    - (parseInt(a.replace(/\D+/g, ""), 10) || 0));
     for (const d of names) {
       const p = `${root}/${d}/${suffix}`;
       if (fs.existsSync(p)) return p;
@@ -466,7 +469,11 @@ function centerCaptcha(page) {
         const hit = pat.startsWith("/") ? u.includes(pat) : (patRe ? patRe.test(u) : false);
         if (!hit) continue;
         const ct = res.headers()["content-type"] || "";
-        const key = c.name || pat;
+        // 审查八轮（MEDIUM）：capture 的 name/url_pattern 由配置提供（AI 生成、无校验），
+        // 此前直接 path.join 进文件名——name:"../../x" 可写到 outDir 之外；url_pattern
+        // 含 "/"（如 "/api/list"）会生成子路径 → 收尾 flushCaptures 抛 ENOENT 把整个
+        // 任务判失败。统一净化成安全单段文件名（与同项目其它落盘点同口径）。
+        const key = String(c.name || pat).replace(/[\\/:*?"<>|\r\n]+/g, "_").replace(/^\.+/, "_").slice(0, 120) || "capture";
         // 4xx/5xx：记录 URL（诊断 403 卡点）
         if (res.status() >= 400) {
           (capturedBy[key] = capturedBy[key] || []).push({ url: u, status: res.status(), httpError: true });

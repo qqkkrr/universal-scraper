@@ -195,6 +195,20 @@ def extract_tables(pdf_path: str | Path, pages: Optional[List[int]] = None) -> L
                         if not tb or len(tb) < 2:
                             continue
                         header = [(c or "").strip() for c in tb[0]]
+                        # 审查八轮（MEDIUM）：表头重名（两列都叫「数量」）曾让 row[key]
+                        # 互相覆盖——实测 header=["项目","数量","数量"], row=["甲","1","2"]
+                        # 得 {'项目':'甲','数量':'2'}，第一列的值永久丢失。同名列加数字后缀。
+                        _seen_h: Dict[str, int] = {}
+                        _hdr2 = []
+                        for _h in header:
+                            _base = _h or ""
+                            if _base in _seen_h:
+                                _seen_h[_base] += 1
+                                _hdr2.append(f"{_base}{_seen_h[_base]}")
+                            else:
+                                _seen_h[_base] = 1
+                                _hdr2.append(_h)
+                        header = _hdr2
                         rows = []
                         for raw in tb[1:]:
                             row = {}

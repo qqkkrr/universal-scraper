@@ -356,6 +356,11 @@ def agent_task(description: str, start_url: str = "", max_steps: int = 12,
                     it.setdefault("_parser", "agent")
                     if it not in items:
                         items.append(it)
+                    # 审查八轮（LOW）：上限只在每步循环**顶部**判——单次 extract 抽到
+                    # 300 条就整批写入，日志却宣称"已达数量上限"（--limit 5 出 300 条）。
+                    # 达到上限即停（与 limit 语义一致）。
+                    if limit and len(items) >= limit:
+                        break
                 history.append(f"extract -> {len(got)} 条")
                 continue
             if a == "goto":

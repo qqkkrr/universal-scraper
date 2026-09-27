@@ -350,6 +350,25 @@ def _regex_sub_conflicts(sub, ic: bool) -> bool:
                     return True
         return False
 
+    def _single_variable_repeat(ops) -> bool:
+        """R4（审查八轮新增）：重复体是"单个变长重复元素"——(a{1,3})+ / ([a-z]{2,5})+。
+        每次迭代可消费 1..n 个同一字符集字符，切分方式数随长度指数增长（实测
+        (a{1,3})+$ 对 24 字符 0.27s、每 +2 字符涨约 3.3 倍）。只在"整体仅此一个
+        消费元素"时判：定长（lo==hi，如 (a{3})+）安全；首集不重叠的多元素体
+        （如 (ab{1,3})+，每次迭代起点由 'a' 唯一确定）同样安全，不误杀。"""
+        consuming = [(op, av) for op, av in ops
+                     if str(op) not in ("ASSERT", "ASSERT_NOT")]
+        if len(consuming) != 1:
+            return False
+        op, av = consuming[0]
+        o = str(op)
+        if o in ("MAX_REPEAT", "MIN_REPEAT"):
+            lo, hi, _inner = av
+            return hi > lo
+        if o == "SUBPATTERN":
+            return _single_variable_repeat(av[-1])
+        return False
+
     def _walk(ops, in_unb: bool) -> bool:
         for op, av in ops:
             o = str(op)
@@ -367,6 +386,8 @@ def _regex_sub_conflicts(sub, ic: bool) -> bool:
                         return True           # R2b：(a|aa)+（sre 重写为 a(?:|a)+）
                     if _seq_overlap(inner):
                         return True           # F2：(a?\\w)+ 可空元素邻接相交
+                    if _single_variable_repeat(inner):
+                        return True           # R4：(a{1,3})+ 有界变长重复套无界重复
                 if _walk(inner, in_unb or unb):
                     return True
             elif o == "SUBPATTERN":

@@ -41,8 +41,10 @@ def check_deps() -> List[Dict[str, str]]:
                     "hint": "python3 -m pip install " + m if not ok else ""})
     for m in OPTIONAL_PY:
         ok = _py_ok(m)
+        # 审查八轮（MEDIUM）：可选依赖与硬依赖共用 ok 计数与退出码——缺 pandas 也
+        # exit 1，把 doctor 当预检门禁的编排器/agent 会被恒假失败挡住。
         out.append({"item": f"python 可选 {m}", "ok": ok,
-                    "hint": "" if ok else "可选（缺省时自动降级）"})
+                    "hint": "" if ok else "可选（缺省时自动降级）", "optional": True})
     return out
 
 
@@ -116,9 +118,13 @@ def check_repo() -> List[Dict[str, str]]:
         try:
             r = subprocess.run(["git", "-C", str(ROOT), "status", "--short"], capture_output=True, text=True, timeout=15)
             dirty = len(r.stdout.strip().splitlines())
-            out.append({"item": "工作区", "ok": dirty == 0, "hint": f"{dirty} 个未提交改动" if dirty else "干净"})
+            # 审查八轮（LOW）：技能仓库常态有未提交改动（本地沉淀/输出），工作区脏
+            # 不该让 doctor 整体判失败 → 标 optional（仍如实显示，不计入退出码）
+            out.append({"item": "工作区", "ok": dirty == 0,
+                        "hint": f"{dirty} 个未提交改动（不影响使用）" if dirty else "干净",
+                        "optional": True})
         except Exception as e:
-            out.append({"item": "工作区", "ok": False, "hint": str(e)})
+            out.append({"item": "工作区", "ok": False, "hint": str(e), "optional": True})
     return out
 
 
@@ -170,13 +176,21 @@ def main() -> int:
     r = run()
     print(f"🩺 万能爬虫工具自检：{r['ok']}/{r['total']} 项通过")
     for c in r["checks"]:
-        mark = "✅" if c["ok"] else "❌"
+        if c["ok"]:
+            mark = "✅"
+        else:
+            mark = "○" if c.get("optional") else "❌"
         print(f"  {mark} {c['item']}" + (f"  → {c['hint']}" if c["hint"] else ""))
-    if r["ok"] == r["total"]:
-        print("🎉 全部就绪，可正常使用。")
+    # 审查八轮（MEDIUM）：可选依赖/工作区脏曾是硬失败 → 恒 exit 1（本机技能仓库
+    # 常态脏、pandas 常缺）。退出码只反映"硬依赖/环境不可用"，可选项仅提示。
+    hard = [c for c in r["checks"] if not c["ok"] and not c.get("optional")]
+    if not hard:
+        if r["ok"] != r["total"]:
+            print("（○ = 可选依赖/工作区提示，不影响使用）")
+        print("🎉 核心就绪，可正常使用。")
         return 0
     print("\n修复提示见每项 → 提示。")
-    return 1 if r["total"] - r["ok"] > 0 else 0
+    return 1
 
 
 if __name__ == "__main__":

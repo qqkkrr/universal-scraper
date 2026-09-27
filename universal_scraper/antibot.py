@@ -433,6 +433,7 @@ def detect_block(status: int = 200, text: str = "", headers: Optional[Dict[str, 
     # 2) 头部特征：cf-* 头在 Cloudflare CDN 透传的正常 200（DockerHub/V2EX 等）上同样存在。
     #    审查修复（误伤复盘）：只有"200 且 content-type 是 HTML 且内容极小"才判拦截——
     #    CF 前置的 JSON API 小响应（{"code":0,"msg":"ok"}）曾被误杀整站
+    _cf_cdn = False   # 见过 cf-* 头（CDN 前置）；仅用于末尾 detail 文案
     if any(key in h for key in ("cf-ray", "cf-chl", "cf-cache-status")):
         # Tier1 结构指纹优先于 CDN 透传判定：CF 前置站送来 ≥2KB 挑战页时
         # 结构标记仍要抓（审查修复：原逻辑提前 return none 漏掉这类封锁）
@@ -443,6 +444,14 @@ def detect_block(status: int = 200, text: str = "", headers: Optional[Dict[str, 
                 if m:
                     frag = _t_cf[max(0, m.start() - 12):m.end() + 12].replace("\n", " ")[:60]
                     return {"kind": kind, "detail": frag, "status": status}
+        # 审查八轮（HIGH）修复：此处在"tiny html 但无挑战信号"与"大页"两条路径上
+        # 曾直接 `return none/cdn passthrough` —— 只要响应带 cf-ray，下文全部检测
+        # （BLOCK_PATTERNS 散文指纹、BLOCK_PATTERNS_GATED、SHORT_BODY_BLOCK_PATTERNS、
+        # rendered 空壳判定）被整体跳过：实测同一段"账号异常/访问过于频繁"正文，
+        # 无 cf 头判 waf/banned，带 cf-ray 判 none —— 拦截页被当正常内容入库
+        # （fetchers 的"封禁页绝不入库"硬闸因此失效）。改为不 return，落入下方
+        # 通用检测；只有真正无任何拦截信号时才在末尾返回 none（detail 保留 cdn 说明）。
+        _cf_cdn = True
         if ("html" in _ct.lower() or not _ct) and len((text or "").strip()) < 2048:
             # R37 修复（P0）：裸 cf-* 透传头 + 小 HTML 曾误杀 CDN 前置的正常小页
             # （example.com 就架在 Cloudflare 后面）——需要实际挑战信号才判拦截：
@@ -453,8 +462,6 @@ def detect_block(status: int = 200, text: str = "", headers: Optional[Dict[str, 
                                  "cf-chl-bypass", "attention required", "安全验证", "人机验证"))
             if _cf_mitigated or _challenge_kw:
                 return {"kind": "cloudflare", "detail": "cf 挑战信号 + tiny html body", "status": status}
-            return {"kind": "none", "detail": "cdn passthrough", "status": status}
-        return {"kind": "none", "detail": "cdn passthrough", "status": status}
     # 3) 正文特征（只在前 20KB 匹配，避免全文误判）
     t = (text or "")[:20000].lower()
     if not t:
@@ -518,7 +525,7 @@ def detect_block(status: int = 200, text: str = "", headers: Optional[Dict[str, 
         if len(sig) >= 2 or (len(sig) == 1 and len(text or "") < 5000):
             return {"kind": "empty_shell", "detail": f"结构完整性: {', '.join(sig)}",
                     "status": status}
-    return {"kind": "none", "detail": "", "status": status}
+    return {"kind": "none", "detail": "cdn passthrough" if _cf_cdn else "", "status": status}
 
 
 # 短页连击阈值：连续 N 页 body 都这么短且长度一致 → 判异常（封禁页特征：每次返回同一文案）

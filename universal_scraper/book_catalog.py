@@ -644,7 +644,15 @@ def _merge_book_row(book: Dict[str, Any], isbn: str, sources: Dict[str, Any], ro
 
     problem_codes = {"NO_RESULT", "NO_VENDOR", "LOGIN_WALL", "FETCH_ERROR",
                      "NO_DATA", "RATE_LIMITED", "MISMATCH", "COVER_DOWNLOAD_FAILED"}
-    has_problem = any(diag["code"] in problem_codes for diag in diag_entries)
+    # 审查八轮（MEDIUM）：JD 的 LOGIN_WALL 是**设计内**结果（本工具不抓京东登录墙，
+    # 只用豆瓣公开聚合数据；模块自述"电商价格/封面是可选数据源，允许 N/A"）。把它
+    # 计入 problem_codes 会让每本数据齐全的书都恒判 PARTIAL（质量信号失去区分度，
+    # webui 报"N 本未全字段成功（LOGIN_WALL×N）"误导用户）。只豁免这一组合，
+    # JD 的其它问题码（限流/抓取失败）照旧计入。
+    has_problem = any(
+        diag["code"] in problem_codes
+        and not (diag.get("source") == "JD" and diag["code"] == "LOGIN_WALL")
+        for diag in diag_entries)
     if has_bibliographic_data and has_retail_data and not has_problem:
         status = "OK"
     elif has_bibliographic_data or has_retail_data:

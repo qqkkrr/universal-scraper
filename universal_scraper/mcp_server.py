@@ -176,9 +176,13 @@ def tool_auto(args: Dict[str, Any]) -> Dict[str, Any]:
     desc = str(args.get("description", "")).strip()
     if not desc:
         return {"error": "description 不能为空"}
+    # 审查八轮（MEDIUM）：rounds 此前无任何钳制——0/负数静默跑 0 轮（返回空结果），
+    # 10^6 时每轮上限 240s（auto.py 的 round_timeout）可长期占用工具调用。
+    _rounds = int(args.get("rounds") if args.get("rounds") is not None else 2)
+    _rounds = max(1, min(_rounds, 10))
     out = auto_task(desc,
                     limit=args.get("limit") or None,
-                    rounds=int(args.get("rounds") if args.get("rounds") is not None else 2))
+                    rounds=_rounds)
     return {
         "name": out.get("name"),
         "result": out.get("result"),

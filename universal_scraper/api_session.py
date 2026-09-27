@@ -75,7 +75,11 @@ def run_session(plan: Dict[str, Any], out_dir: Path, max_requests: Optional[int]
     logger = Logger(log_file=log_file or (out_dir / f".session_{name}.log"))
     # 预算 + 节流与 `run --max-requests` 同源：core 计数器经 client._throttle 累计，
     # 超限抛 MaxRequestsExceeded（BaseException，穿透一切重试网）
-    set_request_budget(int(max_requests or plan.get("max_requests") or 0))
+    # 审查八轮（LOW）：原来用 `max_requests or plan.get(...) or 0` 的 or 链——显式传
+    # max_requests=0（文档语义"不限"）会被当成"未给"而让位给计划里的值（悄悄加上限）。
+    # 改为显式 None 判定：只有真的没给（None）才回落计划值，0 就是 0（=不限）。
+    _mr = max_requests if max_requests is not None else plan.get("max_requests")
+    set_request_budget(int(_mr) if _mr is not None else 0)
     client = make_http_client({"min_interval": float(min_gap if min_gap is not None
                                else plan.get("min_gap", 2.5)), "timeout": timeout,
                                "http_backend": "auto"})

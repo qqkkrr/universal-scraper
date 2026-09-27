@@ -144,7 +144,13 @@ class Pipeline(BasePipeline):
         for step in self.steps:
             t = step.get("type")
             if t == "filter":
-                field, op, value = step["field"], step.get("op", "contains"), step.get("value")
+                field, op = step["field"], step.get("op", "contains")
+                # 审查八轮（HIGH）：value 未兜底——`None not in val` 直接抛 TypeError。
+                # v3 主流程（engine_v3._handle）按"跳过该条"接住 → 整批条目静默归零；
+                # detail.filters 路径（_run_details）无守卫 → 抓完后崩掉导出。
+                # 与 v2（engine.py:92）同口径：缺失/None 按空串处理。
+                _v = step.get("value")
+                value = "" if _v is None else str(_v)
                 val = str(item.get(field) or "")
                 if op == "non_empty" and not val.strip():
                     return None
@@ -365,4 +371,12 @@ class Pipeline(BasePipeline):
                     # OCR R131（M）：下载失败曾静默置空——磁盘满/超时对用户不可见
                     self._warn_once(f"download 失败（{type(_dl_e).__name__}: {str(_dl_e)[:80]}）: {u[:80]}")
                     item[out_field] = ""
+            else:
+                # 审查八轮（MEDIUM）：if/elif 链没有 else——v3 执行器未实现的步骤类型
+                # （v2-only 的 regex_extract/transform 等，config 用 ALL_PIPELINE_TYPES
+                # 放行）既不报错也不告警，产出静默缺列，只有 verify 事后报"死列"。
+                # 这里只告警一次并计数（不抛错：既有任务包不能因一行未知步骤整体失败）。
+                self._warn_once(f"流水线步骤类型 '{t}' 未被 v3 执行器实现，已跳过"
+                                "（v2-only 步骤请用 run --config；详见 references/spec-schema.md）")
+                self._bump(self.skipped, f"pipeline:{t}:未实现")
         return item

@@ -681,6 +681,16 @@ def _probe_summary(url: str, max_chars: int = 2500) -> str:
         data = {}
     summary = ""
     timeout = int(_os.environ.get("US_PROBE_TIMEOUT", "8"))
+    # 审查八轮（HIGH）：探测走裸 urllib（结构摘要 + 直连回退），此前不经过任何
+    # 出站守卫——auto/agent 流程的 URL 可被指向内网。与 core.assert_public_url 同口径
+    # （US_ALLOW_PRIVATE=1 放行内网场景）。
+    try:
+        from .core import assert_public_url as _apu_p
+        _apu_p(url, context="auto 页面探测")
+    except Exception as _e:
+        from .core import log as _lg
+        _lg(f"  ⛔ {_e}", "WARN")
+        return ""
     try:
         from .structure import build_structure_summary
         summary = build_structure_summary(url) or ""
@@ -698,7 +708,11 @@ def _probe_summary(url: str, max_chars: int = 2500) -> str:
             summary = md
             if links:
                 summary += "\n\n页面链接：\n" + "\n".join(links)
-            _cst = _class_stats_text(raw.decode("utf-8", "ignore"))
+            _cst = _class_stats_text(raw)   # 审查八轮（MEDIUM）：raw 已是 str，
+                                            # 再 .decode() 抛 AttributeError 被外层
+                                            # except 吞掉 → 整段探测摘要（markdown+
+                                            # 链接+类名统计）白拼一场，页面结构对
+                                            # _build_config/自修复提示恒为空。
             if _cst:
                 summary += _cst
         except Exception:

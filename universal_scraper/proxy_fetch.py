@@ -57,6 +57,13 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 TEST_URL = "https://example.com"          # 轻量连通测试（仅通用模式）
 # 目标站校验默认超时：免费代理慢，12s 实测过滤率与体感一致
 TARGET_TIMEOUT = 12
+# 无 marker 时的"真实页面"否定判据（审查八轮修复用）：拦截/拦截页常见特征。
+# 注意 TEST_URL=example.com 只有 559 字节——旧判据">5KB 或 JSON"对它恒假，
+# 导致 validate()/refresh（模块 docstring 的默认用法）恒判 0 可用。
+_BLOCK_HINTS = (b"captcha", b"forbidden", b"access denied", b"blocked",
+                b"not allowed", b"cloudflare", b"<title>error",
+                "安全验证".encode("utf-8"), "访问受限".encode("utf-8"),
+                "访问过于频繁".encode("utf-8"))
 
 
 def _guard_url(url: str) -> str:
@@ -208,9 +215,26 @@ def _fetch_via(proxy: str, url: str, timeout: int, marker: Optional[str] = None)
     if ok and marker:
         ok = _marker_hit(marker, r.content, r.text)
     if ok and not marker:
-        # 无标记时至少要求是真实页面而非拦截页（>5KB 或 JSON）
-        ok = len(r.content) > 5120 or r.content[:1] in (b"{", b"[")
+        ok = _looks_like_real_page(r.content)
     return ok, int((time.time() - t0) * 1000)
+
+
+def _looks_like_real_page(body: bytes) -> bool:
+    """无 marker 时的通用可用性判据（审查八轮修复）。
+
+    旧判据 `len > 5120 or JSON` 对 TEST_URL=example.com（559 字节 HTML）恒假，
+    于是 `validate()` / `python -m universal_scraper.proxy_fetch --refresh`
+    （模块 docstring 宣传的默认用法）恒判 0 个可用，并把既有 proxies.txt 覆盖成空。
+    新判据 = "拿到真内容 且 不是拦截页"：体积下限 200 字节（JSON 例外），
+    且不含 captcha/forbidden/安全验证 等拦截特征。
+    """
+    body = body or b""
+    if not body:
+        return False
+    low = body[:4096].lower()
+    if any(h in low for h in _BLOCK_HINTS):
+        return False
+    return len(body) >= 200 or body[:1] in (b"{", b"[")
 
 
 def _fetch_via_requests(proxy: str, url: str, timeout: int, marker: Optional[str] = None) -> Tuple[bool, int]:
@@ -224,7 +248,7 @@ def _fetch_via_requests(proxy: str, url: str, timeout: int, marker: Optional[str
     if ok and marker:
         ok = _marker_hit(marker, r.content, r.text)
     if ok and not marker:
-        ok = len(r.content) > 5120 or r.content[:1] in (b"{", b"[")
+        ok = _looks_like_real_page(r.content)   # 与 curl_cffi 通道同判据（避免两通道口径分叉）
     return ok, int((time.time() - t0) * 1000)
 
 
@@ -415,9 +439,24 @@ def refresh(out: str = "outputs/proxies.txt", workers: int = 30,
         log(f"⚠️ 可用代理仅 {len(good)} 个（阈值 {min_ok}），仍会写入供应急使用")
     fp = Path(out).expanduser()
     fp.parent.mkdir(parents=True, exist_ok=True)
-    fp.write_text("\n".join(good) + ("\n" if good else ""), encoding="utf-8")
+    # 审查八轮（HIGH，数据丢失防护）：本轮 0 可用时**不覆盖**既有池文件——
+    # 旧判据恒判 0 可用（见 _looks_like_real_page 注释），refresh 会把上一轮
+    # 验证好的可用池直接清空成空文件（实测复现），用户手里再没有可用代理。
+    _kept = False
+    if not good and fp.exists():
+        try:
+            _old = fp.read_text(encoding="utf-8").strip()
+        except Exception:
+            _old = ""
+        if _old:
+            kept_n = len([x for x in _old.splitlines() if x.strip()])
+            log(f"⚠️ 本轮 0 个可用——保留既有 {fp}（{kept_n} 行）不覆盖，"
+                "请先查证源站/网络再重跑")
+            _kept = True
+    if not _kept:
+        fp.write_text("\n".join(good) + ("\n" if good else ""), encoding="utf-8")
     log(f"✅ 可用代理 {len(good)} 个 → {fp}（三态账本: {st.path}）")
-    return {"total": len(all_p), "ok": len(good), "file": str(fp),
+    return {"total": len(all_p), "ok": len(good), "file": str(fp), "kept_previous": _kept,
             "stats": st.stats(), "state_file": str(st.path)}
 
 

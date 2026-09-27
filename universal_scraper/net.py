@@ -96,13 +96,18 @@ def detect_system_proxy() -> Dict[str, Any]:
     # 3) 常见本机代理进程（Clash/V2Ray/sing-box 等）
     if shutil.which("ps"):
         try:
-            ps = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=5).stdout
+            ps = subprocess.run(["ps", "-Axo", "comm="], capture_output=True, text=True, timeout=5).stdout
+            # 审查八轮（LOW）：曾扫 `ps aux` 全命令行——`grep clash`、`vim clash.md`、
+            # `python3 crawl.py --proxy v2ray` 这类"提到名字"的进程全都误报（实测六个
+            # 名字全中）。改扫 **可执行文件名**（comm 列取 basename）：只有真的是该
+            # 程序在跑才命中（ClashX/clash-verge 这类带后缀的仍能匹配）。
+            _names = "\n".join(os.path.basename(_l.strip()) for _l in ps.splitlines() if _l.strip())
             for name in ("clash", "mihomo", "verge", "v2ray", "sing-box", "surge"):
                 # OCR R131（M）：子串匹配曾误报（如 "converge"/"purge" 命中 verge/
                 # surge）——词边界锚定。尾部放行大写/数字续接（ClashX 是客户端名），
                 # 仅拒绝小写字母续接（verges/surges 复数形）。审查二轮（M）：(?-i:)
                 # 内联关大小写——re.I 会让 [A-Z0-9] 连小写也放行，防复数形失效
-                if re.search(rf"\b{re.escape(name)}(?:\b|(?-i:[A-Z0-9]))", ps, re.I):
+                if re.search(rf"\b{re.escape(name)}(?:\b|(?-i:[A-Z0-9]))", _names, re.I):
                     out["processes"].append(name)
         except Exception as e:
             out["sources"].append(f"进程检测失败({type(e).__name__})，结果不可信")

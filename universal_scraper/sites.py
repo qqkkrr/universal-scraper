@@ -337,6 +337,14 @@ def _row_keys(rows: List[Dict[str, Any]]) -> List[str]:
 def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
             limit: int = 20, out_name: Optional[str] = None) -> Dict[str, Any]:
     """通用精配执行：命中注册表 → 抓取 → 解析 → 导出。返回 {total, rows, files, error}。"""
+    # 审查八轮（HIGH）：精配路径此前整体绕过私网守卫——match_* 全是子串匹配
+    # （"wttr.in" in url），`http://127.0.0.1/anything?q=wttr.in` 即命中并把请求
+    # 真发到内网。入口统一过出站守卫（US_ALLOW_PRIVATE=1 可放行内网场景）。
+    from .core import assert_public_url, RedirectBlockedError
+    try:
+        assert_public_url(url, context="sites.run_site")
+    except RedirectBlockedError as e:
+        return {"total": 0, "rows": [], "files": {}, "error": str(e)}
     site = match_site(url)
     if not site:
         return {"total": 0, "rows": [], "files": {}, "error": f"未命中精配站点: {url}"}
@@ -352,7 +360,10 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
             return {"total": 0, "rows": [], "files": {}, "error": "解析 0 条（可能触发验证码/WAF/无结果）"}
         from pathlib import Path as _P
         from urllib.parse import urlparse as _up
-        host = _up(url).netloc.replace(".", "_")
+        host = re.sub(r"[^0-9A-Za-z_-]", "_", _up(url).netloc)
+        # 审查八轮（LOW）：曾只把 "." 换成 "_"——带端口的 URL（测试/内网/UGC 常见）
+        # 生成 `site_weather_127_0_0_1:8934.csv`，冒号在 Windows 是非法文件名字符
+        # （open 抛 OSError 被吞成"导出失败"告警，files 少项）。统一净化非安全字符。
         name = out_name or f"site_{site}_{host}"
         out_dir = _P("outputs"); out_dir.mkdir(exist_ok=True)
         fp = out_dir / f"{name}.json"
@@ -417,7 +428,7 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
         return {"total": 0, "rows": [], "files": {}, "error": "解析 0 条（页面结构变化、接口失效或需登录/Cookie）"}
     from pathlib import Path as _P
     from urllib.parse import urlparse as _up
-    host = _up(url).netloc.replace(".", "_")
+    host = re.sub(r"[^0-9A-Za-z_-]", "_", _up(url).netloc)   # 同上一处：净化端口冒号等非法字符
     name = out_name or f"site_{site}_{host}"
     out_dir = _P("outputs"); out_dir.mkdir(exist_ok=True)
     fp = out_dir / f"{name}.json"

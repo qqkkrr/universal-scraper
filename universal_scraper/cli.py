@@ -612,6 +612,11 @@ def main() -> int:
         tpl = json.loads(json.dumps(SCAFFOLD_TEMPLATE[args.type]))
         tpl["name"] = args.name
         out = Path(args.out)
+        # 审查八轮（LOW）：--out 指向已存在目录曾甩裸 IsADirectoryError（traceback）
+        if out.is_dir():
+            print(f"❌ --out 是目录（需要文件路径）: {out}\n   例如: --out {out}/{args.name}.json",
+                  file=sys.stderr)
+            return 2
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(tpl, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"✅ 模板已生成: {out}")
@@ -1353,15 +1358,44 @@ def main() -> int:
             _cmd.extend(["--proxy", args.proxy])
         _env = {**_os.environ, "NODE_PATH": npath}
         _logf = open(_Path(str(_cap) + ".daemon.log"), "ab")
+        try:
+            _stf.unlink()          # 清掉上一次运行的残留状态文件（否则会被当"已启动"）
+        except Exception:
+            pass
+        _t_start = _time.time()
         _sp.Popen(_cmd, stdout=_logf, stderr=_sp.STDOUT,
                   stdin=_sp.DEVNULL, start_new_session=True, env=_env)
+        # 审查八轮（MEDIUM）：此前只判状态文件"是否存在"就打印已启动并 return 0——
+        # 上一次运行残留的 status.json 会让"新进程其实没起来"（profile 被占/node 缺库/
+        # CDP 9222 不可用）也报成功。改为真存活校验：pid 存活 且 状态文件在本次启动后
+        # 被刷新；超时则打日志尾部并返回 1（与 xhs 分支的 running 轮询同口径）。
         for _ in range(40):
             _time.sleep(0.25)
-            if _stf.exists():
-                print(f"📡 守护进程已启动，捕获 → {_cap}")
-                print("   在有头窗口里人工登录/操作；停止用 capture-daemon stop")
-                return 0
-        print("❌ 启动超时（看 capture.daemon.log）", file=sys.stderr)
+            try:
+                _d = _json.loads(_stf.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            _pid = _d.get("pid")
+            if not _pid or _d.get("stopping"):
+                continue
+            try:
+                if _stf.stat().st_mtime < _t_start - 0.5:
+                    continue          # 旧文件（未刷新）
+                _os.kill(int(_pid), 0)
+            except OSError:
+                continue
+            except Exception:
+                continue
+            print(f"📡 守护进程已启动（pid={_pid}），捕获 → {_cap}")
+            print("   在有头窗口里人工登录/操作；停止用 capture-daemon stop")
+            return 0
+        print("❌ 启动超时或进程未能存活（看 capture.daemon.log）", file=sys.stderr)
+        try:
+            _tail = _Path(str(_cap) + ".daemon.log").read_text(encoding="utf-8", errors="ignore")[-400:]
+            if _tail.strip():
+                print("--- 日志尾部 ---\n" + _tail, file=sys.stderr)
+        except Exception:
+            pass
         return 1
 
     if args.cmd == "xhs":
@@ -1503,6 +1537,14 @@ def main() -> int:
         if _sp0.scheme not in ("http", "https"):
             print("❌ 仅允许 http/https", file=sys.stderr)
             return 1
+        # 审查八轮（HIGH）：map 走 client.get 直连且无地址校验——与 fetch/shell 的
+        # 守卫口径不一致（内网/环回可被探测）。统一过出站守卫。
+        try:
+            from .core import assert_public_url as _apu_m
+            _apu_m(args.url, context="cli map")
+        except Exception as _e:
+            print(f"⛔ {_e}", file=sys.stderr)
+            return 1
         client = make_http_client({"min_interval": 0.3, "timeout": 20})
         urls: list = []
         res = client.get(args.url)
@@ -1529,7 +1571,7 @@ def main() -> int:
         for u in urls[:100]:
             print(f"  {u}")
         if len(urls) > 100:
-            print(f"  …（其余 {len(urls) - 100} 条用 --json/--max-urls 控制）")
+            print(f"  …（其余 {len(urls) - 100} 条用 --max-urls 控制）")
         return 0 if urls else 1
 
     if args.cmd == "pagefn":
@@ -1991,6 +2033,14 @@ def main() -> int:
         if not args.url:
             print("❌ 缺少 URL（diagnose <url>；查历史用 diagnose --history）", file=sys.stderr)
             return 1
+        # 审查八轮（HIGH）：diagnose 曾无出站守卫——与 fetch/shell 的口径不一致，
+        # 被诱导评测内网地址时会把请求真发出去（盲 SSRF + 状态码泄漏）。
+        try:
+            from .core import assert_public_url as _apu_d
+            _apu_d(args.url, context="cli diagnose")
+        except Exception as _e:
+            print(f"⛔ {_e}", file=sys.stderr)
+            return 1
 
         from .diagnose import format_verdict
         if getattr(args, "quick", False):
@@ -2261,16 +2311,34 @@ def main() -> int:
         content = result.get("markdown") or result.get("article") or result.get("selector") or result.get("text", "")
         # 实战反馈六#3（知乎）：200 + 壳页（markdown 0 行）曾照样 ✅——工具说谎
         # 比工具失败更误事。空/极短内容按铁律 3 大声告警并置 nodata 退出码
-        if len(content.strip()) < 200:
-            print(f"⛔ 内容为空或极短（{len(content.strip())} 字符）——大概率是壳页/"
-                  "渲染失败/被拦截，按铁律 3 走诊断：1) fetch --browser --capture 看接口 "
-                  "2) cli diagnose 3) 换 L4 登录态", file=sys.stderr)
-            # 审查六轮（L6）：告警归告警，正文仍打 stdout（取证/人工判断不丢数据）
-            print(content)
-            if args.out:
-                fp = save_result(result, args.out, as_json=False)
-                print(f"\n（空内容仍已保存供取证）: {fp}")
-            return 3
+        # 审查八轮（MEDIUM）：200 字符硬阈值把"内容短但成功"的合法页（示例页
+        # example.com 165 字符/单行公告/短 JSON）判成壳页并 exit 3——fetch 是
+        # 第〇/二幕侦察入口，agent 会据此无谓升级浏览器/诊断。改为"抽取量 vs
+        # 原文体量"判据：原文本身就小（<4KB 或本身就没几个 script）＝真短页照常成功；
+        # 原文很大却只抽出几乎零文本＝壳页/抽取失败，仍 exit 3。
+        _cl = len(content.strip())
+        if _cl < 200:
+            # 注意：main() 里 map 分支等处有局部 `import re`——整个函数作用域内 `re`
+            # 是局部名，此处直接用会 UnboundLocalError（实测踩中）。改用别名局部导入。
+            import re as _re
+            _raw_html = result.get("html") or result.get("text") or ""
+            _scripts = len(_re.findall(r"<script", _raw_html, _re.I))
+            _empty_extract = _cl < 60
+            _shellish = bool(result.get("shell_suspect")) or _empty_extract or (
+                len(_raw_html) >= 4000 and _scripts >= 3 and _cl < 200)
+            if _shellish:
+                print(f"⛔ 内容为空或极短（{_cl} 字符；原文 {len(_raw_html)}B / script×{_scripts}）"
+                      "——大概率是壳页/渲染失败/被拦截，按铁律 3 走诊断："
+                      "1) fetch --browser --capture 看接口 2) cli diagnose 3) 换 L4 登录态",
+                      file=sys.stderr)
+                # 审查六轮（L6）：告警归告警，正文仍打 stdout（取证/人工判断不丢数据）
+                print(content)
+                if args.out:
+                    fp = save_result(result, args.out, as_json=False)
+                    print(f"\n（空内容仍已保存供取证）: {fp}")
+                return 3
+            print(f"ℹ️ 内容偏短（{_cl} 字符）但原文本身就是小页面——按成功返回"
+                  "（若后续抽取为空再按铁律 3 诊断）", file=sys.stderr)
         _deg = " [degraded:{}⚠️非curl_cffi]".format(result["backend"]) if result.get("degraded_backend") else ""
         print(f"# {result['url']}  ({result['status']}, {len(result.get('text',''))}B){_deg}\n")
         print(content[:20000])

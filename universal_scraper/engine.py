@@ -27,6 +27,106 @@ from .middleware import MiddlewareChain
 from .proxy import ProxyPool
 from .storage import Checkpoint, SeenStore, record_key
 
+_REQ_THREAD_WARNED = False
+
+
+class _MwClient:
+    """把 MiddlewareChain 的 request/response/error 时机接到 HTTP 客户端上（审查八轮）。
+
+    为什么用适配器：v2 的取数分散在 fetchers（列表）/ engine（详情、下载）两处，
+    逐个改签名既容易漏点位、又要动多条链。包一层客户端后**任何**经它发出的请求
+    都会经过钩子；适配器双向透明（读写属性都转发给被包客户端），fetcher 既有的
+    `self.client.max_retries = 1` / `getattr(self.client, "_at")` 等用法不受影响。
+
+    契约（对齐 middleware.MiddlewareChain.run）：钩子原地修改 ctx dict——
+      request : {"url","method","headers","body"}   ← 可改（改后生效）
+      response: {"url","status","ok","text","body","json","headers"} ← 可改（写回结果）
+      error   : {"url","method","error"}（传输异常）或 {"url","status","text"}（HTTP 失败）
+    钩子内部异常由 MiddlewareChain 自己捕获（不影响主流程）。
+    """
+
+    def __init__(self, client, chain, logger=None):
+        object.__setattr__(self, "_c", client)
+        object.__setattr__(self, "_mw", chain)
+        object.__setattr__(self, "_log", logger)
+
+    # 双向透明：读转发给被包客户端；写也落到它身上（除了本适配器自己的三个槽位）
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_c"), name)
+
+    def __setattr__(self, name, value):
+        if name in ("_c", "_mw", "_log"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(object.__getattribute__(self, "_c"), name, value)
+
+    def request(self, url: str, method: str = "GET", **kw):
+        mw = object.__getattribute__(self, "_mw")
+        ctx = {"url": url, "method": method,
+               "headers": dict(kw.get("headers") or {}),
+               "body": kw.get("data") if kw.get("data") is not None else kw.get("json_data")}
+        if mw is not None:
+            mw.run("request", ctx)
+        url = ctx.get("url") or url
+        method = ctx.get("method") or method
+        if ctx.get("headers"):
+            kw["headers"] = ctx["headers"]
+        if ctx.get("body") is not None:
+            if "json_data" in kw and kw.get("json_data") is not None:
+                kw["json_data"] = ctx["body"]
+            else:
+                kw["data"] = ctx["body"]
+        try:
+            r = object.__getattribute__(self, "_c").request(url, method, **kw)
+        except Exception as e:
+            if mw is not None:
+                mw.run("error", {"url": url, "method": method, "error": e})
+            raise
+        if mw is not None:
+            if isinstance(r, dict):
+                rctx = {"url": r.get("url") or url, "status": r.get("status"), "ok": r.get("ok"),
+                        "text": r.get("text") or "", "body": r.get("body"),
+                        "json": r.get("json"), "headers": r.get("headers") or {}}
+                mw.run("response", rctx)
+                for k in ("status", "ok", "text", "body", "json", "headers"):
+                    if k in rctx:
+                        r[k] = rctx[k]
+                if not r.get("ok"):
+                    mw.run("error", {"url": r.get("url") or url, "status": r.get("status"),
+                                     "text": (r.get("text") or "")[:200]})
+            else:
+                mw.run("response", {"url": url, "status": getattr(r, "status", 0)})
+        return r
+
+    def get(self, url: str, **kw):
+        return self.request(url, "GET", **kw)
+
+    def post(self, url: str, **kw):
+        return self.request(url, "POST", **kw)
+
+
+
+def _warn_requests_threading(http, workers: int) -> None:
+    """requests 后端 + 多线程共享同一 Session 的告警（审查八轮，MEDIUM）。
+
+    requests.Session 非线程安全（连接池/内部状态），而详情/下载走 ThreadPoolExecutor
+    共享同一个 client；curl_cffi 后端每次请求走模块级 request（独立会话）、urllib 后端
+    每次新建 opener，故只有 requests 后端有此问题。默认 auto 走 curl_cffi 时无此问题，
+    但用户显式 http_backend=requests + 并发>1 时症状是"偶发响应串数据"，极难排查——
+    这里一次性大声告警（不改行为，避免擅自串行化拖慢用户任务）。
+    """
+    global _REQ_THREAD_WARNED
+    try:
+        if workers and int(workers) > 1 and getattr(http, "_backend_name", "") == "requests" \
+                and not _REQ_THREAD_WARNED:
+            _REQ_THREAD_WARNED = True
+            log("⚠️ http_backend=requests + 并发>1：多线程共享同一 requests.Session 并非"
+                "线程安全用法（可能偶发响应串数据）。建议用 auto（默认 curl_cffi，每请求"
+                "独立会话）或把并发设为 1", "WARN")
+    except Exception:
+        pass
+
+
 FETCHERS = {
     "http_json": HttpFetcher,
     "http_html": HttpFetcher,
@@ -320,7 +420,7 @@ def fetch_detail_row(http, row: Dict[str, Any], detail: Dict[str, Any]) -> Dict[
 
 
 def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, logger: Optional[Logger] = None,
-                  source: Optional[Dict[str, Any]] = None) -> List:
+                  source: Optional[Dict[str, Any]] = None, middleware=None) -> List:
     if not detail.get("enabled"):
         return rows
     # OCR R6：extract spec 缺 "name" 曾通过 validate、逐行抽取时才 KeyError——
@@ -458,6 +558,9 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
     # anti 的 curl_cffi 指纹/verify/代理），否则"列表成功详情 403"且难排查
     from .core import make_http_client
     http = make_http_client({**anti, "min_interval": interval, "timeout": timeout})
+    _warn_requests_threading(http, concurrency)   # 审查八轮：requests 会话跨线程共享告警
+    if middleware is not None:
+        http = _MwClient(http, middleware, logger)   # request/response/error 时机接线
 
     def _work(r):
         fetch_detail_row(http, r, detail)
@@ -536,7 +639,8 @@ def fetch_sitemap_urls(http, url: str, max_urls: int = 500,
     return urls[:max_urls]
 
 
-def download_files(rows, dl_cfg, anti, out_dir: Path, logger: Optional[Logger] = None) -> int:
+def download_files(rows, dl_cfg, anti, out_dir: Path, logger: Optional[Logger] = None,
+                   middleware=None) -> int:
     """按配置下载文件（附件/PDF 等）。"""
     if not dl_cfg or not dl_cfg.get("enabled"):
         return 0
@@ -568,6 +672,8 @@ def download_files(rows, dl_cfg, anti, out_dir: Path, logger: Optional[Logger] =
     # 避免列表走 TLS 伪装、下载掉到无伪装栈的指纹分裂
     from .core import make_http_client
     http = make_http_client({**anti, "min_interval": dl_cfg.get("interval", 0.3), "timeout": 60})
+    if middleware is not None:
+        http = _MwClient(http, middleware, logger)   # request/response/error 时机接线
     done = 0
     import threading as _th
     _name_lock = _th.Lock()
@@ -774,8 +880,19 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             # 是 type，任何类都 isinstance 成立）——删除
         cache_dir = out_dir / ".cache" if output.get("cache") else None
         fetcher = fetcher_cls(source, anti_iter, ivars, base_dir)
+        # 审查八轮（功能接线）：middleware 的 request/response/error 时机——包一层
+        # 客户端即可覆盖列表/分页请求。两个 v2 取数器的客户端属性名不同
+        # （fetchers.HttpFetcher 用 .http，modules 版用 .client），逐个探测。
+        if middleware is not None:
+            _cl = getattr(fetcher, "http", None) or getattr(fetcher, "client", None)
+            if _cl is not None:
+                _mw_c = _MwClient(_cl, middleware, logger)
+                if hasattr(fetcher, "http"):
+                    fetcher.http = _mw_c
+                else:
+                    fetcher.client = _mw_c
         if hasattr(fetcher, "http") and cache_dir:
-            fetcher.http.cache_dir = cache_dir
+            fetcher.http.cache_dir = cache_dir      # 适配器双向透明：写会落到被包客户端
 
         if dry_run:
             logger.info(f"[dry-run] 取数器 {ftype} 就绪: {source.get('url', source.get('bridge'))}")
@@ -905,7 +1022,7 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
                             merged += 1
                     logger.info(f"断点续跑：从检查点合并 {merged} 条详情")
             rows = fetch_details(rows, detail, anti_iter, checkpoint=checkpoint, logger=logger,
-                                 source=source)
+                                 source=source, middleware=middleware)
 
         if rows:
             all_rows.extend(rows)
@@ -933,7 +1050,8 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
 
     # 文件下载
     if all_rows:
-        download_files(all_rows, config.get("download"), anti, out_dir, logger=logger)
+        download_files(all_rows, config.get("download"), anti, out_dir, logger=logger,
+                       middleware=middleware)
 
     # 合并导出
     if all_rows and not dry_run:

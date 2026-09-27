@@ -200,7 +200,7 @@ class EngineV3:
 
         # 存储
         store_cfg = dict(self.config.get("storage", {}))
-        _sd = store_cfg.get("dir", "items")
+        _sd = (store_cfg.get("dir") or "items")
         store_cfg["dir"] = str(_sd) if Path(_sd).is_absolute() else str(out_dir / _sd)
         self.storage_name = safe_fname(store_cfg.get("name", self.task.name))  # R91：净化防路径逃逸
         store_cfg["name"] = self.storage_name  # sqlite/multi 后端需要名字
@@ -276,7 +276,7 @@ class EngineV3:
         self._spool_path: Optional[Path] = None
         try:
             # store_cfg["dir"] 已在上方被引擎绝对化（out_dir 已拼接），直接用即可
-            self._spool_path = Path(str(store_cfg.get("dir", "items"))) / f"{self.storage_name}.jsonl"
+            self._spool_path = Path(str((store_cfg.get("dir") or "items"))) / f"{self.storage_name}.jsonl"
         except Exception:
             self._spool_path = None
         # 失败重试队列：{url: attempts}
@@ -365,14 +365,26 @@ class EngineV3:
             # 返回 None = 丢弃该请求（跳过抓取不计错）
             try:
                 from .plugins import apply_request_hooks
+                # 审查八轮（MEDIUM）：插件契约声明 req 含 headers 且可改，
+                # 但这里曾硬传 "headers": {} 且只在 url 变化时重建——插件注入的
+                # Authorization/UA/代理头**永远不生效**（抓取照常"成功"但没带该头）。
+                # 现在传真实 headers/body/method，四个字段任一变化都重建 Request。
                 _preq = apply_request_hooks({"url": req.url, "method": req.method,
-                                             "headers": {}, "body": req.body})
+                                             "headers": dict(req.headers or {}),
+                                             "body": req.body})
                 if _preq is None:
                     self.logger.info(f"插件丢弃请求: {req.url}")
                     return
-                if _preq.get("url") and _preq["url"] != req.url:
-                    req = Request(url=_preq["url"], method=_preq.get("method", req.method),
-                                  body=_preq.get("body"), depth=req.depth, meta=req.meta)
+                _new_headers = _preq.get("headers") if isinstance(_preq.get("headers"), dict) else None
+                if (_preq.get("url") and _preq["url"] != req.url
+                        or _preq.get("method", req.method) != req.method
+                        or _new_headers is not None and _new_headers != (req.headers or {})
+                        or _preq.get("body", req.body) != req.body):
+                    req = Request(url=_preq.get("url") or req.url,
+                                  parser=req.parser,
+                                  method=(_preq.get("method") or req.method),
+                                  headers=_new_headers if _new_headers is not None else req.headers,
+                                  body=_preq.get("body", req.body), depth=req.depth, meta=req.meta)
             except ImportError:
                 pass
             resp = self.fetcher.fetch(req)
@@ -384,14 +396,21 @@ class EngineV3:
             for mw in self.middlewares:
                 resp = mw.on_response(resp, self.ctx) or resp
             # 插件钩子（R4 修复）：process_response——文档承诺自动生效但从未接线
+            # 审查八轮（MEDIUM）：此前只有 text 变化才重建，且 headers 恒传 {}——
+            # 插件改 status/body 被静默丢弃（契约说可改）。现在 status/text/body 任一
+            # 变化都重建（headers 字段名保留以兼容既有插件读写）。
             try:
                 from .plugins import apply_response_hooks
                 from .protocols import Response
                 _presp = apply_response_hooks({"status": resp.status, "text": resp.text or "",
                                               "headers": {}, "body": resp.body})
-                if _presp.get("text") is not None and _presp["text"] != (resp.text or ""):
+                _chg = (_presp.get("status", resp.status) != resp.status
+                        or (_presp.get("text") is not None and _presp["text"] != (resp.text or ""))
+                        or (_presp.get("body") is not None and _presp["body"] != resp.body))
+                if _chg:
                     resp = Response(request=req, status=_presp.get("status", resp.status),
-                                   body=_presp.get("body", resp.body), text=_presp["text"],
+                                   body=_presp.get("body", resp.body),
+                                   text=(_presp["text"] if _presp.get("text") is not None else (resp.text or "")),
                                    json=None, url=resp.url)
             except ImportError:
                 pass
@@ -511,6 +530,13 @@ class EngineV3:
                 if item is not None and self._seen_store is not None:
                     from .storage import record_key
                     k = record_key(item, self._inc_key)
+                    # 审查八轮（MEDIUM）：列表键各项全缺失时 record_key 返回 "|"
+                    # （非空真值）——不同记录被判重复，只留第一条、其余静默丢弃。
+                    # 兄弟实现（modules/pipelines.py:209、engine.py:135）都有
+                    # "任一键为空即保留不判重"的守卫，此处缺；补齐（宁重不漏）。
+                    _kvals = [item.get(kk) for kk in (self._inc_key if isinstance(self._inc_key, list) else [self._inc_key])]
+                    if any(v in (None, "") for v in _kvals):
+                        k = ""
                     # 两段式去重（R6 审查 P1）：reserve 原子"查询+占位"——旧
                     # is_seen/mark 分离曾让 4 个 worker 并发把同一条目各写一份
                     if k and not self._seen_store.reserve(k):
@@ -768,11 +794,14 @@ class EngineV3:
                 self.logger.warn(f"sitemap 展开失败: {e}")
 
         # 种子：start_urls + 上次未完成队列（中断恢复）
-        seeds = seeds or list(self.config.get("start_urls", []))
+        # 审查八轮（MEDIUM）：`.get("start_urls", [])` 不覆盖**显式 null**——配置写
+        # "start_urls": null 时 list(None) 直接 TypeError（sitemap 种子场景可达）。
+        _su = self.config.get("start_urls") or []
+        seeds = seeds or list(_su)
         if self.resume and self.pending_file.exists():
             try:
                 seeds.extend(json.loads(self.pending_file.read_text(encoding="utf-8")))
-                self.logger.info(f"断点续跑：恢复 {len(seeds) - len(self.config.get('start_urls', []))} 个未完成 URL")
+                self.logger.info(f"断点续跑：恢复 {len(seeds) - len(_su)} 个未完成 URL")
             except Exception as e:
                 # 审查修复（P2）：损坏的 pending 曾静默丢弃——用户 --resume 想恢复
                 # 500 个 URL，实际只跑了种子，还毫无提示（.state 分支有告警，此处不对称）
@@ -925,7 +954,24 @@ class EngineV3:
                 self.fetcher.close()
             except Exception:
                 pass
-        self._run_details()
+        # 审查八轮（HIGH）：_run_details 曾裸调用且位于 try/finally 之外——详情阶段
+        # 任一异常（坏 detail.filters 步骤、Pipeline 构造失败…）会穿透到 CLI，
+        # 使 _finalize/_save_state 全部跳过：已抓到的列表数据不导出，输出目录只剩
+        # items/（无 json/csv/xlsx、无 state）。改为"尽力收尾 + 如实上抛"。
+        try:
+            self._run_details()
+        except BaseException as _de:
+            self.logger.error(f"⚠️ 详情阶段异常（{type(_de).__name__}: {_de}）"
+                              "——先尽力导出已抓数据，再上抛")
+            try:
+                self._finalize()
+            except Exception as _fe:
+                self.logger.error(f"⚠️ 异常后的兜底导出也失败: {type(_fe).__name__}: {_fe}")
+            try:
+                self._save_state()
+            except Exception:
+                pass
+            raise
         self._finalize()
         self._save_state()
         self._flush_metrics()  # R101：收尾补最后一个采样点（短任务也有完整时序）
@@ -1070,14 +1116,25 @@ class EngineV3:
         # （对齐队列路径 534-556 的守卫：OSError 硬停机 + finalize 导出已写部分）
         _write_err = None
         try:
-            for item in kept:
+            for _i, item in enumerate(kept):
                 try:
                     self.storage.write(item)
                 except OSError as e:
-                    self.logger.error(f"💾 磁盘写入失败（OSError），已写 {kept.index(item)} 条——硬停机保全已写数据: {e}")
+                    self.logger.error(f"💾 磁盘写入失败（OSError），已写 {_i} 条——硬停机保全已写数据: {e}")
                     _write_err = e
                     break
                 except Exception as e:
+                    # 审查八轮（HIGH）：sqlite 满盘/DB 锁定抛的是 OperationalError
+                    # （不是 OSError）——桥路径曾把它归进"单条跳过继续"，于是每条都
+                    # 失败仍跑完并返回 total=len(kept)/errors=0（全部未落盘却报成功，
+                    # 实测 3 条只落 1 条仍报成功）。与队列路径同口径：sqlite 类故障
+                    # 一律硬停机 + 抛出止损。
+                    import sqlite3 as _sq
+                    if isinstance(e, _sq.Error):
+                        self.logger.error(f"⛔ 存储写入失败（sqlite/磁盘满），已写 {_i} 条"
+                                          f"——硬停机保全已写数据: {e}")
+                        _write_err = e
+                        break
                     self.logger.error(f"⚠️ 单条写盘异常（跳过继续）: {type(e).__name__}: {e}")
                     continue
         finally:
@@ -1329,7 +1386,7 @@ class EngineV3:
         if self._spooling:      # 子集当"全量"，tmp+replace 会销毁盘上的多出的记录
             try:
                 store_cfg = self.config.get("storage", {}) or {}
-                _sd = store_cfg.get("dir", "items")
+                _sd = (store_cfg.get("dir") or "items")
                 _dir = Path(_sd) if Path(str(_sd)).is_absolute() else self.out_dir / str(_sd)
                 _sp = _dir / f"{self.storage_name}.jsonl"
                 if _sp.exists():
@@ -1535,7 +1592,7 @@ class EngineV3:
                     # spool_start 防止按旧偏移读回错位
                     _sp = self._spool_path
                     if _sp is None:
-                        _sd = store_cfg.get("dir", "items")
+                        _sd = (store_cfg.get("dir") or "items")
                         _sp = (Path(_sd) if Path(str(_sd)).is_absolute()
                                else self.out_dir / str(_sd)) / f"{self.storage_name}.jsonl"
                     _tmp = _sp.with_suffix(".jsonl.tmp_detail")
@@ -1545,7 +1602,7 @@ class EngineV3:
                     self._spool_start = 0
                     self.logger.info(f"详情：合并结果已写回 spool（{len(rows)} 条）")
                 else:
-                    _sd = store_cfg.get("dir", "items")
+                    _sd = (store_cfg.get("dir") or "items")
                     _dir = Path(_sd) if Path(str(_sd)).is_absolute() else self.out_dir / str(_sd)
                     _sp = _dir / f"{self.storage_name}.jsonl"
                     # R33 修复（P1）：非 spool 路径跨运行合并——jsonl 是追加式跨运行
@@ -1604,7 +1661,7 @@ class EngineV3:
             # 从 jsonl 全量读回（内存不驻留，导出时才读）
             try:
                 store_cfg = self.config.get("storage", {}) or {}
-                _sd = store_cfg.get("dir", "items")
+                _sd = (store_cfg.get("dir") or "items")
                 _dir = Path(_sd) if Path(str(_sd)).is_absolute() else self.out_dir / str(_sd)
                 _sp = _dir / f"{self.storage_name}.jsonl"
                 if _sp.exists():

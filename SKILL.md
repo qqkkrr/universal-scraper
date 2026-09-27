@@ -313,7 +313,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | **详情页 playwright 渲染** | detail 配 `"backend": "browser", "browser_backend": "auto"`（R101：装了 playwright-python 走进程内渲染，否则自动回落 node 桥；CDP 附加用 `cdp` 字段） |
 | **分布式去重/共享前沿** | `queue: {"backend": "redis", "redis_url": "redis://host:6379/0"}`（R101/R105：多机跑**同一任务**时共享已见集+URL 队列，namespace 默认按任务名派生——不同任务互不串台，同任务多机要共享需显式传相同 namespace；连不上显式报错不静默回落）。run 时序指标自动落 `<out>/.metrics.json`，webui `/api/metrics?task=<子目录>` 读取。投递语义 **at-least-once**（R116：pop 进 processing 暂存，页成功 ack，崩溃后 `visibility_timeout` 秒自动重投；默认 300s 可配）。run 时序指标自动落 `<out>/.metrics.json`，webui `/api/metrics?task=<子目录>` 读取，首页「📈 任务走势」面板可视化 |
 | **代理提取 API** | `anti_bot.proxy_api: {"url": "https://厂商/提取接口", "format": "auto|text|json_list|json_data"}`（R116：住宅/商业代理 API adapter，启动时拉取并入代理池，300s 缓存；失败 WARN 走直连） |
-| **渲染等待策略** | detail/source 配 `"wait_until": "networkidle"`（SPA 接口拖尾，超时自动回落）或 `"dom_stable": true`（DOM 长度稳定检测）；并发渲染 `browser_backend: auto` + `concurrency>1` 时多实例分片并行（上限 3） |
+| **渲染等待策略** | ~~detail/source 配 `"wait_until"` / `"dom_stable"`~~ **（审查八轮更正：这两个键当前在所有执行器都不生效——v2 引擎只把 cdp 传给浏览器抓取器、node 桥硬编码 `domcontentloaded`，属未实现的功能承诺，勿依赖）**；并发渲染 `browser_backend: auto` + `concurrency>1` 时多实例分片并行（上限 3） |
 | **LLM pydantic 结构化抽取** | `LLMClient().extract_json_model(内容, MyPydanticModel)`（R101：jsonschema 注入+校验失败自动回喂重试） |
 | **sitemap 增量监控** | `monitor.watch_once(name, sitemap_url, webhook=...)`（R101：快照 diff 新增/消失 URL，有变化才 POST webhook；快照存 `~/.universal_scraper/monitor/`） |
 
@@ -334,7 +334,9 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
    - 子进程只用列表参数，不用 shell=True / 字符串拼接
    - 批量文件编号用 `%02d`.format 或 f"{i:02d}"，**别用 bash `printf %02d`**——
      08/09 被当八进制直接报错，第 9 篇起的文件静默丢失（小红书实战踩中）
-3. **优先走本技能 CLI**（`us bili/journal/dianping/run/...`）——这些是用户
+3. **优先走本技能 CLI**（`python3 -m universal_scraper.cli bili|journal|dianping|run|...`；
+   审查八轮更正：文档里旧写法 `us xxx` 在本仓库并不存在——没有 console_scripts/alias，
+   必须用 `python3 -m universal_scraper.cli` 调用）——这些是用户
    已信任的入口，且输出落盘规范。
 
 工作区可放 `.claude/settings.json`（permissions.allow 白名单）预批准常用
@@ -362,8 +364,9 @@ HS 字体反爬）+ 签名接口需行为指纹——配置 schema 装不下这�
 5. **沉淀战报**：新发现的反爬形态写回 playbook，API 端点写回 recipes
 
 **代码放哪**：任务目录下（`outputs/<任务名>/`），不放进插件仓库。
-**预算闸接线**：`safe_http_template.py` 已内置 `_check_budget()`，预算文件
-`outputs/.budget.json` 与 `verify --dir` 共享路径。住宅代理 API 用
+**预算闸接线**：`safe_http_template.py` 已内置 `_check_budget()`，预算文件按任务分桶
+`outputs/.budget_<US_BUDGET_TASK>.json`（审查八轮更正：旧文档写的 `outputs/.budget.json`
+已不存在；`verify --dir` 也**不读**预算文件——它只看证据目录）。住宅代理 API 用
 `proxy_api.merge_api_proxies(anti)` 一行接入。
 
 ## 遇到阻断

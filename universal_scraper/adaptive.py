@@ -22,6 +22,10 @@ STRATEGY_FILE = Path(__file__).resolve().parent.parent / "configs" / "_adaptive_
 ESCALATION = ["http", "curl_cffi", "browser_headless", "browser_visible"]
 LABELS = {"http": "HTTP 直抓", "curl_cffi": "TLS 指纹伪装",
           "browser_headless": "无头浏览器", "browser_visible": "有头浏览器"}
+# 审查八轮（MEDIUM）：save_strategy 是"读-改-写"（tmp+replace 只防半截文件，不防
+# 丢更新）——实测两线程各存一个域名后缓存只剩后写者，先写者的策略被静默丢弃。
+# 进程内用线程锁互斥整个读改写（跨进程并发仍需外层互斥，属既有前提）。
+_SAVE_LOCK = __import__("threading").Lock()
 
 
 def _load_strategies() -> dict:
@@ -66,15 +70,18 @@ def save_strategy(url: str, strategy: str):
     # failed——下次明明可用的策略被跳过。failed 只在新站点（尚无有效策略）时记录
     # OCR R131 终审（M）：prev 曾是独立 _load_strategies() 调用——与下方 data 的
     # 二次读取构成 TOCTOU 双读（并发 save 时 prev 可能过时）。合并为一次读
-    data = _load_strategies()
-    prev = data.get(domain, {}).get("best_strategy")
-    if strategy == "failed" and prev not in (None, "", "failed"):
-        return
-    data.setdefault(domain, {})["best_strategy"] = strategy
-    data.setdefault(domain, {})["updated"] = time.strftime("%Y-%m-%d %H:%M")
-    # OCR R131（M）：TOCTOU 修复——prev 和 data 曾是两次独立 _load_strategies()，
-    # 并发 save 时后写覆盖先写。合并为一次读（prev 直接取自 data）
-    _save_strategies(data)
+    # 审查八轮：读改写整体进锁（并发 save 曾互相覆盖：两线程各存一个域名，
+    # 缓存只剩后写者）
+    with _SAVE_LOCK:
+        data = _load_strategies()
+        prev = data.get(domain, {}).get("best_strategy")
+        if strategy == "failed" and prev not in (None, "", "failed"):
+            return
+        data.setdefault(domain, {})["best_strategy"] = strategy
+        data.setdefault(domain, {})["updated"] = time.strftime("%Y-%m-%d %H:%M")
+        # OCR R131（M）：TOCTOU 修复——prev 和 data 曾是两次独立 _load_strategies()，
+        # 并发 save 时后写覆盖先写。合并为一次读（prev 直接取自 data）
+        _save_strategies(data)
 
 
 def _detect_block(text: str, status: int) -> str:

@@ -202,15 +202,18 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
         seen = set()
         dups = 0
         empty = 0
+        _SEP = "\x1f"   # 审查八轮（MEDIUM）：复合键曾用 "|" 拼接——两段值自身含 "|"
+                        # 时键有歧义（{"a":"x|y","b":"z"} 与 {"a":"x","b":"y|z"} 同键
+                        # → 不同行被判重复）。改用不可能出现在文本里的分隔符。
         for r in rows:
             if key == "title+link":
-                v = _norm(r.get("title") or r.get("标题")) + "|" + _norm(r.get("link") or r.get("url") or r.get("链接") or r.get("网址"))
+                v = _norm(r.get("title") or r.get("标题")) + _SEP + _norm(r.get("link") or r.get("url") or r.get("链接") or r.get("网址"))
             elif key == "name+link":
-                v = _norm(r.get("name") or r.get("名称")) + "|" + _norm(r.get("link") or r.get("url") or r.get("链接") or r.get("网址"))
+                v = _norm(r.get("name") or r.get("名称")) + _SEP + _norm(r.get("link") or r.get("url") or r.get("链接") or r.get("网址"))
             else:
                 v = _norm(r.get(key))
             # OCR R131（M）：复合键两段全空曾得 "|"（非空串）——同类行互相判重
-            if not v or not v.replace("|", ""):
+            if not v or not v.replace(_SEP, "").strip():
                 empty += 1
             elif v in seen:
                 dups += 1
@@ -544,15 +547,27 @@ def verify_dir(path: str, log=print) -> Dict[str, Any]:
                     raise ValueError(vr["error"])
                 # OCR R131 反馈 #3：非列表 JSON（配置/单对象/证据文件）曾被当"1 条
                 # 记录"计——产出 "1 条、完整率 0.75" 之类噪音。识别后标注、不计 records
+                # 审查八轮（MEDIUM）追加：顶层是对象但**内含记录数组**（{"code":0,
+                # "data":[…30 行]}，接口原样落盘）时，verify_file 已解包算出 30 条，
+                # 旧逻辑仍按"顶层非列表"记 0 → verdict 假报 empty。这里按"是否真的
+                # 解包出数组"判定（不能只看 n>0——单对象配置也会被 verify_file 记为 1 条）。
+                _wrapped_list = False
                 try:
                     _raw = json.loads(f.read_text(encoding="utf-8-sig"))
                     _is_list = isinstance(_raw, list)
+                    if isinstance(_raw, dict):
+                        for _k in ("data", "list", "rows", "items"):
+                            if isinstance(_raw.get(_k), list):
+                                _wrapped_list = True
+                                break
                 except Exception:
                     _is_list = True  # 解析失败走 verify_file 的正常错误路径
                 n = vr.get("total") or vr.get("records") or 0
-                if _is_list:
+                if _is_list or _wrapped_list:
                     entry["records"] = int(n) if isinstance(n, (int, float)) else 0
                     total_records += entry["records"]
+                    if _wrapped_list:
+                        entry["note"] = "顶层为对象——已按 data/list/rows/items 解包计数"
                 else:
                     entry["records"] = 0
                     entry["note"] = "非列表 JSON（单对象/配置/证据）——不计入记录数"

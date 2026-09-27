@@ -35,6 +35,12 @@ def _norm_domain(d: str) -> str:
 
 DEFAULT_HOURS = 24.0
 
+# 审查八轮（MEDIUM）：台账的 mark/check 是"读-改-写"，此前无任何锁——并发抓取中
+# 多线程同时走到 403/421/52x 自动记账时互相覆盖（实测 8 线程各记 25 个域只落 28/200，
+# 丢 86%），域封锁冷却被静默抹掉（复核时 `budget --list` 看到的是解除态）。
+# 进程内用线程锁互斥；跨进程并发需外层 flock（模块 docstring 已声明该前提）。
+_LOCK = __import__("threading").Lock()
+
 
 def ledger(path: str | Path | None = None) -> QuotaLedger:
     return QuotaLedger(path or DEFAULT_FILE, windows={"domain": 86400})
@@ -48,13 +54,17 @@ def mark(domain: str, hours: float = DEFAULT_HOURS, note: str = "",
          path: str | Path | None = None) -> Dict:
     """登记一次封锁/超预算事件。hours 随台账持久：check/list 按
     [最后事件 + hours] 计算，绝不回退到硬编码窗口。"""
-    led = ledger(path)
     # OCR R131（H）：touch 内部曾先 save 一次（只含新 ts），meta 改完再 save
     # 一次——两写非原子，中间崩溃 = 封锁登记了新 ts 却丢了 hours（check 回退
     # DEFAULT_HOURS，冷却时长静默漂移）。改：内存同改后一次落盘
-    led.data.setdefault("domain", {})[f"domain:{_norm_domain(domain)}"] = int(time.time())
-    _meta(led)[_norm_domain(domain)] = {"hours": float(hours), "note": note[:200]}
-    led.save()
+    # 审查八轮：整个"读-改-写"进进程内锁（并发记账曾互相覆盖，实测丢 86%）。
+    # 关键：ledger(path) 的**读文件**也必须在锁内——只在锁内改+写而读在锁外，
+    # 拿到的仍是过期快照，先写者的记录会被后写者整份覆盖（实测 4 线程 ×25 只落 30）。
+    with _LOCK:
+        led = ledger(path)
+        led.data.setdefault("domain", {})[f"domain:{_norm_domain(domain)}"] = int(time.time())
+        _meta(led)[_norm_domain(domain)] = {"hours": float(hours), "note": note[:200]}
+        led.save()
     until = time.time() + hours * 3600
     return {"domain": domain, "cooldown_hours": hours,
             "until": time.strftime("%m-%d %H:%M", time.localtime(until))}

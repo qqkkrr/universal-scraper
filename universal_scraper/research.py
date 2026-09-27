@@ -152,16 +152,30 @@ class ResearchRunner:
     def _save(self) -> None:
         # 原子落盘：tmp + os.replace——进程死在 json.dump 中途不再撕裂进度文件
         # （撕裂会被 _load_json 静默吞成零进度，触发无告警全量重抓）
-        import os
+        # 审查八轮（MEDIUM）：曾用**固定**临时名 progress.json.tmp / orgid_cache.json.tmp
+        # ——同一 --out 上并发/重入跑两个 run 时两进程写同一 inode：一方 replace 成功后
+        # 另一方 replace 抛 FileNotFoundError，被下面统一兜成 SystemExit（"被目录占用
+        # 或无权限？"误诊）直接中止整批；进度文件还可能成为两次写入的交错混合体。
+        # 改用 mkstemp 唯一临时名（与原目录同盘，保证 replace 原子）。
+        import os as _os
+        import tempfile as _tf
+
+        def _atomic_write(path: Path, obj) -> None:
+            fd, tmp = _tf.mkstemp(dir=str(self.out), prefix=path.name + ".", suffix=".tmp")
+            try:
+                with _os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(obj, f, ensure_ascii=False)
+                _os.replace(tmp, path)
+            except Exception:
+                try:
+                    _os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+
         try:
-            p1 = self.out / "progress.json.tmp"
-            with open(p1, "w", encoding="utf-8") as f:
-                json.dump(self.progress, f, ensure_ascii=False)
-            os.replace(p1, self.out / "progress.json")
-            p2 = self.out / "orgid_cache.json.tmp"
-            with open(p2, "w", encoding="utf-8") as f:
-                json.dump(self.org_cache, f, ensure_ascii=False)
-            os.replace(p2, self.out / "orgid_cache.json")
+            _atomic_write(self.out / "progress.json", self.progress)
+            _atomic_write(self.out / "orgid_cache.json", self.org_cache)
         except Exception as e:
             raise SystemExit(f"✗ 状态落盘失败（progress/orgid_cache 被目录占用或无权限？）: "
                              f"{type(e).__name__}: {e}") from e
@@ -177,25 +191,43 @@ class ResearchRunner:
 
     # ---------- 巨潮适配 ----------
     def _org_id(self, code: str) -> str:
+        """取该公司 orgId。**瞬时故障一律上抛**（审查八轮修复）。
+
+        此前非 200 / 异常都静默落回 ""，调用方随即以裸 code 检索——巨潮对缺 orgId
+        的 stock 参数静默返回 0 条，于是该企业-年被判 `nodata`，而 nodata 不在
+        run() 的重试白名单里（只认 pdf_fail:/scan），**永久漏采**且面板把它当
+        "检索窗口内无候选披露"。现在瞬时故障抛异常，交给 run() 的 API_FAIL 分支
+        计数 + 保持 pending（"稍后重跑即续"语义），并由熔断闸防止无限重试。
+        只有"HTTP 200 且响应可解析、确实无匹配 code"才视为确定无 orgId（沿用裸
+        code 检索——未上市年份/未披露公司的正常路径）。
+        """
         oid = self.org_cache.get(code)
         if oid is not None:
             return oid
-        oid = ""
         try:
             r = self.sess.post(self._allowed("http://www.cninfo.com.cn/new/information/topSearch/query"),
                                data={"keyWord": code, "maxNum": 10}, timeout=20)
-            if r.status_code == 200:
-                for it in (r.json() or []):
-                    if str(it.get("code")) == code:
-                        oid = it.get("orgId") or ""
-                        break
-                # 仅 200 才落缓存：瞬时故障的 "" 一旦固化，该公司全部年份退化为
-                # 无 orgId 检索（部分站点静默 0 条 → 假 nodata 且永不重试）
-                self.org_cache[code] = oid
-            else:
-                time.sleep(3)
-        except Exception:
+        except Exception as e:
+            time.sleep(3)  # 原行为保留：失败也退避一次再上抛
+            raise RuntimeError(f"topSearch 请求失败（瞬时故障，未固化）："
+                               f"{type(e).__name__}: {e}") from e
+        if r.status_code != 200:
             time.sleep(3)
+            raise RuntimeError(f"topSearch HTTP {r.status_code}（瞬时故障，未固化）")
+        try:
+            items = r.json() or []
+        except Exception as e:
+            time.sleep(3)
+            raise RuntimeError(f"topSearch 响应非 JSON（瞬时故障，未固化）："
+                               f"{type(e).__name__}: {e}") from e
+        oid = ""
+        for it in items:
+            if str(it.get("code")) == code:
+                oid = it.get("orgId") or ""
+                break
+        # 仅 200 且可解析才落缓存：瞬时故障的 "" 一旦固化，该公司全部年份退化为
+        # 无 orgId 检索（部分站点静默 0 条 → 假 nodata 且永不重试）
+        self.org_cache[code] = oid
         time.sleep(self.api_interval * 0.8 + random.random() * self.jitter)
         return oid
 

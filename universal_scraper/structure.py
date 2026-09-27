@@ -353,9 +353,14 @@ def annotate_dom(html: str, url: str = "", max_chars: int = 7000,
             # 必须数同 tag 兄弟（与 _rel_path 口径一致）
             _parent = el.getparent()
             if _parent is not None:
-                _idx = sum(1 for c in _parent
-                           if isinstance(c.tag, str) and c.tag == el.tag
-                           and list(_parent).index(c) <= list(_parent).index(el))
+                # 审查八轮（MEDIUM）：曾对每个子节点重算 `list(_parent).index()`
+                # （两次调用，各自 O(n)）——单个元素即 O(n²)，实测同父 4000 子节点
+                # 15.9s（宽列表页卡十几秒）。改为一次筛出同 tag 兄弟再 index（O(n)）。
+                _sibs = [c for c in _parent if isinstance(c.tag, str) and c.tag == el.tag]
+                try:
+                    _idx = _sibs.index(el) + 1      # lxml 元素按同一性比较
+                except ValueError:
+                    _idx = len(_sibs)
             else:
                 _idx = i
             lines.append(f"  实例{i} ({tag}.{cls_str}:nth-of-type({_idx})):")

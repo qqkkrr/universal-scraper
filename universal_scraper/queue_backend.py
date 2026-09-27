@@ -119,7 +119,22 @@ class RedisQueueBackend:
             # 才允许重投（zrangebyscore 非锁定读，多 worker 并发 reclaim 曾
             # 对同一 stale 条目双重 lpush → 队列重复条目）
             if self._r.zrem(self._pkey, member):
-                self._r.lpush(self._qkey, raw)
+                try:
+                    self._r.lpush(self._qkey, raw)
+                except Exception as e:
+                    # 审查八轮（MEDIUM，at-least-once 保底）：zrem 已成功而 lpush
+                    # 抛错（连接抖动/Redis 重启）时，该 URL 会既不在队列也不在
+                    # 处理集合——**永久丢失**。回滚：把条目按原 member 放回处理
+                    # 集合，等下一轮 reclaim 再重投。
+                    # 残余窗口：两条命令之间进程被杀（需 EVAL/MULTI 才能原子化，
+                    # 本机无 Redis 环境无法验证，故不引入未验证的原子化改造）。
+                    try:
+                        self._r.zadd(self._pkey, {member: time.time()})
+                    except Exception:
+                        pass
+                    import sys as _sys
+                    print(f"⚠️ reclaim 重投失败已回滚（{type(e).__name__}: {e}）", file=_sys.stderr)
+                    continue
                 n += 1
         return n
 

@@ -178,4 +178,15 @@ def record_key(record: Dict[str, Any], keys) -> str:
         # 与缺 id 的记录同键，静默互吞
         v = record.get(k)
         parts.append("" if v is None else str(v).replace("\n", " ").replace("\r", " "))
-    return "|".join(parts)
+    key = "|".join(parts)
+    # 审查八轮（MEDIUM）：字段值本身含 "|" 时键有歧义——{'a':'x|y','b':'z'} 与
+    # {'a':'x','b':'y|z'} 同为 "x|y|z" → 不同记录被当重复静默丢弃（增量任务丢数据）。
+    # 只在真的含 "|" 时追加确定性指纹：不含 "|" 的键与历史格式**逐字相同**
+    # （既有 seen/断点续跑文件不受影响，无一次性重抓）。
+    if any("|" in p for p in parts):
+        try:
+            import hashlib
+            key = key + "#" + hashlib.sha1("\x1f".join(parts).encode("utf-8")).hexdigest()[:12]
+        except Exception:
+            pass
+    return key

@@ -196,24 +196,52 @@ def merge_api_proxies(anti: Dict[str, Any], log=None) -> None:
         cache_key = (f"{url}|{api_cfg.get('format', 'auto')}"
                      f"|{api_cfg.get('protocol', 'http')}"
                      f"|{bool(api_cfg.get('allow_private_api'))}")
-        with _API_CACHE_LOCK:
-            cached = _API_CACHE.get(cache_key)
-            fetched = None
-            if cached and time.time() - cached[0] < _API_CACHE_TTL:
-                fetched = cached[1]
-            else:
-                fetched = fetch_proxies(url, format=api_cfg.get("format", "auto"),
-                                        protocol=api_cfg.get("protocol", "http"),
-                                        allow_private_api=bool(api_cfg.get("allow_private_api")))
-                _API_CACHE[cache_key] = (time.time(), fetched)
-        static = anti.get("proxies") or []
-        anti["proxies"] = list(dict.fromkeys(list(static) + fetched))
-        if log:
-            log(f"🌐 代理 API 注入 {len(fetched)} 条（合计 {len(anti['proxies'])}）")
-    except Exception as e:
-        if log:
+
+        def _log(msg: str, level: str = "INFO") -> None:
+            """兼容两种调用方：可调用回调 log(msg[, level]) 与 log.Logger 实例。
+
+            审查八轮（MEDIUM）：engine.py 传的是 **Logger 实例**（无 __call__），而本
+            函数此前直接 `log(msg)` → TypeError 被外层 except 吞掉 → 代理 API 的
+            成功注入与失败告警**全部静默**（表现为"配了 API 却零代理直连、无提示"）。
+            """
+            if log is None:
+                return
             try:
-                log(f"⚠️ 代理 API 拉取失败（继续用已有代理/直连）: "
-                    f"{type(e).__name__}: {str(e)[:140]}", "WARN")
+                if callable(log):
+                    try:
+                        log(msg, level)
+                    except TypeError:
+                        log(msg)          # 单参回调
+                else:
+                    _fn = getattr(log, "warn", None) if str(level).upper() == "WARN" \
+                        else getattr(log, "info", None)
+                    if _fn:
+                        _fn(msg)
             except Exception:
                 pass
+
+        # 审查八轮（MEDIUM）：HTTP 拉取曾整个包在 _API_CACHE_LOCK 里——锁要跨一次
+        # 最长 20s 的同步网络调用，所有 key 的并发调用者被串行化（实测 3 个不同
+        # cache_key 并发 merge 耗时 3.02s）。改双检锁：锁内只读缓存，网络在锁外，
+        # 回来后锁内写缓存（同时不要重复写别人已写的值）。
+        fetched = None
+        with _API_CACHE_LOCK:
+            cached = _API_CACHE.get(cache_key)
+            if cached and time.time() - cached[0] < _API_CACHE_TTL:
+                fetched = cached[1]
+        if fetched is None:
+            fetched = fetch_proxies(url, format=api_cfg.get("format", "auto"),
+                                    protocol=api_cfg.get("protocol", "http"),
+                                    allow_private_api=bool(api_cfg.get("allow_private_api")))
+            with _API_CACHE_LOCK:
+                _old = _API_CACHE.get(cache_key)
+                if not (_old and time.time() - _old[0] < _API_CACHE_TTL):
+                    _API_CACHE[cache_key] = (time.time(), fetched)
+                else:
+                    fetched = _old[1]      # 别人已填：用新鲜的那份，避免覆盖
+        static = anti.get("proxies") or []
+        anti["proxies"] = list(dict.fromkeys(list(static) + fetched))
+        _log(f"🌐 代理 API 注入 {len(fetched)} 条（合计 {len(anti['proxies'])}）")
+    except Exception as e:
+        _log(f"⚠️ 代理 API 拉取失败（继续用已有代理/直连）: "
+             f"{type(e).__name__}: {str(e)[:140]}", "WARN")

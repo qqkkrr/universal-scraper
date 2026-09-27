@@ -147,13 +147,18 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
         issues.append(f"freq 公式违例 {bad_freq} 处（组: {groups}）")
 
     # 5) 年度↔标题对齐（year 残缺的行计入错位而非崩溃——title 常规即匹配年度报告正则）
+    # 审查八轮（HIGH/OCR）：此前用 `H.get("title", 0)` —— 表头缺 title 列时**默认取
+    # 第 0 列当标题**（静默拿错列做年份比对，结果不可信且看不出来）。改为显式报告跳过。
     mis = 0
-    for r in t:
-        m = re.search(r"(\d{4})\s*年年度报告", str(r[H.get("title", 0)] or ""))
-        if m and _safe_int(r[H["year"]], -1) != int(m.group(1)):
-            mis += 1
-    if mis:
-        issues.append(f"year↔title 错位 {mis} 行")
+    if "title" in H:
+        for r in t:
+            m = re.search(r"(\d{4})\s*年年度报告", str(r[H["title"]] or ""))
+            if m and _safe_int(r[H["year"]], -1) != int(m.group(1)):
+                mis += 1
+        if mis:
+            issues.append(f"year↔title 错位 {mis} 行")
+    else:
+        issues.append("表头缺 title 列——year↔title 对齐检查跳过（请核对面板表头）")
 
     # 6) 文本源覆盖 + 抽验全字段重算
     if keywords is not None:

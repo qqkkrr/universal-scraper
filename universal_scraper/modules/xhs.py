@@ -191,7 +191,12 @@ def parse_note_detail(capture: Path, note_id: str) -> Dict[str, Any]:
     """从捕获的 SSR HTML / 详情接口解析单篇笔记字段。"""
     detail: Dict[str, Any] = {}
     for _, rec in _iter_capture(capture):
-        if note_id not in str(rec.get("url", "")):
+        # 审查八轮（LOW）：曾用子串匹配（`note_id in url`）——短 id 会命中"含该
+        # 前缀的其它笔记 URL"（如 id=123 命中 .../explore/12345），把别的笔记正文
+        # 当本篇解析。改为字母数字边界内的精确出现（兼容各种 URL 形态，仍拒绝前缀撞车）。
+        import re as _re
+        _u = str(rec.get("url", ""))
+        if _re.search(rf"(?<![0-9A-Za-z]){_re.escape(str(note_id))}(?![0-9A-Za-z])", _u) is None:
             continue
         body = rec.get("body")
         if not isinstance(body, str):
