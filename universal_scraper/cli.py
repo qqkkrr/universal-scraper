@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 from .engine import run_config
 from .config import load_config, ConfigError
+from .core import MaxRequestsExceeded
+from .protocols import BlockDetectedError, RateLimitedError
 
 SCAFFOLD_TEMPLATE = {
     "http_json": {
@@ -92,10 +96,29 @@ def main() -> int:
     runp.add_argument("--task", default=None, help="v3 任务包目录（tasks/<name>）")
     runp.add_argument("--var", action="append", default=[], help="覆盖变量 k=v")
     runp.add_argument("--resume", action="store_true", help="断点续跑")
-    runp.add_argument("--limit", type=int, default=None, help="只处理前 N 条（冒烟测试）")
+    runp.add_argument("--limit", type=int, default=None, help="只处理前 N 条（冒烟测试；0=不限，留空=不限）")
     runp.add_argument("--dry-run", action="store_true", help="只校验不抓取")
     runp.add_argument("--url", default=None, help="覆盖入口 URL（任务包=start_urls[0]，配置=source.url）")
     runp.add_argument("--log-file", type=Path, default=None, help="日志文件路径")
+    runp.add_argument("--max-requests", type=int, default=None,
+                      help="任务级请求预算硬闸（含重试，按真实 HTTP 尝试计；触发即停，exit 4）")
+
+    dp2 = sub.add_parser("dryparse", help="🔍 单 URL 预检：过完整 parser 看字段抽取结果"
+                                           "（不写盘、几秒定位选择器错误——Scrapy parse 同款心智）")
+    dp2.add_argument("--task", required=True, help="v3 任务包目录")
+    dp2.add_argument("--url", required=True, help="要预检的 URL（列表页/详情页均可）")
+    dp2.add_argument("--var", action="append", default=[], help="覆盖变量 k=v")
+    dp2.add_argument("--limit", type=int, default=3, help="最多打印 N 条 item（默认 3）")
+    dp2.add_argument("--json", action="store_true", help="输出原始 JSON（供脚本消费）")
+
+    sp = sub.add_parser("session", help="🔗 多步 API 链执行器：单会话+预算硬闸+节流+逐请求 JSONL 审计+挑战壳冷却+证据落盘（接口考古标配）")
+    sp.add_argument("--plan", required=True, help="计划 JSON（具体化步骤列表：name/method/url/headers/params/json/save/expect_json）")
+    sp.add_argument("--out", required=True, help="证据目录（响应落盘 + requests_<name>.jsonl 审计）")
+    sp.add_argument("--max-requests", type=int, default=None, help="请求预算硬闸（默认取计划内 max_requests）")
+    sp.add_argument("--min-gap", type=float, default=None, help="最小请求间隔秒（默认取计划内 min_gap，兜底 2.5）")
+    sp.add_argument("--timeout", type=float, default=30.0, help="单请求超时秒")
+    sp.add_argument("--risk-accepted", action="store_true",
+                    help="确认总量风险（步数超阈值时的显式放行；政府/司法站阈值 500、默认 2000）")
 
     valp = sub.add_parser("validate", help="校验配置")
     valp.add_argument("--config", required=True)
@@ -131,15 +154,25 @@ def main() -> int:
     fp.add_argument("--article", action="store_true", help="自动抽取正文")
     fp.add_argument("--table", action="store_true", help="抽取表格为 JSON")
     fp.add_argument("--json", action="store_true", help="输出完整 JSON 结构")
+    fp.add_argument("--raw", action="store_true",
+                    help="输出原始 HTML 字节（不 markdown 化）——反爬取证用：看 @font-face、"
+                         "background-position、加密脚本等原始结构。与 --json 互斥")
     fp.add_argument("--out", default=None, help="输出文件路径（默认 outputs/fetch_*.md|json）")
     fp.add_argument("--proxy", default=None, help="代理，如 http://127.0.0.1:7890")
-    fp.add_argument("--actions", default=None, help="动作链 JSON，如 [{\"type\":\"click\",\"selector\":\"#more\"}]")
+    fp.add_argument("--actions", default=None,
+                    help="动作链 JSON。支持 type: click/wait/wait_for_url/fill/press/hover/"
+                         "select/scroll/scroll_bottom/mouse_move/drag/click_point/evaluate/screenshot。"
+                         '示例 [{"type":"click","selector":"#more"},{"type":"fill","selector":"#q","value":"abc"}]；'
+                         "选择器支持 :contains(text)（自动转 Playwright 的 :has-text）")
     fp.add_argument("--wait", default=None, help="等待选择器出现（浏览器模式）")
     fp.add_argument("--links", action="store_true", help="同时提取页面所有外链（Firecrawl map 风格）")
     fp.add_argument("--screenshot", default=None, help="浏览器截全页图保存路径（Firecrawl screenshot 风格）")
     fp.add_argument("--links-allow", default=None, help="只保留匹配该正则的外链")
     fp.add_argument("--links-deny", default=None, help="排除匹配该正则的外链")
     fp.add_argument("--cdp", default=None, help="附加调试 Chrome（如 http://127.0.0.1:9222），侦察与正式跑同通道")
+    fp.add_argument("--capture", default=None,
+                    help="捕获页面全部 XHR/fetch JSON 响应并保存（自动启用浏览器模式；"
+                         "参数=保存路径，默认 outputs/fetch_capture.json）——SPA 接口侦察一步到位")
 
     cp = sub.add_parser("crawl", help="从 URL 递归爬站（Firecrawl crawl 风格）")
     cp.add_argument("url", help="入口 URL")
@@ -200,6 +233,20 @@ def main() -> int:
                     help="断点续传批抓 PDF（登录态 CDP 模式；需清单已生成+调试 Chrome 已登录；每 IP 日配额约20篇，换 IP 重跑即可续）")
     jp.add_argument("--cdp", default="http://127.0.0.1:9222", help="CDP 调试 Chrome 地址（配 --pdf-batch-resume）")
 
+    # R101 沉淀：B站精配（影视飓风 UP主战役四通道战法代码化）
+    bp = sub.add_parser("bili", help="📺 B站精配：视频元数据+弹幕+评论三通道（R34 战法，含 wbi 签名）")
+    bp.add_argument("--video", default="", help="单个视频 BV 号（例 BV1abc，元数据+弹幕+评论全跑）")
+    bp.add_argument("--mid", default="", help="UP主 UID：拉取投稿列表（需 wbi；-352 时按提示补 dm_img_*）")
+    bp.add_argument("--year", type=int, default=0, help="按发布年份过滤投稿（配 --mid，例 2024）")
+    bp.add_argument("--max-videos", type=int, default=30, help="--mid 模式最多处理的视频数（默认 30）")
+    bp.add_argument("--limit-danmaku", type=int, default=5000, help="每个视频弹幕上限（默认 5000）")
+    bp.add_argument("--limit-comments", type=int, default=500, help="每个视频评论上限（默认 500，含楼中楼）")
+    bp.add_argument("--no-replies", action="store_true", help="不抓楼中楼回复")
+    bp.add_argument("--dm-img-str", default="", help="真实行为指纹（-352 时用浏览器 capture 目标页取原值重放）")
+    bp.add_argument("--dm-cover-img-str", default="", help="同上（capture_all.json 里的 dm_cover_img_str）")
+    bp.add_argument("--dm-img-inter", default="", help="同上（capture_all.json 里的 dm_img_inter）")
+    bp.add_argument("--out", default="", help="输出目录（默认 outputs/bili_<BV或UP主>）")
+
     pr_p = sub.add_parser("proxy", help="🔄 免费代理池自动构建（抓取+验证+入库）")
     rp_p = sub.add_parser("report", help="📊 爬取CSV → 自动可视化报告（概览/统计/分组/分布图）")
     rp_p.add_argument("csv", help="输入 CSV 文件")
@@ -227,6 +274,10 @@ def main() -> int:
     ck_p.add_argument("--out", default="", help="同时写入文件（如 /tmp/jd_cookie.txt）")
     ck_p.add_argument("--from-cdp", action="store_true",
                       help="直接从 9222 调试 Chrome 导出 Cookie（CDP 附加运行不落盘 session.json 时的正路）")
+    ck_p.add_argument("--list", action="store_true",
+                      help="列出已存档会话与健康状态（有效/过期条数、登录态、存档年龄）")
+    ck_p.add_argument("--clear", action="store_true",
+                      help="删除 --domain 指定域的会话存档（与 --domain 一起用）")
 
     dp_p = sub.add_parser("dianping", help="🌶️ 大众点评专用：Cookie 直抓搜索页列表（绕开验证码/csec）")
     dp_p.add_argument("--keyword", required=True, help="关键词，如 美食 / 烤肉")
@@ -239,20 +290,96 @@ def main() -> int:
 
     sub.add_parser("ip", help="🌐 查看当前出口 IP 与运营商（换网络后确认）")
 
+    diag_p = sub.add_parser("diagnose", help="🧬 阻断判型：实测一次请求，机器识别 瑞数/Cloudflare/WAF/JS壳/SPA 并给出处方（NMPA 战训：执行命令比读判型表可靠）")
+    diag_p.add_argument("url", nargs="?", default="", help="要判型的 URL（被 412/403 拦的页面地址）；--history 时可省略")
+    diag_p.add_argument("--json", action="store_true", help="输出原始 JSON（供脚本/子代理消费）")
+    diag_p.add_argument("--proxy", default="", help="可选：通过指定代理判型 http://host:port")
+    diag_p.add_argument("--quick", action="store_true",
+                        help="🪶 轻量探针：HEAD 优先 + 8s 短超时 + 不下载全文——代理循环/批量预检用；"
+                             "JS 挑战类判型不完整，疑阻断时用完整模式复核")
+    diag_p.add_argument("--history", nargs="?", const="", default=None, metavar="URL关键词",
+                        help="📒 查诊断台账（可带 URL 关键词过滤，省略=全部最近记录），不发起诊断")
+
     cdp_p = sub.add_parser("cdp", help="🔗 调试 Chrome (9222) 辅助：列标签页 / 查登录态 / 导 Cookie")
+    cap_p = sub.add_parser("captcha", help="🧩 验证码人机协同：CDP 附加真 Chrome + 文件协议"
+                                           "（文字点选 OCR 自动点 / 图标码转人工在环，gsxt 战训标配）")
+    cap_p.add_argument("--dir", required=True,
+                       help="会话工作目录（boot.json/cmd.json/last_result.json/status.json 交接面）")
+    cap_p.add_argument("--start", action="store_true", help="启动验证码桥（默认 CDP 附加 9222 调试 Chrome）")
+    cap_p.add_argument("--stop", action="store_true", help="停止验证码桥（触摸 stop 文件）")
+    cap_p.add_argument("--status", action="store_true", help="查看桥状态（JSON）")
+    cap_p.add_argument("--url", default="", help="启动/解题前导航到该 URL")
+    cap_p.add_argument("--own", action="store_true", help="CDP 不可用时改启动自带 headful 浏览器（窗口可见仍可人工点码）")
+    cap_p.add_argument("--cdp", type=int, default=9222, help="调试 Chrome 端口（默认 9222）")
+    cap_p.add_argument("--solve", action="store_true",
+                       help="进入解题循环：截图→文字点选 OCR 自动点→等通过；图标码/未配题面自动转人工")
+    cap_p.add_argument("--prompt", default="", help="文字点选题面，如 '依次点击：国 家 税'（--solve 必需）")
+    cap_p.add_argument("--captcha-selector", default="",
+                       help="验证码主图选择器（OCR 截该元素；不给则整页截图）")
+    cap_p.add_argument("--wait-selector", default="",
+                       help="验证码通过后页面出现的特征选择器（通过判定，强烈建议给）")
+    cap_p.add_argument("--max-wait", type=float, default=240.0, help="解题/人工等待上限秒（默认 240；GT4 弹窗约 90s 存活，留足余量）")
+    cap_p.add_argument("--manual", action="store_true",
+                       help="人工在环：打印提示后轮询等待——用户直接在调试 Chrome 窗口里点码（默认行为之一）")
+    cap_p.add_argument("--out-html", default="", help="通过后落盘渲染 HTML 的路径")
+    cap_p.add_argument("--out-cookies", default="", help="通过后落盘 cookies JSON 的路径")
     cdp_p.add_argument("--list-tabs", action="store_true", help="列出所有打开的标签页（默认）")
     cdp_p.add_argument("--login-state", default="", help="查某域名的 Cookie 数量与名称，如 taobao.com")
     cdp_p.add_argument("--out", default="", help="把该域名的 Cookie 串写入文件（配合 --login-state）")
+
+    shl_p = sub.add_parser("shell", help="🐚 交互式调试：抓取 URL 后进入 Python REPL 探索 response"
+                                          "（对标 Scrapy shell——试选择器/正则/JSON 路径再也不用猜）")
+    shl_p.add_argument("url", help="要抓取并探索的 URL")
+    shl_p.add_argument("--browser", action="store_true", help="走浏览器桥（JS 渲染 / SPA）")
+    shl_p.add_argument("--cookie", default="", help="Cookie 串")
+    shl_p.add_argument("--proxy", default="", help="代理")
+    shl_p.add_argument("--cdp", default="", help="CDP 附加调试 Chrome")
+    shl_p.add_argument("--timeout", type=float, default=60, help="请求超时秒")
+    shl_p.add_argument("--actions", default="", help="JSON 格式的动作链（如 '[{\"type\":\"click\",\"selector\":\"#more\"}]'）")
+    shl_p.add_argument("--js", default="", help="页面加载前注入的 JS 代码")
+    shl_p.add_argument("--wait-selector", default="", help="等待选择器出现")
 
     jr_p = sub.add_parser("jsrecon", help="🔍 接口侦察：下载页面 JS 包自动提取候选 API 端点（SPA 先于 capture 使用）")
     jr_p.add_argument("url", help="目标页面 URL")
     jr_p.add_argument("--max-scripts", type=int, default=6, help="最多分析的 JS 包数（默认 6）")
     jr_p.add_argument("--out", default=None, help="结果 JSON 保存路径（目录自动补 jsrecon.json）")
 
-    bt_p = sub.add_parser("batch", help="🗂️ 批量任务队列：next/claim/done/fail/nodata/retry/status（多代理+断点续跑）")
+    mp_p = sub.add_parser("map", help="🗺️ 全站 URL 快速发现（Firecrawl /map 风格）：入口链接 + sitemap.xml 并集，秒级出规划清单")
+    mp_p.add_argument("url", help="入口 URL")
+    mp_p.add_argument("--max-urls", type=int, default=500, help="最多返回的 URL 数（默认 500）")
+    mp_p.add_argument("--sitemap", action="store_true", default=True, help="并集 sitemap.xml（默认开）")
+    mp_p.add_argument("--allow", default=None, help="路径正则白名单（锚定 ^/page/\\d+/$）")
+    mp_p.add_argument("--deny", default=None, help="路径正则黑名单")
+
+    xhs_p = sub.add_parser("xhs", help="📕 小红书一等公民采集（实战反馈五收编）：话题搜索 Top-N 笔记 + 评论 + 作者主页；需调试窗口人工登录")
+    xhs_p.add_argument("--keyword", required=True, help="搜索关键词（如 \"#大模型\"）")
+    xhs_p.add_argument("--top", type=int, default=20, help="按点赞取前 N 篇（默认 20）")
+    xhs_p.add_argument("--comments", type=int, default=50, help="每篇采集的顶层评论数（默认 50）")
+    xhs_p.add_argument("--proxy", default="", help="库层代理 http://127.0.0.1:7897（300012 IP 封锁时必须）")
+    xhs_p.add_argument("--out", default="outputs/xhs", help="输出目录（默认 outputs/xhs）")
+    xhs_p.add_argument("--wait", type=int, default=600, help="等待人工登录+搜索的超时秒数（默认 600）")
+
+    cad_p = sub.add_parser("capture-daemon", help="📡 常驻捕获守护：patchright 持久上下文 + 指定域 XHR 持续落 JSONL（签名型站点通用）")
+    cad_p.add_argument("action", choices=["start", "stop", "status"], help="守护动作")
+    cad_p.add_argument("--hosts", default="", help="捕获域白名单（逗号分隔，如 a.com,b.com；start 必填）")
+    cad_p.add_argument("--capture", default="outputs/capture_daemon.jsonl", help="捕获 JSONL 路径")
+    cad_p.add_argument("--profile", default="", help="持久 profile 目录（默认 ~/.universal-scraper/daemon_profile）")
+    cad_p.add_argument("--proxy", default="", help="库层代理 URL")
+
+    pf_p = sub.add_parser("pagefn", help="🧩 枚举页面非原生全局函数（加密/签名入口清单——传统 jQuery 页面打法，需调试 Chrome）")
+    pf_p.add_argument("url", help="目标页面 URL（须已过挑战/登录，调试 Chrome 里能看到数据）")
+    pf_p.add_argument("--limit", type=int, default=60, help="最多返回的函数数（默认 60，实现长的排前）")
+
+    rd_p = sub.add_parser("rangedl", help="⬇️ 慢站大文件 Range 并行下载：分段并行 + 断点续传（实战反馈四#4）")
+    rd_p.add_argument("url", help="文件 URL（服务器需支持 Accept-Ranges）")
+    rd_p.add_argument("--out", required=True, help="输出文件路径")
+    rd_p.add_argument("--segments", type=int, default=8, help="Range 分段数（默认 8）")
+    rd_p.add_argument("--concurrency", type=int, default=3, help="并发下载数（默认 3）")
+
+    bt_p = sub.add_parser("batch", help="🗂️ 批量任务队列：next/claim/touch/done/fail/nodata/retry/status（多代理+断点续跑）")
     bt_p.add_argument("--queue", required=True, help="队列 JSON 文件（[{id,text,status,attempts,result,priority?}]）")
-    bt_p.add_argument("action", choices=["next", "claim", "done", "fail", "blocked", "nodata", "retry", "status"],
-                      help="队列操作（claim=多代理原子领取；nodata=数据不存在于公开渠道，区别于爬取失败）")
+    bt_p.add_argument("action", choices=["next", "claim", "touch", "done", "fail", "blocked", "nodata", "retry", "status"],
+                      help="队列操作（claim=多代理原子领取；touch=长任务续租 running 心跳防误回收；nodata=数据不存在于公开渠道，区别于爬取失败）")
     bt_p.add_argument("item_id", nargs="?", default=None, help="任务 id（done/fail/blocked/nodata/retry 时必填）")
     bt_p.add_argument("--result", default="", help="核对结论/失败原因（写入台账）")
 
@@ -263,12 +390,32 @@ def main() -> int:
     bd_p.add_argument("--check", default=None,
                       help="查询某域名是否冷却中（退出码：0=可访问，2=冷却中）")
     bd_p.add_argument("--list", action="store_true", help="列出全部台账")
+    bd_p.add_argument("--usage", action="store_true",
+                      help="查看本进程任务请求额度（--max-requests 计数：已用/上限/剩余）")
+    bd_p.add_argument("--probe", default=None,
+                      help="放行窗口探针：URL（每 --every 秒 GET 一次，判 OPEN/BLOCKED/EMPTY_200；"
+                           "gsxt 战训：200 空页=软封锁，200≠放行）")
+    bd_p.add_argument("--expect", default="",
+                      help="探针放行标记（站名/页面特有文案）；命中即 OPEN。不给标记则 200+正文≥4KB 判放行")
+    bd_p.add_argument("--every", type=float, default=60.0, help="探针间隔秒（默认 60）")
+    bd_p.add_argument("--max-rounds", type=int, default=30,
+                      help="探针最大轮数（默认 30=每60s间隔约30分钟；0=不限，慎用——会卡死任务）")
+    bd_p.add_argument("--timeout", type=float, default=15.0, help="探针单次请求超时秒")
+    bd_p.add_argument("--action", default=None,
+                      help="稀缺动作预算扣额：动作名（如 gsxt-search）。发起即扣额、失败不退"
+                           "（gsxt 战训：失败搜索同样烧窗口）；退出码 0=允许 2=超额")
+    bd_p.add_argument("--action-limit", type=int, default=5, help="动作预算：窗口内限额（默认 5）")
+    bd_p.add_argument("--action-window", type=float, default=3600.0, help="动作预算：滑动窗口秒（默认 3600）")
+    bd_p.add_argument("--action-cost", type=int, default=1, help="动作预算：本次扣额数（默认 1）")
+    bd_p.add_argument("--action-info", default=None, help="查动作预算状态（不扣额）")
     bd_p.add_argument("--file", default=None, help="台账文件路径（默认 ~/.universal_scraper/domain_budget.json）")
 
     c2p = sub.add_parser("capture2config", help="⚡ 捕获→可重放 http_json 配置（POST体/方法/翻页模板一步到位）")
     c2p.add_argument("capture", help="捕获文件：capture_all.json 或声明式 <name>.json")
     c2p.add_argument("--referer", default="", help="原页面 URL（写进配置的 Referer 头）")
     c2p.add_argument("--out", default="", help="输出 JSON（默认 <捕获文件>_configs.json）")
+    c2p.add_argument("--watch", action="store_true",
+                     help="👀 监听捕获文件变化，每次落盘稳定后自动重新生成配置草案（Ctrl+C 退出）")
 
     pdf_p = sub.add_parser("pdf", help="📎 附件批量下载 + 表格型 PDF 结构化（pdfplumber/pypdf）")
     pdf_p.add_argument("--download", default=None, help="下载清单 JSON（[{url,name}] 或 [url]）")
@@ -279,13 +426,160 @@ def main() -> int:
     gd_p = sub.add_parser("guide", help="📖 生成并行子代理执行规范 AGENT_GUIDE.md（batch2400 战训标准件）")
     gd_p.add_argument("--out", default="AGENT_GUIDE.md", help="输出路径（默认 ./AGENT_GUIDE.md）")
 
+    rs_p = sub.add_parser("research", help="🔬 科研批量采集（五任务实战动线引擎化）：清单×年份窗×词典 → 面板+文本档案；断点续跑/防封禁自熔断/扫描件 OCR 兜底")
+    rs_sub = rs_p.add_subparsers(dest="research_cmd", required=True)
+    r1 = rs_sub.add_parser("run", help="批量采集（断点续跑/自熔断/文本档案/OCR 兜底）")
+    r1.add_argument("--universe", required=True, help="企业清单 CSV（stkcd[,first_year,last_year]）")
+    r1.add_argument("--out", required=True, help="输出目录（progress/texts/rows.jsonl）")
+    r1.add_argument("--keywords", help="关键词词典 JSON {组:[词]}（缺省内置 合规/出海/收缩）")
+    r1.add_argument("--year-from", type=int, default=2010)
+    r1.add_argument("--year-to", type=int, default=2024)
+    r1.add_argument("--fuse", type=int, default=5, help="连续 API 异常熔断阈值")
+    r1.add_argument("--panel-xlsx", help="采集完成后立即生成面板 xlsx（可选）")
+    r2 = rs_sub.add_parser("panel", help="rows.jsonl → 面板 xlsx（含清单外/缺口/说明）")
+    r2.add_argument("--out", required=True)
+    r2.add_argument("--universe", required=True)
+    r2.add_argument("--keywords")
+    r2.add_argument("--year-from", type=int, default=2010)
+    r2.add_argument("--year-to", type=int, default=2024)
+    r2.add_argument("--xlsx", required=True)
+
+    au_p = sub.add_parser("audit", help="🧪 交付审计电池（出口检查）：panel=面板全量电池 / urls=来源可达性 / verbatim=逐字回源")
+    au_sub = au_p.add_subparsers(dest="audit_cmd", required=True)
+    a1 = au_sub.add_parser("panel", help="面板 xlsx：唯一键/窗口/freq 公式/年度-标题/文本源覆盖/文档一致")
+    a1.add_argument("--xlsx", required=True)
+    a1.add_argument("--texts", help="文本档案目录（*.txt.gz）")
+    a1.add_argument("--keywords", help="研究词典 JSON {组:[词]}——抽验升级为全字段关键词重算")
+    a1.add_argument("--universe")
+    a1.add_argument("--year-from", type=int, default=2010)
+    a1.add_argument("--year-to", type=int, default=2024)
+    a2 = au_sub.add_parser("urls", help="来源 URL 在线可达 + 根路径引用检测")
+    a2.add_argument("--xlsx", required=True)
+    a2.add_argument("--sheet")
+    a2.add_argument("--url-col", default="source_url")
+    a2.add_argument("--note-col")
+    a3 = au_sub.add_parser("verbatim", help="JSON 条款库逐字回源 + 文档内唯一性")
+    a3.add_argument("--json", required=True)
+    a3.add_argument("--sources", required=True, help="doc_id=路径 的 JSON 映射")
+    a3.add_argument("--no-unique", action="store_true")
+
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比；或通用目录审计")
     vp.add_argument("--file", default=None, help="结果 JSON 文件，如 outputs/xxx.json")
     vp.add_argument("--dir", default=None, help="任意任务目录审计（不要求由本工具产出）：记录数/字段完整率/证据存在性")
     vp.add_argument("--network", action="store_true", help="联网抽样重抓对比（默认只做本地检查）")
     vp.add_argument("--data-key", default="", help="JSON 为 dict 包装时取数组的键；未指定则自动探测 data/list/rows/items")
+    vp.add_argument("--expect", default="",
+                    help="语义校验（--file，JSON/CSV 自动识别）：'词'=任一命中(OR)，'+词'=必须含(AND)，'!词'=不得出现；"
+                         "列级断言：'列名!词'/'列名+词'=该列内约束（精准，防全文误杀）；"
+                         "多指标任务用 + 防丢一半，如 \"+消费价格,+出厂价格,!预测\"")
+    vp.add_argument("--require", default="",
+                    help="必需字段清单（逗号分隔）：点名这些列完整率必须 ≥90%%，否则整体 FAIL——"
+                         "UI 驱动采集产物的显式验收契约，如 \"案号,裁判日期\"")
+    vp.add_argument("--expect-count", type=int, default=None,
+                    help="对账型检查（实战反馈六）：源站声明的总数（如 common_counts/"
+                         "回答总数）——实采 < 声明则 FAIL 并给出缺口率（防\"采到一半以为完了\"）")
 
     args = ap.parse_args()
+
+    if args.cmd == "dryparse":
+        # 单 URL 过完整 fetch→route→parse 链，字段级打印（Scrapy parse 心智）：
+        # 小白 90% 的失败是选择器/字段映射写错，预检把发现周期从"烧一轮请求"
+        # 缩到 3 秒。不写盘，只读。
+        import json as _json
+        from pathlib import Path as _P
+        from .task import Task
+        from .protocols import Request, ParseContext
+        from .engine_v3 import resolve_tpl, _match_rule
+        from .antibot import detect_block as _db
+        from .core import set_request_budget, request_budget as _rq
+        _fetcher = None
+        try:
+            task = Task(_P(args.task))
+            cfg = task.config
+            vars_ = dict(cfg.get("vars", {}))
+            for kv in (args.var or []):
+                _k, _, _v = kv.partition("=")
+                if _k:
+                    vars_[_k] = _v
+            anti = dict(cfg.get("anti_bot", {}))
+            anti.setdefault("min_interval", 0.05)
+            set_request_budget(50)  # 预检硬闸：绝不烧成全量抓取
+            src = resolve_tpl(dict(cfg.get("source", {})), vars_)
+            src["_task_dir"] = str(task.root)
+            fetcher = task.get_fetcher_cls()(src, vars_, anti)
+            _fetcher = fetcher
+            if not hasattr(fetcher, "fetch"):
+                print("❌ bridge/一次性取数器没有单 URL fetch——请用 `session` 或 `run` 跑",
+                      file=sys.stderr)
+                return 1
+            pname = "default"
+            for rule in (cfg.get("rules") or []):
+                if _match_rule(rule, args.url):
+                    pname = rule.get("parser", "default")
+                    break
+            pmap = task.get_parsers()
+            pcls = pmap.get(pname) or pmap.get("default")
+            if pcls is None:
+                print(f"❌ 任务包没有可用 parser（routed={pname}）", file=sys.stderr)
+                return 1
+            parser = pcls(cfg.get("parsers", {}).get(pname, {}), vars_)
+            resp = fetcher.fetch(Request(url=args.url, depth=0))
+            ctx = ParseContext(task, cfg, vars_)
+            result = parser.parse(resp, ctx)
+            _META = ("_url", "_parser", "_ts", "_id")
+            all_items = list(result.items or [])
+            # 空壳过滤（AI 空壳问题）：全字段无值的 item 是选择器没匹配上的
+            # 副产物——预检必须说"0 有效条目"，不能拿空壳凑数
+            items = [it for it in all_items
+                     if any(str(v or "").strip() for k, v in it.items() if k not in _META)]
+            _bd = _db(int(getattr(resp, "status", 0) or 0),
+                      (getattr(resp, "text", "") or "")[:20000], {}, args.url)
+            payload = {
+                "url": args.url, "routed_parser": pname,
+                "status": int(getattr(resp, "status", 0) or 0),
+                "text_bytes": len(getattr(resp, "text", "") or ""),
+                "items": len(items), "items_raw": len(all_items),
+                "new_requests": len(result.requests or []),
+                "block_kind": _bd.get("kind"), "budget": _rq(),
+                "sample": items[:max(1, args.limit)],
+            }
+            if args.json:
+                print(_json.dumps(payload, ensure_ascii=False, indent=1, default=str))
+            else:
+                print(f"🧪 dryparse: {args.url}")
+                print(f"   路由解析器: {pname} | HTTP {payload['status']} | "
+                      f"正文 {payload['text_bytes']:,}B | 有效条目 {len(items)}"
+                      + (f"（另有 {len(all_items) - len(items)} 条全空壳）" if len(all_items) != len(items) else "")
+                      + f" | 跟进链接 {payload['new_requests']} | 预算 {payload['budget']['used']}")
+                if _bd.get("kind") not in ("none",):
+                    print(f"   ⚠️ 页面命中拦截指纹 [{_bd['kind']}] {_bd.get('detail', '')}"
+                          f"——先跑 `cli diagnose {args.url}` 判型")
+                if not items:
+                    _shell_note = (f"，而原始解析出了 {len(all_items)} 条全空壳 item——"
+                                   "rows_css/records_path 多半没匹配上本页" ) if all_items else ""
+                    print(f"   ❌ 0 有效条目{_shell_note}。排查顺序: ① rows_css/records_path "
+                          "是否匹配本页（用 `fetch <url>` 看渲染后结构）② 需要渲染的站改 "
+                          "source.type=browser ③ 数据在接口里走 jsrecon→capture2config")
+                for i, it in enumerate(items[:max(1, args.limit)], 1):
+                    print(f"   ── item {i} ──")
+                    for k, v in it.items():
+                        _sv = "" if v is None else str(v)
+                        mark = "⚠️ 空" if not _sv.strip() else (f"{_sv[:80]}…" if len(_sv) > 80 else _sv)
+                        print(f"      {k:<16} = {mark}")
+            if _bd.get("kind") not in ("none",) and not items:
+                return 2
+            return 0 if items else 3
+        except Exception as e:
+            print(f"❌ dryparse 失败: {type(e).__name__}: {e}", file=sys.stderr)
+            return 2
+        finally:
+            # 异常路径也必须关取数器（审查 P2）：BrowserFetcher 池残留会占
+            # profile 锁害死下一个任务
+            if _fetcher is not None and hasattr(_fetcher, "close"):
+                try:
+                    _fetcher.close()
+                except Exception:
+                    pass
 
     if args.cmd == "list":
         d = Path(args.dir)
@@ -339,22 +633,31 @@ def main() -> int:
             print("❌ 编排文件应为 JSON 数组：[{\"task\": \"tasks/a\"}, ...]", file=sys.stderr)
             return 1
         total = 0
+        failed = []
         for i, job in enumerate(jobs, 1):
-            tp = Path(job["task"])
-            print(f"[jobs] {i}/{len(jobs)} {tp}", flush=True)
             try:
+                if not isinstance(job, dict) or not job.get("task"):
+                    raise ValueError("编排条目缺少 task 字段（应为 {\"task\": ...}）")
+                tp = Path(job["task"])
+                print(f"[jobs] {i}/{len(jobs)} {tp}", flush=True)
                 r = run_task(tp, overrides=job.get("var"), limit=job.get("limit"),
                              resume=bool(job.get("resume")))
             except Exception as e:
                 print(f"[jobs] {i} 失败跳过: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+                failed.append({"i": i, "task": (job.get("task") if isinstance(job, dict) else None),
+                               "error": f"{type(e).__name__}: {str(e)[:120]}"})
                 continue
             total += r.get("total", 0)
-        print(json.dumps({"jobs": len(jobs), "total_items": total}, ensure_ascii=False))
-        return 0
+        # 审查修复（P1）：全部失败也 exit 0 曾让调度方误判成功
+        print(json.dumps({"jobs": len(jobs), "failed": len(failed),
+                          "total_items": total}, ensure_ascii=False))
+        return 1 if failed else 0
 
     if args.cmd == "monitor":
         from .engine_v3 import run_task
-        import time
+        # 审查修复（P1，R77）：局部 import time 曾遮蔽模块级导入——本分支内
+        # 的 blocked.json 写盘调用 time.strftime 必抛 UnboundLocalError，
+        # exit 5 时证据文件永远写不出来
         key_field = args.key
         diff_fields = args.diff_fields.split(",") if args.diff_fields else None
         tp = Path(args.task)
@@ -367,16 +670,33 @@ def main() -> int:
             except Exception:
                 old_snap = {}
         run_no = 0
+        _failed_rounds = 0
         while args.times == 0 or run_no < args.times:
             run_no += 1
             print(f"[monitor] 第 {run_no} 次抓取 {tp}", flush=True)
-            run_task(tp)
-            # 读取任务输出
-            cfg = json.loads((tp / "config.json").read_text(encoding="utf-8"))
-            out_json = Path("outputs") / f"{cfg.get('output', {}).get('base_name', tp.name)}.json"
-            rows = []
-            if out_json.exists():
-                rows = json.loads(out_json.read_text(encoding="utf-8"))
+            try:
+                run_task(tp)
+                # 读取任务输出
+                cfg = json.loads((tp / "config.json").read_text(encoding="utf-8"))
+                # R42b 修复：解析与引擎一致——output.dir 相对路径按 CWD 解析
+                # （engine_v3:125 同款）；base_name 缺省用 config.name（引擎同款）
+                _od = Path(str((cfg.get("output") or {}).get("dir", "") or "outputs"))
+                out_json = _od / f"{(cfg.get('output') or {}).get('base_name', cfg.get('name', tp.name))}.json"
+                rows = []
+                if out_json.exists():
+                    rows = json.loads(out_json.read_text(encoding="utf-8"))
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                # 审查修复（P1）：监控循环曾因单轮异常整进程死亡——无人值守
+                # 场景夜里一次桥超时就全瞎。失败轮跳过本轮 diff（快照不动，
+                # 下轮重比），并明确告警而非假"无变化"
+                _failed_rounds += 1
+                print(f"[monitor] ⚠️ 本轮抓取失败（快照保持不变）: "
+                      f"{type(e).__name__}: {str(e)[:140]}", file=sys.stderr, flush=True)
+                if args.times == 0 or run_no < args.times:
+                    time.sleep(args.every)
+                continue
             snap = {str(r.get(key_field)): r for r in rows if r.get(key_field)}
             added = [k for k in snap if k not in old_snap]
             removed = [k for k in old_snap if k not in snap]
@@ -395,24 +715,45 @@ def main() -> int:
                     print(f"  ~ {k}", flush=True)
             else:
                 print(f"[monitor] 无变化（共 {len(snap)} 条）", flush=True)
-            snap_path.write_text(json.dumps(snap, ensure_ascii=False, default=str), encoding="utf-8")
+            # R45 修复：快照写曾无 mkdir 且无兜底——output.dir≠outputs 的任务在
+            # 干净 CWD 下第 1 轮就 FileNotFoundError exit 1，监控循环中止
+            try:
+                snap_path.parent.mkdir(parents=True, exist_ok=True)
+                snap_path.write_text(json.dumps(snap, ensure_ascii=False, default=str), encoding="utf-8")
+            except Exception as e:
+                print(f"[monitor] ⚠️ 快照写盘失败（下轮将整体视为新增）: {e}", file=sys.stderr, flush=True)
             old_snap = snap
             if args.times == 0 or run_no < args.times:
                 print(f"[monitor] 等待 {args.every}s...", flush=True)
                 time.sleep(args.every)
+        if _failed_rounds:
+            print(f"[monitor] 结束：共 {_failed_rounds} 轮失败（见上方告警）", file=sys.stderr)
+            return 1
         return 0
 
     if args.cmd == "schedule":
         from .engine_v3 import run_task
         import time as _time
         run_no = 0
+        _failed_rounds = 0
         while args.times == 0 or run_no < args.times:
             run_no += 1
             print(f"[schedule] 第 {run_no} 次运行 {args.task}", flush=True)
-            run_task(Path(args.task), resume=args.resume)
+            try:
+                run_task(Path(args.task), resume=args.resume)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                # 审查修复（P1）：定时循环曾因单轮异常整进程死亡
+                _failed_rounds += 1
+                print(f"[schedule] ⚠️ 本轮运行失败: {type(e).__name__}: {str(e)[:140]}",
+                      file=sys.stderr, flush=True)
             if args.times == 0 or run_no < args.times:
                 print(f"[schedule] 等待 {args.every}s...", flush=True)
                 _time.sleep(args.every)
+        if _failed_rounds:
+            print(f"[schedule] 结束：共 {_failed_rounds} 轮失败（见上方告警）", file=sys.stderr)
+            return 1
         return 0
 
     if args.cmd == "auto":
@@ -484,7 +825,10 @@ def main() -> int:
         def _upsert(k, v):
             nonlocal _lines
             _lines = [ln for ln in _lines if not ln.startswith(f"export {k}=")]
-            _lines.append(f"export {k}={v!r}")
+            # 审查三轮（H）：repr() 是 Python 引号——值含 !/反斜杠时写进 zshenv
+            # 会坏（! 触发历史扩展、\ 不还原）。shlex.quote 才是 POSIX 安全写法
+            import shlex as _shx
+            _lines.append(f"export {k}={_shx.quote(str(v))}")
         changed = False
         if args.key:
             _upsert("QWEN_API_KEY" if "dashscope" in (args.base or "") or not args.base else "OPENAI_API_KEY", args.key)
@@ -549,15 +893,54 @@ def main() -> int:
 
     if args.cmd == "cookies":
         import json as _json
+        import time as _time
         from pathlib import Path as _P
+        from . import cookies as _ck
+        if getattr(args, "list", False):
+            rows = _ck.list_saved()
+            if not rows:
+                print("（无存档会话——在调试 Chrome 登录目标站后运行 cli cookies --from-cdp 导入）")
+                return 0
+            print(f"{'域':<32} {'条数':>4} {'有效':>4} {'过期':>4} 登录态 存档时间")
+            for r in rows:
+                if r.get("corrupt"):
+                    print(f"{str(r.get('domain', '')):<32} {'—':>4} {'—':>4} {'—':>4}  —    ⚠️存档损坏，请重新导入")
+                    continue
+                _sa = r.get("saved_at")
+                _age = f"{(_time.time() - _sa) / 86400:.1f}天前" if isinstance(_sa, (int, float)) else "?"
+                _flag = " ⚠️已全部过期，请重新导入" if r.get("count") and not r.get("valid") else ""
+                print(f"{str(r.get('domain', '')):<32} {r.get('count', 0):>4} {r.get('valid', 0):>4} "
+                      f"{r.get('expired', 0):>4} {'✓' if r.get('has_login') else '✗':>4} {_age}{_flag}")
+            return 0
+        if getattr(args, "clear", False):
+            _dom = (args.domain or "").strip()
+            if not _dom:
+                print("❌ --clear 需与 --domain 一起用（指定要删除哪个域的会话存档）", file=sys.stderr)
+                return 1
+            _ok = _ck.delete(_dom)
+            if _ok:
+                print(f"✅ 已删除: {_dom}")
+                return 0
+            if _ck.has_cookies(_dom):
+                # delete 失败但存档还在（权限等）——delete 内部已打印 WARN
+                print(f"❌ 删除失败: {_dom}（见上方 WARN）", file=sys.stderr)
+                return 1
+            print(f"ℹ️ 该域无存档: {_dom}")
+            return 1
         if getattr(args, "from_cdp", False):
             # CDP 附加运行不落盘 storageState——直接从调试 Chrome 取全部 Cookie
+            # （端口自动搜索：9222 被占时调试脚本可能自动换了端口）
             import os as _os
             import subprocess as _sp
             from .runtime import resolve_node, resolve_node_path
+            _cdp_port = _ck.find_cdp_port(9222)
+            if _cdp_port is None:
+                print("❌ 未发现调试 Chrome（9222-9230 均未监听）——先跑 open-debug-chrome.sh 并登录目标站",
+                      file=sys.stderr)
+                return 1
             _js = (
                 'const {chromium}=require("playwright");'
-                '(async()=>{const b=await chromium.connectOverCDP("http://127.0.0.1:9222");'
+                f'(async()=>{{const b=await chromium.connectOverCDP("http://127.0.0.1:{_cdp_port}");'
                 'const ctx=b.contexts()[0];if(!ctx){console.error("CDP 无浏览器上下文");process.exit(1);}'
                 'const cs=await ctx.cookies();console.log(JSON.stringify(cs));'
                 'process.exit(0);'  # connectOverCDP 的 ws 会挂住事件循环，必须显式退出
@@ -596,7 +979,12 @@ def main() -> int:
         out = "; ".join(pairs)
         print(out)
         if args.out:
-            _P(args.out).write_text(out, encoding="utf-8")
+            # R100 修复（P2）：登录 Cookie 串曾 0644 落盘（R18 同类）
+            import os as _os
+            _fd = _os.open(args.out, _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
+            with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
+                _f.write(out)
+            _os.chmod(args.out, 0o600)
             print(f"✅ 已写入: {args.out}", file=sys.stderr)
         print(f"（{len(pairs)} 个 cookie，域过滤={dom or '全部'}）", file=sys.stderr)
         return 0
@@ -606,19 +994,30 @@ def main() -> int:
         import os as _os
         import subprocess as _sp
         from .runtime import resolve_node, resolve_node_path
+        from .cookies import find_cdp_port as _fcp
+        _cdp_port = _fcp(9222)
+        if _cdp_port is None:
+            print("❌ 未发现调试 Chrome（9222-9230 均未监听）——先跑 open-debug-chrome.sh", file=sys.stderr)
+            return 1
         js = (
             'const {chromium}=require("playwright");'
-            '(async()=>{const b=await chromium.connectOverCDP("http://127.0.0.1:9222");'
+            f'(async()=>{{const b=await chromium.connectOverCDP("http://127.0.0.1:{_cdp_port}");'
             'const ctx=b.contexts()[0];if(!ctx){console.error("CDP 无浏览器上下文");process.exit(1);}'
         )
         if args.login_state:
             dom = args.login_state
-            js += (f'const cs=(await ctx.cookies()).filter(c=>String(c.domain).includes({json.dumps(dom)}));'
+            # 实战反馈五#6：count=0 曾语义歧义（未登录 vs 目标站没开标签页）——
+            # 增列 tab_open 供 CLI 侧区分处方
+            js += (f'const tabOpen=ctx.pages().some(p=>p.url().includes({json.dumps(dom)}));'
+                   f'const cs=(await ctx.cookies()).filter(c=>String(c.domain).includes({json.dumps(dom)}));'
                    f'console.log(JSON.stringify({{"domain":{json.dumps(dom)},"count":cs.length,'
-                   f'"names":cs.map(c=>c.name).slice(0,30)}}));')
+                   f'"tab_open":tabOpen,"names":cs.map(c=>c.name).slice(0,30)}}));')
             if args.out:
-                js += (f'require("fs").writeFileSync({json.dumps(args.out)},'
-                       f'cs.map(c=>c.name+"="+c.value).join("; "));'
+                # R100 修复（P2）：Node 侧写登录 Cookie 串曾默认 0644
+                js += (f'const _fs=require("fs");'
+                       f'const _p={json.dumps(args.out)};'
+                       f'_fs.writeFileSync(_p, cs.map(c=>c.name+"="+c.value).join("; "), {{mode:0o600}});'
+                       f'_fs.chmodSync(_p, 0o600);'
                        f'console.error("已写入 {args.out}");')
         else:
             js += 'console.log(JSON.stringify(ctx.pages().map(p=>p.url())));'
@@ -631,6 +1030,13 @@ def main() -> int:
                 data = json.loads(out)
                 # 闲鱼战例：dict 结果曾按 list 遍历只打印出键名（"空表头"）——按形态分流
                 if isinstance(data, dict):
+                    # 实战反馈五#6：count=0 时按 tab_open 区分处方（没开标签页 ≠ 未登录）
+                    if data.get("count") == 0 and data.get("tab_open") is not None:
+                        _rx = ("调试 Chrome 没有打开该域的标签页——先在窗口里打开目标站"
+                               if not data.get("tab_open") else
+                               "该域下无任何 Cookie——大概率未登录，请在窗口登录后重查")
+                        print(f"count: 0\n说明: {_rx}")
+                        return 0 if not data.get("tab_open") else 1
                     for k, v in data.items():
                         print(f"{k}: {', '.join(map(str, v)) if isinstance(v, list) else v}")
                 elif isinstance(data, list):
@@ -643,6 +1049,511 @@ def main() -> int:
         if r.stderr.strip():
             print(r.stderr.strip(), file=sys.stderr)
         return 0 if r.returncode == 0 else 1
+
+    if args.cmd == "captcha":
+        # 验证码人机协同（gsxt 战训内置化）：桥进程归 CLI 管，协议归 CaptchaSession
+        import json as _json
+        import os as _os
+        import subprocess as _sp
+        import time as _time
+        from pathlib import Path as _P
+        from .captcha_session import CaptchaSession, BRIDGE as _BRIDGE, SCRIPTS_DIR as _SD
+        from .runtime import resolve_node as _rn
+        from .antibot import detect_block as _db
+        wdir = _P(args.dir).resolve()
+        s = CaptchaSession(wdir)
+
+        def _emit(o):
+            print(_json.dumps(o, ensure_ascii=False))
+
+        def _solve_flow():
+            if not s.is_running():
+                print("❌ 验证码桥未运行——先加 --start 启动（或单独跑 cli captcha --start --dir）",
+                      file=sys.stderr)
+                return 1
+            if args.url:
+                s.goto(args.url, wait_ms=2000)
+            if not args.solve:
+                # 不解题 = 纯人工在环：提示用户在窗口里操作，轮询通过特征
+                print("🙋 人工在环：请在调试 Chrome 窗口内完成验证码/登录等人工操作"
+                      f"（等待上限 {args.max_wait:.0f}s）…", file=sys.stderr)
+            if args.solve and args.prompt:
+                try:
+                    __import__("ddddocr")
+                    _can_ocr = True
+                except Exception:
+                    print("⚠️ 未安装 ddddocr（pip install ddddocr）——文字点选自动解题不可用，"
+                          "转人工在环", file=sys.stderr)
+                    _can_ocr = False
+            else:
+                _can_ocr = False
+            from .captcha_ocr import solve_text_clicks
+            deadline = _time.time() + args.max_wait
+            last_html_len = -1
+            last_hint = 0.0
+            _last_unmatched: tuple = ()
+            passed = False
+            _bridge_error = ""
+            while _time.time() < deadline:
+                # 通过判定 1：wait-selector 出现
+                try:
+                    if args.wait_selector and s.wait(args.wait_selector, timeout_ms=2000):
+                        passed = True
+                        break
+                    # 尝试 OCR 自动点选（每轮先截验证码主图——元素截图，防题面误点）
+                    if _can_ocr and args.captcha_selector:
+                        try:
+                            png = s.shot("captcha.png", selector=args.captcha_selector)
+                            img = _P(png).read_bytes()
+                            sol = solve_text_clicks(img, args.prompt)
+                            pts = [p for p in sol.get("points") if p]
+                            if pts and not sol.get("unmatched"):
+                                s.click_xy(pts, delay_ms=600)
+                                print(f"🤖 OCR 已点选 {len(pts)} 点（{sol['matched']}）",
+                                      file=sys.stderr)
+                                _last_unmatched = ()
+                            elif tuple(sol.get("unmatched") or ()) != _last_unmatched:
+                                _last_unmatched = tuple(sol.get("unmatched") or ())
+                                print(f"⚠️ OCR 未完整匹配（命中 {sol.get('matched')} / "
+                                      f"未命中 {list(_last_unmatched)}）——本轮不点击，"
+                                      f"重试或转人工", file=sys.stderr)
+                        except RuntimeError:
+                            raise   # 桥死亡（RuntimeError 契约）→ 交外层终止解题
+                        except Exception as e:
+                            print(f"⚠️ OCR 解题轮失败（转重试/人工）: {e}", file=sys.stderr)
+                            _can_ocr = False
+                    # 通过判定 2：无 wait-selector 时用"HTML 长度跳增 + 无拦截指纹
+                    # + 验证码图已消失"（审查 P2：只看增长会把 SPA 渲染误判为通过）
+                    if not args.wait_selector:
+                        h = s.html()
+                        bd = _db(200, h, {}, args.url or "")
+                        _cap_gone = True
+                        if args.captcha_selector:
+                            _cap_gone = not s.run_js(
+                                "!!document.querySelector(%s)" % _json.dumps(args.captcha_selector))
+                        if len(h) > 5000 and bd["kind"] == "none" and _cap_gone and \
+                                last_html_len >= 0 and len(h) - last_html_len >= 2000:
+                            passed = True
+                            break
+                        last_html_len = len(h)
+                except RuntimeError as e:
+                    # 审查修复（P2）：桥死亡（Chrome 被关/崩溃）曾裸栈崩溃——
+                    # 自动化拿不到结构化失败。转成 passed=false + exit 3 契约
+                    _bridge_error = f"{type(e).__name__}: {str(e)[:160]}"
+                    print(f"❌ 验证码桥异常（停止解题）: {_bridge_error}", file=sys.stderr)
+                    break
+                # 人工在环提示（每 30s 一次）
+                if _time.time() - last_hint > 30:
+                    last_hint = _time.time()
+                    print(f"⏳ 等待验证码通过（剩 {deadline - _time.time():.0f}s）——"
+                          f"可在调试 Chrome 窗口内人工点选", file=sys.stderr)
+                _time.sleep(3)
+            result = {"passed": passed, "dir": str(wdir)}
+            try:
+                result["url"] = s.status().get("url", "")
+            except Exception:
+                result["url"] = ""
+            if _bridge_error:
+                result["bridge_error"] = _bridge_error
+            try:
+                html = s.html()
+                if args.out_html:
+                    _P(args.out_html).write_text(html, encoding="utf-8")
+                    result["out_html"] = args.out_html
+                if args.out_cookies:
+                    # R99 修复（P2）：登录态 Cookie 全文曾 0644 落盘
+                    import os as _os
+                    _fd = _os.open(args.out_cookies,
+                                   _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
+                    with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
+                        _f.write(_json.dumps(s.cookies(), ensure_ascii=False))
+                    _os.chmod(args.out_cookies, 0o600)  # R18b 同款：治愈遗留 0644
+                    result["out_cookies"] = args.out_cookies
+                result["html_bytes"] = len(html)
+            except Exception as e:
+                result["dump_error"] = str(e)
+            _emit(result)
+            return 0 if passed else 3  # 3=未通过（证据已落盘，与 exit 5 封禁语义区分）
+
+        if args.status:
+            _emit(s.status())
+            return 0
+        if args.stop:
+            s.stop()
+            _emit({"stopped": True, "dir": str(wdir)})
+            return 0
+        if args.start:
+            # 双启动守卫（审查 P2）：同一 workdir 已有活桥时再 start 会双桥抢命令
+            if s.is_running():
+                _emit({"started": False, "error": f"该目录已有验证码桥在运行（pid={s.status().get('pid')}）",
+                       "dir": str(wdir)})
+                return 1
+            boot = {"cdp": args.cdp, "own": bool(args.own)}
+            if args.url:
+                boot["url"] = args.url
+            wdir.mkdir(parents=True, exist_ok=True)
+            (wdir / "boot.json").write_text(_json.dumps(boot), encoding="utf-8")
+            env = {**_os.environ, "NODE_PATH": str(_SD.parent / "node_modules")}
+            proc = _sp.Popen(
+                [_rn(), str(_BRIDGE), "--dir", str(wdir)],
+                cwd=str(_SD.parent), env=env,
+                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+            try:
+                st = s.wait_alive(30)
+            except Exception as e:
+                # 孤儿进程防线（审查 P1）：启动超时必须击杀残留桥，否则留下
+                # 无人认领的浏览器窗口（墓碑错误路径下桥已自退，kill 无害）
+                if proc.poll() is None:
+                    proc.kill()
+                    _killed = True
+                else:
+                    _killed = False
+                _emit({"started": False, "error": str(e),
+                       "killed_orphan": _killed})
+                return 1
+            _emit({"started": True, "pid": proc.pid, "mode": st.get("mode"),
+                   "url": st.get("url"), "dir": str(wdir)})
+            if args.solve or args.manual or args.wait_selector:
+                return _solve_flow()
+            return 0
+        if args.url or args.solve or args.manual or args.wait_selector:
+            return _solve_flow()
+        print("用法：cli captcha --start --dir <目录> [--url ...] / "
+              "cli captcha --solve --dir <目录> --prompt '依次点击：国 家 税' "
+              "--captcha-selector '.geetest_item' --wait-selector '.result' / "
+              "cli captcha --status|--stop --dir <目录>", file=sys.stderr)
+        return 1
+
+    if args.cmd == "shell":
+        # 交互式调试（对标 Scrapy shell）：抓 URL → 进入 Python REPL，
+        # 预注入 response + 便捷函数，小白试选择器不再需要"改配置→跑→看结果"循环
+        import code as _code_mod
+        import re as _re_mod
+        from .quick import fetch_url
+        _sh_actions = None
+        if args.actions:
+            try:
+                _sh_actions = json.loads(args.actions)
+            except json.JSONDecodeError as e:
+                print(f"❌ --actions 不是合法 JSON: {e}", file=sys.stderr)
+                return 1
+        r = fetch_url(args.url, browser=args.browser, cookie=args.cookie or None,
+                      proxy=args.proxy or None, timeout=args.timeout,
+                      js=args.js or None, wait_selector=args.wait_selector or None,
+                      actions=_sh_actions, cdp=args.cdp or None)
+        if r.get("error"):
+            print(f"❌ 抓取失败: {r['error']}", file=sys.stderr)
+            return 1
+        html = r.get("text", "") or ""
+        _banner = (
+            f"\n🐚 万能爬虫交互式调试（{r.get('backend', '?')} | HTTP {r.get('status', '?')} | {len(html):,} 字符）\n"
+            f"  常用变量:\n"
+            f"    resp          = 完整 response dict\n"
+            f"    html          = 页面 HTML 全文\n"
+            f"    sel('css')    → CSS 选择器结果列表\n"
+            f"    rex(r'正则')  → 正则匹配列表\n"
+            f"    jp('a.b.*')   → JSON 路径提取\n"
+            f"    links()       → 页面所有链接\n"
+            f"    forms()       → 页面所有表单结构\n"
+            f"  试试: sel('h1') / rex(r'价格.*?(\\d+)') / forms()\n"
+        )
+        print(_banner)
+
+        def sel(pattern):
+            """快速 CSS 选择器"""
+            try:
+                from lxml import html as _lh
+                doc = _lh.fromstring(html)
+                return [e.text_content().strip() if not e.attrib else
+                        {**e.attrib, "text": e.text_content().strip()} for e in doc.cssselect(pattern)]
+            except Exception as e:
+                return [f"❌ {e}"]
+
+        def rex(pattern, flags=_re_mod.S | _re_mod.I):
+            """快速正则匹配"""
+            return _re_mod.findall(pattern, html, flags)
+
+        def jp(path):
+            """JSON 路径提取"""
+            from .selectors import jpath
+            try:
+                data = json.loads(html) if html.strip().startswith(("{", "[")) else {}
+            except Exception:
+                data = {}
+            return jpath(data, path) if data else []
+
+        def links():
+            """页面所有链接"""
+            from .extractors import extract_links_markdown
+            return extract_links_markdown(html, base_url=r.get("url", ""))
+
+        def forms():
+            """页面所有表单结构（字段名/类型/提交地址）"""
+            from .extractors import discover_forms
+            return discover_forms(html, base_url=r.get("url", ""))
+
+        ns = {"resp": r, "html": html, "sel": sel, "rex": rex,
+              "jp": jp, "links": links, "forms": forms,
+              "url": r.get("url", ""), "status": r.get("status", 0)}
+        try:
+            from IPython import embed as _ipy
+            _ipy(user_ns=ns, colors="neutral")
+        except ImportError:
+            import readline  # noqa: F401
+            _code_mod.interact(local=ns, banner="")
+        return 0
+
+    if args.cmd == "capture-daemon":
+        # 实战反馈五#2：常驻捕获守护通用化（签名型站点在场捕获，页自算签名不逆向）
+        import json as _json
+        import os as _os
+        import subprocess as _sp
+        import time as _time
+        from pathlib import Path as _Path
+        from .runtime import resolve_node, resolve_node_path
+        _cap = _Path(args.capture).resolve()
+        _stf = _Path(str(_cap) + ".status.json")
+        if args.action == "status":
+            try:
+                d = _json.loads(_stf.read_text(encoding="utf-8"))
+            except Exception:
+                print("📡 守护进程未在运行（无状态文件）")
+                return 0
+            _pid = d.get("pid")
+            _alive = False
+            if _pid:
+                try:
+                    _os.kill(int(_pid), 0)
+                    _alive = True
+                except OSError:
+                    pass
+            print(f"📡 {'运行中' if _alive else '已停止（状态残留）'} pid={_pid} "
+                  f"已捕获={d.get('captured', 0)} 条\n  hosts={d.get('hosts')}\n  capture={d.get('capture')}")
+            return 0 if _alive else 1
+        if args.action == "stop":
+            try:
+                import signal as _sg
+                d = _json.loads(_stf.read_text(encoding="utf-8"))
+                _os.kill(int(d["pid"]), _sg.SIGTERM)
+            except Exception as e:
+                print(f"⚠️ 停止失败（{e}）——可能本就未运行", file=sys.stderr)
+                return 1
+            print("📡 已发送 TERM，守护进程优雅退出中")
+            return 0
+        # start
+        if not args.hosts:
+            print("❌ start 需要 --hosts（捕获域白名单，逗号分隔）", file=sys.stderr)
+            return 1
+        node, npath = resolve_node(), resolve_node_path()
+        _cmd = [node, str(Path(__file__).resolve().parent.parent / "scripts" / "capture_daemon.cjs"),
+                "--hosts", args.hosts, "--capture", str(_cap),
+                "--profile", (args.profile or str(_Path.home() / ".universal-scraper" / "daemon_profile")),
+                "--cdp", "9222"]
+        if args.proxy:
+            _cmd.extend(["--proxy", args.proxy])
+        _env = {**_os.environ, "NODE_PATH": npath}
+        _logf = open(_Path(str(_cap) + ".daemon.log"), "ab")
+        _sp.Popen(_cmd, stdout=_logf, stderr=_sp.STDOUT,
+                  stdin=_sp.DEVNULL, start_new_session=True, env=_env)
+        for _ in range(40):
+            _time.sleep(0.25)
+            if _stf.exists():
+                print(f"📡 守护进程已启动，捕获 → {_cap}")
+                print("   在有头窗口里人工登录/操作；停止用 capture-daemon stop")
+                return 0
+        print("❌ 启动超时（看 capture.daemon.log）", file=sys.stderr)
+        return 1
+
+    if args.cmd == "xhs":
+        # 实战反馈五#1 收编：小红书一等公民采集（搜索 Top-N + 评论 + 作者主页）
+        import json as _json
+        import os as _os
+        import subprocess as _sp
+        import time as _time
+        from pathlib import Path as _Path
+        from .runtime import resolve_node, resolve_node_path
+        from .modules import xhs as _xhs
+        out_dir = _Path(args.out)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        capture = out_dir / "capture.jsonl"
+
+        # ① 出口预检（#3：请用户扫码/登录前先确认出口没被目标站封）
+        eg = _xhs.check_egress(args.proxy)
+        print(f"🌐 出口预检: {eg.get('egress_ip', '?')}（{eg.get('egress_note', '')}）"
+              + (f" 代理={args.proxy}" if args.proxy else ""))
+        print("   出口 IP 若已确认被目标站封锁，先 --proxy 换出口再继续，避免登录暴露")
+
+        # ② 守护进程（cli 层持有 Popen；xhs.py 只构造命令——进程职责分离）
+        st = _xhs.daemon_status(capture)
+        if not st.get("running"):
+            node, npath = resolve_node(), resolve_node_path()
+            _cmd = _xhs.daemon_cmd(capture, proxy=args.proxy)
+            _env = {**_os.environ, "NODE_PATH": npath}
+            _logf = open(capture.with_suffix(".daemon.log"), "ab")
+            _sp.Popen(_cmd, stdout=_logf, stderr=_sp.STDOUT,
+                      stdin=_sp.DEVNULL, start_new_session=True, env=_env)
+            for _ in range(40):
+                _time.sleep(0.25)
+                if _xhs.daemon_status(capture).get("running"):
+                    break
+            else:
+                _hint = ""
+                try:
+                    _logtail = capture.with_suffix(".daemon.log").read_text(
+                        encoding="utf-8", errors="ignore")[-500:]
+                    if "现有的浏览器会话" in _logtail or "existing browser" in _logtail:
+                        _hint = ("——检测到同 profile 已有浏览器实例在运行，"
+                                 "请先关闭旧窗口（或 kill 旧进程）再试")
+                except OSError:
+                    pass
+                print(f"❌ 守护进程启动超时{_hint}（看 {capture.with_suffix('.daemon.log')}）",
+                      file=sys.stderr)
+                return 1
+        print("📕 守护进程在位。请在有头窗口完成：①登录小红书 ②搜索关键词 "
+              f"\"{args.keyword}\"\n   （本命令轮询捕获，最多等 {args.wait}s）")
+
+        # ③ 轮询搜索卡片
+        node, npath = resolve_node(), resolve_node_path()
+        _env = {**_os.environ, "NODE_PATH": npath}
+        _deadline = _time.time() + args.wait
+        cards = []
+        while _time.time() < _deadline:
+            cards = _xhs.parse_search_cards(capture)
+            if len(cards) >= max(3, args.top // 4):
+                break
+            _time.sleep(3)
+        if not cards:
+            print("❌ 等待超时未捕获到搜索结果——确认已登录并在窗口完成搜索", file=sys.stderr)
+            return 1
+        cards = cards[:args.top]
+        print(f"🔍 捕获 {len(cards)} 篇（按点赞取前 {args.top}）：")
+        for c in cards[:10]:
+            print(f"   {c['liked_count_raw']:>8} 赞  {c['title'][:50]}")
+
+        # ④ 逐篇驱动（滚动评论到目标数）+ 解析；导航间隔 ≥3.5s（#4 节奏建议）
+        note_rows, comment_rows, user_rows = [], [], []
+        node_bin = node
+        for idx, c in enumerate(cards, 1):
+            print(f"📥 [{idx}/{len(cards)}] {c['title'][:40]} …")
+            _cp_env = {**_env, "CAPTURE_PATH": str(capture)}
+            # 审查六轮（H2）：驱动超时曾炸穿 handler——已采的整轮数据随异常丢失。
+            # 超时/失败跳过该篇继续（capture 数据仍在，可补解析）
+            try:
+                _r = _sp.run([node_bin, str(Path(__file__).resolve().parent.parent / "scripts" / "xhs_collect_note.cjs"),
+                              c["note_id"], c["xsec_token"], str(out_dir / f"note_{idx:02d}")],
+                             capture_output=True, text=True, env=_cp_env, timeout=300)
+            except _sp.TimeoutExpired:
+                print("   ⚠️ 单篇驱动超时（300s）——跳过该篇继续", file=sys.stderr)
+                _time.sleep(3.5)
+                continue
+            if _r.returncode != 0:
+                print(f"   ⚠️ 驱动失败（已跳过，capture 仍保留数据）: {(_r.stderr or '')[:100]}")
+            detail = _xhs.parse_note_detail(capture, c["note_id"])
+            interact = detail.get("interact_info") or {}
+            # 审查六轮（H3）：h264 变体可能是空数组/None——get 默认值只兜键缺失，
+            # [0] 对空列表 IndexError 会炸掉整轮采集
+            _h264 = (((detail.get("video") or {}).get("media") or {}).get("stream") or {}).get("h264") or []
+            _video_url = (_h264[0].get("master_url", "") if _h264 else "")
+            note_rows.append({
+                "笔记ID": c["note_id"], "标题": c["title"],
+                "正文": detail.get("desc", ""),
+                "话题标签": " ".join(t.get("name", "") for t in detail.get("tag_list") or []),
+                "图片": " ".join((im.get("url_default") or im.get("url", "")) for im in detail.get("image_list") or []),
+                "视频": _video_url,
+                "发布时间": _time.strftime("%Y-%m-%d %H:%M", _time.localtime(int(detail.get("time", 0) or 0) / 1000)) if detail.get("time") else "",
+                "点赞": (interact.get("liked_count") or ""), "收藏": (interact.get("collected_count") or ""),
+                "评论数": (interact.get("comment_count") or ""), "分享": (interact.get("share_count") or ""),
+                "类型": c.get("type", ""), "推广标识": "是" if detail.get("is_promotion") else "",
+                "作者ID": (detail.get("user") or {}).get("user_id", ""),
+                "作者昵称": (detail.get("user") or {}).get("nickname", ""),
+                "_url": f"https://www.xiaohongshu.com/explore/{c['note_id']}",
+            })
+            cms = _xhs.parse_comments(capture, c["note_id"])
+            for cm in cms[:args.comments]:
+                cm["笔记ID"] = c["note_id"]
+                comment_rows.append(cm)
+            uid = (detail.get("user") or {}).get("user_id", "")
+            if uid:
+                try:
+                    _sp.run([node_bin, str(Path(__file__).resolve().parent.parent / "scripts" / "xhs_ctl.cjs"), "goto",
+                             f"https://www.xiaohongshu.com/user/profile/{uid}", "4000"],
+                            capture_output=True, text=True, env=_cp_env, timeout=90)
+                except _sp.TimeoutExpired:
+                    print("   ⚠️ 作者主页导航超时（跳过该主页）", file=sys.stderr)
+                _time.sleep(2)
+                user_rows.append({"用户ID": uid, **_xhs.parse_user_profile(capture, uid)})
+            _time.sleep(3.5)  # 导航间隔（评论型任务节奏）
+        print(f"📊 汇总：笔记 {len(note_rows)} | 评论 {len(comment_rows)} | 主页 {len(user_rows)}")
+        from .core import export_rows
+        paths = export_rows(note_rows, out_dir, "notes")
+        export_rows(comment_rows, out_dir, "comments")
+        export_rows(user_rows, out_dir, "users")
+        print(f"📁 导出: {list(paths.values()) if isinstance(paths, dict) else paths}")
+        print("🛑 采集完成——守护进程保持运行（人工窗口可继续用）；停止: capture-daemon stop 或关窗口")
+        return 0
+
+    if args.cmd == "map":
+        # 实战反馈五对标 Firecrawl /map：入口页链接 + sitemap 并集，秒级出全站
+        # URL 清单——先 map 再选页，避免对"有多大/长什么样"一无所知就开爬
+        import re
+        from urllib.parse import urlsplit as _usp
+        from .core import make_http_client
+        from .queue import extract_links
+        _sp0 = _usp(args.url)
+        if _sp0.scheme not in ("http", "https"):
+            print("❌ 仅允许 http/https", file=sys.stderr)
+            return 1
+        client = make_http_client({"min_interval": 0.3, "timeout": 20})
+        urls: list = []
+        res = client.get(args.url)
+        if res.get("ok"):
+            urls = extract_links(res.get("text", ""), args.url,
+                                 allow=args.allow, deny=args.deny)
+        if args.sitemap:
+            try:
+                from .engine import fetch_sitemap_urls
+                _base = f"{_sp0.scheme}://{_sp0.netloc}"
+                sm_urls = fetch_sitemap_urls(client, f"{_base}/sitemap.xml",
+                                             max_urls=args.max_urls)
+                # 审查六轮（L4）：sitemap URL 也过一遍 allow/deny（与 extract_links
+                # 同口径 path+query）；CLI 级重复复筛曾用纯 path 口径清空合法结果
+                if args.allow:
+                    sm_urls = [u for u in sm_urls if re.search(args.allow, u)]
+                if args.deny:
+                    sm_urls = [u for u in sm_urls if not re.search(args.deny, u)]
+                urls.extend(u for u in sm_urls if u not in urls)
+            except Exception as e:
+                print(f"  (sitemap 不可用: {type(e).__name__})", file=sys.stderr)
+        urls = urls[:args.max_urls]
+        print(f"🗺️ {args.url} → {len(urls)} 个 URL：")
+        for u in urls[:100]:
+            print(f"  {u}")
+        if len(urls) > 100:
+            print(f"  …（其余 {len(urls) - 100} 条用 --json/--max-urls 控制）")
+        return 0 if urls else 1
+
+    if args.cmd == "pagefn":
+        from .quick import pagefn_recon
+        r = pagefn_recon(args.url, limit=args.limit)
+        if r.get("error"):
+            print(f"❌ {r['error']}", file=sys.stderr)
+            return 1
+        print(f"🧩 {r['url']} 非原生全局函数 {r['count']} 个（实现长的排前）：")
+        for f in r["functions"]:
+            print(f"  {f['name']:32s} {f['src'][:90]}")
+        print(f"   {r['hint']}")
+        return 0 if r["count"] else 1
+
+    if args.cmd == "rangedl":
+        from .rangedl import rangedl
+        r = rangedl(args.url, out=args.out, segments=args.segments,
+                    concurrency=args.concurrency)
+        if r.get("error"):
+            print(f"❌ {r['error']}", file=sys.stderr)
+            return 1
+        print(f"✅ {args.out}（{r['size']}B，{r['segments']} 段"
+              f"{'，含续传' if r.get('resumed') else ''}）")
+        return 0
 
     if args.cmd == "jsrecon":
         from .quick import js_recon
@@ -680,6 +1591,15 @@ def main() -> int:
             it = q.claim()
             print(json.dumps({"claimed": bool(it), "task": it}, ensure_ascii=False))
             return 0 if it else 1
+        if args.action == "touch":
+            # 长任务续租（审查 P2）：>30min 的任务必须周期性 touch 防 stale 回收
+            try:
+                it = q.touch(args.item_id)
+            except (ValueError, KeyError) as e:  # R19b：手滑 id 不该甩栈（与 mark 同标准）
+                print(f"❌ {e}", file=sys.stderr)
+                return 1
+            print(json.dumps({"touched": True, "id": args.item_id}, ensure_ascii=False))
+            return 0
         if args.action == "status":
             print(json.dumps(q.status(), ensure_ascii=False))
             return 0
@@ -701,27 +1621,82 @@ def main() -> int:
     if args.cmd == "capture2config":
         from .capture_gen import generate
         out = args.out or str(Path(args.capture).with_suffix("").resolve()) + "_configs.json"
-        r = generate(args.capture, referer=args.referer, out=out)
-        if r.get("error"):
-            print(f"❌ {r['error']}", file=sys.stderr)
+
+        def _run_once() -> int:
+            r = generate(args.capture, referer=args.referer, out=out)
+            if r.get("error"):
+                print(f"❌ {r['error']}", file=sys.stderr)
+                return 1
+            for c in r.get("configs", [])[:10]:
+                src = c["source"]
+                rp = c.get("pagination", {}).get("records_path") or "?"
+                print(f"  {src.get('method','GET'):4s} {src['url'][:80]}  records_path={rp}")
+            if r.get("saved"):
+                print(f"✅ {r['count']} 份配置草案 → {r['saved']}（先 --limit 2 小样验证）")
+            return 0 if r.get("count") else 1
+
+        if not getattr(args, "watch", False):
+            return _run_once()
+
+        # 👀 watch 模式（归档功能请求）：浏览器桥持续追加 capture_all.json 时，
+        # 每次落盘稳定后自动重新生成配置草案——省去手动重跑
+        import time as _time
+        cap = Path(args.capture)
+        if not cap.exists():
+            print(f"❌ 捕获文件不存在: {cap}", file=sys.stderr)
             return 1
-        for c in r.get("configs", [])[:10]:
-            src = c["source"]
-            rp = c.get("pagination", {}).get("records_path") or "?"
-            print(f"  {src.get('method','GET'):4s} {src['url'][:80]}  records_path={rp}")
-        if r.get("saved"):
-            print(f"✅ {r['count']} 份配置草案 → {r['saved']}（先 --limit 2 小样验证）")
-        return 0 if r.get("count") else 1
+        print(f"👀 watch 模式：监听 {cap.name} 变化（Ctrl+C 退出）…")
+        # 审查 L1：桥的 unlink+rename 原子落盘瞬间 stat 会 FileNotFoundError——
+        # 三处 stat 统一防护，竞态按"没变化"处理，绝不冲出常驻循环
+        try:
+            last_mtime = cap.stat().st_mtime
+        except FileNotFoundError:
+            last_mtime = 0.0
+        try:
+            while True:
+                _time.sleep(1.5)
+                try:
+                    m = cap.stat().st_mtime
+                except FileNotFoundError:
+                    continue
+                if m == last_mtime:
+                    continue
+                # 防抖：桥可能分片写入——1.5s 内 mtime 稳定才触发
+                _time.sleep(1.5)
+                try:
+                    if cap.stat().st_mtime != m:
+                        continue
+                    last_mtime = cap.stat().st_mtime
+                except FileNotFoundError:
+                    continue
+                print(f"\n🔄 捕获文件已更新（{_time.strftime('%H:%M:%S')}），重新生成…")
+                try:
+                    _run_once()
+                except Exception as e:
+                    print(f"⚠️ 重新生成失败: {type(e).__name__}: {e}", file=sys.stderr)
+        except KeyboardInterrupt:
+            # cli 全局 SIGTERM 处理器也走这里（优雅停机）——静默退出，不甩裸栈
+            print("\n👋 watch 已退出", file=sys.stderr)
+            return 0
+
 
     if args.cmd == "pdf":
         if args.download:
             from .pdf_attach import download_attachments
-            r = download_attachments(args.download, args.out or "attachments", interval=args.interval)
+            # R32 修复：清单文件缺失/坏 JSON 曾甩裸栈（siblings 都有干净报错）
+            try:
+                r = download_attachments(args.download, args.out or "attachments", interval=args.interval)
+            except FileNotFoundError as e:
+                print(f"❌ 清单文件不存在: {e.filename}", file=sys.stderr)
+                return 1
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"❌ 清单不是合法 JSON: {e}", file=sys.stderr)
+                return 1
             print(json.dumps({k: r[k] for k in ("total", "ok", "skipped", "failed", "dir")},
                              ensure_ascii=False))
             return 0 if not r["failed"] else 1
         if args.tables:
-            from .pdf_attach import extract_tables
+            from .pdf_attach import extract_tables, table_quality_report
             try:
                 tables = extract_tables(args.tables)
             except Exception as e:  # 审查修复：pypdf 的 PdfStreamError 等曾甩裸栈
@@ -730,10 +1705,37 @@ def main() -> int:
             out = args.out or str(Path(args.tables).with_suffix(".tables.json").resolve())
             Path(out).write_text(json.dumps(tables, ensure_ascii=False, indent=1), encoding="utf-8")
             n = sum(len(t["rows"]) for t in tables)
+            # 质量门（招行摘要战训：退化垃圾列曾照样报 ✅）
+            q = table_quality_report(tables)
+            Path(str(out) + ".quality.json").write_text(
+                json.dumps(q, ensure_ascii=False, indent=1), encoding="utf-8")
+            if q.get("degraded"):
+                print(f"⚠️ 表格质量门：疑似退化（列名回退 {q['fallback_rate']}、空单元格 {q['empty_rate']}）"
+                      f"——{q['hint']}", file=sys.stderr)
+                print(f"⚠️ {len(tables)} 页表格 / {n} 行 → {out}（⚠️ 质量存疑，见 {out}.quality.json）")
+                return 2
             print(f"✅ {len(tables)} 页表格 / {n} 行 → {out}")
             return 0
         print("用法：--download <清单.json> --out <目录> / --tables <pdf>", file=sys.stderr)
         return 1
+
+    if args.cmd == "session":
+        from .api_session import run_session
+        try:
+            plan = json.loads(Path(args.plan).read_text(encoding="utf-8-sig"))
+        except Exception as e:
+            print(f"❌ 计划读取/解析失败: {e}", file=sys.stderr)
+            return 1
+        result = run_session(plan, out_dir=Path(args.out), max_requests=args.max_requests,
+                             min_gap=args.min_gap, timeout=args.timeout,
+                             risk_accepted=args.risk_accepted)
+        print(json.dumps(result, ensure_ascii=False, indent=1))
+        if result.get("stopped") == "max_requests":
+            return 4
+        if result.get("stopped") == "blocked":
+            print("⛔ 封禁/拦截判定硬停机——已抓数据保留，请冷却/换出口后再评估", file=sys.stderr)
+            return 5
+        return 0 if result.get("ok") else 1
 
     if args.cmd == "budget":
         from . import domain_budget as db
@@ -754,8 +1756,134 @@ def main() -> int:
                 mark = "🚫" if v["in_cooldown"] else "✅"
                 print(f"  {mark} {d:32s} 剩 {v['remaining_sec']//3600}h（{v['last_event']} {v['note'][:40]}）")
             return 0
-        print("用法：--mark <域名> [--hours 24 --note ...] / --check <域名> / --list", file=sys.stderr)
+        if args.usage:
+            from .core import request_budget
+            r = request_budget()
+            if r["limit"]:
+                print(f"📊 本进程任务请求额度: 已用 {r['used']} / {r['limit']}（剩 {r['remaining']}）"
+                      f"——计数含重试，按真实 HTTP 尝试计（run --max-requests / anti_bot.max_requests）")
+            else:
+                print(f"📊 本进程任务请求额度: 未设上限（已计 {r['used']} 次）")
+            return 0
+        if args.probe:
+            # 放行窗口探针（gsxt 战训）：行为评分型限流下先探窗口再干活
+            from .domain_budget import probe_window
+            try:
+                r = probe_window(args.probe, expect=args.expect, every=args.every,
+                                 max_rounds=args.max_rounds, timeout=args.timeout,
+                                 log=lambda m: print(m, file=sys.stderr, flush=True))
+            except ValueError as e:
+                print(f"❌ {e}", file=sys.stderr)
+                return 1
+            print(json.dumps(r, ensure_ascii=False))
+            return 0 if r["state"] == "OPEN" else 2
+        if args.action:
+            # 稀缺动作预算（gsxt 战训）：贵动作发起即扣额，失败不退
+            from .action_budget import acquire
+            r = acquire(args.action, limit=args.action_limit, window=args.action_window,
+                        cost=args.action_cost, path=args.file)
+            print(json.dumps(r, ensure_ascii=False))
+            return 0 if r["allowed"] else 2
+        if args.action_info:
+            from .action_budget import state as _ab_state
+            r = _ab_state(args.action_info, limit=args.action_limit,
+                          window=args.action_window, path=args.file)
+            print(json.dumps(r, ensure_ascii=False))
+            return 0
+        print("用法：--mark <域名> [--hours 24 --note ...] / --check <域名> / --list / --usage / "
+              "--probe <url> [--expect 标记 --every 60] / --action <名> [--action-limit 5 --action-window 3600] / "
+              "--action-info <名>", file=sys.stderr)
         return 1
+
+    if args.cmd == "bili":
+        # R101 沉淀：B站四通道（元数据/弹幕/评论/UP主列表）——战法详见 recipes R34
+        from pathlib import Path as _P
+        from universal_scraper import bili as _bili
+        from universal_scraper.core import export_rows
+        if not args.video and not args.mid:
+            print("用法: us bili --video BV1abc  或  us bili --mid <UID> --year 2024", file=sys.stderr)
+            return 1
+
+        def _fetch_all(bvid: str, out_dir: _P, client=None, wbi: dict = None):
+            # R113：client/wbi 由调用方复用传入（--mid 循环曾每视频重建客户端，
+            # 重置限速器并多一次预热请求）；单视频模式传 None 自建
+            client = client or _bili._client()
+            meta = _bili.video_meta(client, bvid)
+            # R111 修复（P2）：--mid 模式曾固定名 meta.json 互相覆盖——按 bvid 命名
+            (_P(out_dir) / f"meta_{bvid}.json").write_text(
+                json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+            danmaku = _bili.danmaku(client, meta.get("cid"), limit=args.limit_danmaku)
+            comments = _bili.comments(client, meta.get("aid"),
+                                      limit=args.limit_comments,
+                                      with_replies=not args.no_replies,
+                                      wbi=wbi)
+            return meta, danmaku, comments
+
+        def _export(rows, name, out_dir: _P):
+            if not rows:
+                print(f"  ⚠️ {name}: 0 条", file=sys.stderr)
+                return
+            paths = export_rows(rows, _P(out_dir), name, formats=["json", "csv", "xlsx"])
+            n = len(rows)
+            print(f"  ✅ {name}: {n} 条 -> {list(paths.values())}", file=sys.stderr)
+
+        out_dir = _P(args.out or f"outputs/bili_{args.video or args.mid}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        if args.video:
+            if args.mid:
+                print("ℹ️ --video 与 --mid 同时指定：按 --video 单视频模式执行（--mid 忽略）",
+                      file=sys.stderr)
+            print(f"📺 B站视频 {args.video}", flush=True)
+            try:
+                meta, danmaku, comments = _fetch_all(args.video, out_dir)
+            except RuntimeError as e:
+                # R111 修复（P2）：bili.py 的用户导向错误（-352/-412/-400）曾裸栈退出
+                print(f"❌ {e}", file=sys.stderr)
+                return 1
+            print(f"   标题: {meta.get('标题', '')}\n   播放 {meta.get('播放量')} | 弹幕 {meta.get('弹幕总数')} | 评论 {meta.get('评论总数')}", flush=True)
+            _export(danmaku, f"bili_{args.video}_弹幕", out_dir)
+            _export(comments, f"bili_{args.video}_评论", out_dir)
+            print(f"📁 输出目录: {out_dir}")
+            return 0
+
+        # --mid：UP主投稿列表 → 逐视频三通道
+        client = _bili._client()
+        try:
+            wbi = _bili.get_wbi_keys(client)
+            vids = _bili.user_videos(client, args.mid, wbi,
+                                     dm_img_str=args.dm_img_str,
+                                     dm_cover_img_str=args.dm_cover_img_str,
+                                     dm_img_inter=args.dm_img_inter,
+                                     max_pages=max(1, args.max_videos // 30 + 1),
+                                     year=args.year or None)
+        except RuntimeError as e:
+            # R113 修复（P2）：列表阶段（-352/-412/nav 失败）曾裸栈退出
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        vids = vids[:args.max_videos]
+        print(f"📺 UP主 {args.mid}：命中 {len(vids)} 个视频（year={args.year or '全部'}）", flush=True)
+        if not vids:
+            return 3
+        failed = []
+        for i, v in enumerate(vids, 1):
+            bvid = v.get("bvid", "")
+            if not bvid:
+                continue
+            print(f"[{i}/{len(vids)}] {v.get('标题', '')[:40]}", flush=True)
+            try:
+                # R113：复用 --mid 阶段的 client 与缓存 wbi（少一次预热+nav 往返）
+                meta, danmaku, comments = _fetch_all(bvid, out_dir, client=client, wbi=wbi)
+                _export(danmaku, f"bili_{bvid}_弹幕", out_dir)
+                _export(comments, f"bili_{bvid}_评论", out_dir)
+            except Exception as e:
+                failed.append(bvid)
+                print(f"  ❌ {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+        if failed:
+            print(f"⚠️ {len(failed)} 个视频失败: {', '.join(failed[:10])}——按铁律诊断后重跑", file=sys.stderr)
+            return 1
+        print(f"📁 输出目录: {out_dir}")
+        return 0
 
     if args.cmd == "journal":
         from .journals import run as journal_run
@@ -767,9 +1895,17 @@ def main() -> int:
             print(f"❌ {summary['error']}", file=sys.stderr)
             return 1
         if args.fulltext:
-            import os, subprocess
+            # R42b 修复：局部 import os 曾遮蔽模块级 os——全文下载失败路径之后的
+            # run 封禁处理器用到 os.path 会 UnboundLocalError（webui 同款事故）
+            import subprocess
             from pathlib import Path as _P
             script = _P(__file__).resolve().parent.parent / "scripts" / "kygl_fulltext_download.py"
+            # 审查修复（P2）：脚本缺失曾让成功的采集以 exit 2 收场——先检查再跑
+            if not script.exists():
+                print(f"❌ 全文追加脚本缺失: {script}", file=sys.stderr)
+                print("   （journal 采集本身已成功；全文 PDF 追加功能在当前安装中不可用）",
+                      file=sys.stderr)
+                return 1
             env = os.environ.copy()
             if args.out:
                 env["KYGL_OUT"] = str(_P(args.out).expanduser().resolve())
@@ -824,11 +1960,130 @@ def main() -> int:
         print(f"🔋 电源: {pw.get('source')} {('- ' + pw['caffeinate_hint']) if pw.get('caffeinate_hint') else ''}")
         return 0
 
+    if args.cmd == "diagnose":
+        # 📒 诊断台账（归档功能请求）：--history 查历史判型（同一站点多轮诊断
+        # 可追溯，agent 循环免重跑）
+        if getattr(args, "history", None) is not None:
+            _lp = Path("outputs") / "diagnose_history.jsonl"
+            if not _lp.exists():
+                print("📒 诊断台账为空（跑一次 diagnose 自动落账）")
+                return 0
+            _kw = args.history.lower()
+            _rows = []
+            for line in _lp.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    _e = json.loads(line)
+                except Exception:
+                    continue
+                if not _kw or _kw in str(_e.get("url", "")).lower():
+                    _rows.append(_e)
+            if not _rows:
+                print(f"📒 台账无匹配「{args.history}」的记录")
+                return 0
+            print(f"📒 诊断台账（{_kw or '全部'}，最近 {len(_rows[-20:])} 条）：")
+            for _e in _rows[-20:]:
+                _b = _e.get("block") or {}
+                print(f"  {_e.get('ts','?')} {_e.get('mode','?'):5s} {_e.get('status','?'):>3} "
+                      f"{(_b.get('name') or _b.get('type') or '?')[:14]:14s} {_e.get('url','')[:70]}")
+            return 0
+        if not args.url:
+            print("❌ 缺少 URL（diagnose <url>；查历史用 diagnose --history）", file=sys.stderr)
+            return 1
+
+        from .diagnose import format_verdict
+        if getattr(args, "quick", False):
+            from .diagnose import diagnose_quick as _diagnose
+        else:
+            from .diagnose import diagnose as _diagnose
+        d = _diagnose(args.url, proxy=(args.proxy or None))
+        blk = d.get("block") or {}  # 必须在 json 分支外取：审查修复，--json 路径曾 UnboundLocalError 必崩
+        # 📒 落账（含失败诊断——排障时"哪次开始坏的"靠它）
+        try:
+            from datetime import datetime as _dt
+            _lp = Path("outputs") / "diagnose_history.jsonl"
+            _lp.parent.mkdir(parents=True, exist_ok=True)
+            _entry = {"ts": _dt.now().strftime("%m-%d %H:%M"), "url": args.url,
+                      "mode": "quick" if getattr(args, "quick", False) else "full",
+                      "status": d.get("status"), "block": blk,
+                      "error": d.get("error")}
+            with open(_lp, "a", encoding="utf-8") as _f:
+                _f.write(json.dumps(_entry, ensure_ascii=False) + "\n")
+            # 防膨胀：超 2000 行截到最近 1000（tmp+replace 原子替换）
+            if _lp.exists() and _lp.stat().st_size > 512 * 1024:
+                _lines = _lp.read_text(encoding="utf-8", errors="ignore").splitlines()
+                if len(_lines) > 2000:
+                    _tmp = _lp.with_suffix(".jsonl.tmp")
+                    _tmp.write_text("\n".join(_lines[-1000:]) + "\n", encoding="utf-8")
+                    _tmp.replace(_lp)
+        except Exception:
+            pass  # 台账是锦上添花，落账失败绝不影响诊断结论
+        if args.json:
+            print(json.dumps(d, ensure_ascii=False, indent=1))
+        else:
+            print(format_verdict(d))
+            if blk.get("type") not in (None, "ok"):
+                print("   完整判型表与升级阶梯: references/anti-block-playbook.md")
+        # 判型为阻断类时退出码 2（脚本可据此分支），正常/SPA 提示为 0
+        if d.get("error"):
+            # 审查修复（P2）：网络层失败（DNS/离线/URL 拼错）曾 exit 0——与
+            # "畅通无阻"同码，脚本会拿假绿灯去爬一个不可达的站
+            print("❌ 诊断请求本身失败（网络层错误，非站点封禁）", file=sys.stderr)
+            return 1
+        return 2 if (blk.get("is_block")) else 0
+
     if args.cmd == "guide":
         from .agent_guide import emit
         p_ = emit(args.out)
         print(f"📖 子代理执行规范已生成: {p_.resolve()}")
         print("   随任务分派发给每个并行子代理，并写进调度 prompt。")
+        return 0
+
+    if args.cmd == "research":
+        from .research import ResearchRunner, load_keywords, load_universe, build_panel_xlsx
+        from pathlib import Path as _P
+        if args.research_cmd == "run":
+            kw = load_keywords(args.keywords)
+            pending = load_universe(args.universe, args.year_from, args.year_to)
+            runner = ResearchRunner(_P(args.out), kw, fuse=args.fuse)
+            rc = runner.run(pending)
+            if rc == 0 and getattr(args, "panel_xlsx", None):
+                st = build_panel_xlsx(_P(args.out), args.universe, kw, args.year_from, args.year_to,
+                                      _P(args.panel_xlsx))
+                print(f"📦 面板 xlsx: {st}")
+            return rc
+        kw = load_keywords(getattr(args, "keywords", None))
+        st = build_panel_xlsx(_P(args.out), args.universe, kw, args.year_from, args.year_to, _P(args.xlsx))
+        print(f"📦 面板 xlsx: {st}")
+        return 0
+
+    if args.cmd == "audit":
+        from . import audit as _audit
+        a = vars(args)
+        if args.audit_cmd == "panel":
+            kw = None
+            if a.get("keywords"):
+                try:
+                    kw = json.load(open(a["keywords"], encoding="utf-8"))
+                except Exception as e:
+                    print(f"✗ 词典文件读取失败: {e}")
+                    return 1
+            issues = _audit.audit_panel(args.xlsx, args.texts, a.get("universe"),
+                                        args.year_from, args.year_to, keywords=kw)
+        elif args.audit_cmd == "urls":
+            issues = _audit.audit_urls(args.xlsx, a.get("sheet"), args.url_col, a.get("note_col"))
+        else:
+            try:
+                srcs = json.load(open(args.sources, encoding="utf-8"))
+            except Exception as e:
+                print(f"✗ sources 映射文件读取失败: {e}")
+                return 1
+            issues = _audit.audit_verbatim(args.json, srcs, unique=not a.get("no_unique", False))
+        if issues:
+            print("\n".join("✗ " + i for i in issues))
+            return 1
+        print("✓ 审计全部通过")
         return 0
 
     if args.cmd == "verify":
@@ -861,36 +2116,92 @@ def main() -> int:
             print("用法：verify --file <结果.json> [--network] 或 verify --dir <任务目录>", file=sys.stderr)
             return 1
         from .verify import verify_file as _vf
-        rep = _vf(args.file, network=args.network, data_key=args.data_key)
+        rep = _vf(args.file, network=args.network, data_key=args.data_key,
+                  expect=args.expect, require=getattr(args, "require", ""),
+                  expected_count=getattr(args, "expect_count", None))
+        # 审查修复（P2）：文件缺失/JSON 损坏等原因曾只进 dict 不打印——
+        # 用户只看到"0 条｜存在问题"却无从分辨是文件没了还是语义不匹配
+        if rep.get("error"):
+            print(f"❌ {rep['error']}", file=sys.stderr)
+            return 1
         print(f"🧾 复核报告：{rep.get('total', 0)} 条｜{'✅ 全部通过' if rep.get('ok') else '⚠️ 存在问题'}")
         for c in rep.get("checks", []):
             mark = "✅" if c.get("pass", True) else "❌"
             print(f"  {mark} {c['name']}: {c.get('value', '')}")
             for d in c.get("detail", [])[:5]:
                 print(f"      - {d.get('url','')} reachable={d.get('reachable')} match={d.get('match')}")
+        for c in rep.get("require_fields", []) or []:
+            print(f"  {'✅' if c['pass'] else '❌'} {c['name']}: {c['value']}")
+        if rep.get("semantic"):
+            sem = rep["semantic"]
+            mark = "✅" if sem["semantic_ok"] else "❌"
+            line = f"  {mark} 语义校验: expect={sem['expect']}"
+            has_plus = any(t.strip().startswith("+") for t in sem["expect"].split(","))
+            if sem.get("matched_any"):
+                line += f"｜任一词命中 {sem['matched'] or '无'}（{sem['matched_any']}，仅要求其一；多指标请用 +词 必含）"
+            elif sem.get("matched"):
+                line += f"｜命中 {sem['matched']}"
+            if has_plus:
+                line += ("｜必含词全部命中" if not sem.get("required_missed")
+                         else f"｜❗必含词缺失 {sem['required_missed']}")
+            if sem.get("excluded_hit"):
+                line += f"｜出现排除词 {sem['excluded_hit']}"
+            if sem.get("expect_warning"):
+                line += f"｜⚠️ {sem['expect_warning']}"
+            print(line)
+        for c in rep.get("column_assertions", []):
+            print(f"  {'✅' if c['pass'] else '❌'} {c['name']}: {c['value']}")
         return 0 if rep.get("ok") else 1
 
     if args.cmd == "webui":
         from .webui import serve
-        import os
+        # R42 修复：局部 import os 曾遮蔽模块级 os——之后 BlockDetectedError
+        # 处理器里的 os.path/expandvars 触发 UnboundLocalError，封禁证据写不出
         token = getattr(args, "token", "") or os.environ.get("US_WEBUI_TOKEN", "")
         return serve(args.port, args.host, auto_open=not args.no_open,
                      share=args.share, token=token)
 
     if args.cmd == "crawl":
         from .quick import crawl_url
-        result = crawl_url(args.url, depth=args.depth, max_pages=args.max,
-                           allow=args.allow, deny=args.deny, browser=args.browser,
-                           proxy=args.proxy, concurrency=args.concurrency, out=args.out,
-                           respect_robots=args.robots, sitemap=args.sitemap,
-                           same_domain=args.same_domain)
+        # R32 修复（P1）：crawl 走同一 v3 引擎却没接 --task 路径的封禁终态契约
+        # ——BlockDetectedError 曾裸栈 + exit 1 + 无证据
+        try:
+            result = crawl_url(args.url, depth=args.depth, max_pages=args.max,
+                               allow=args.allow, deny=args.deny, browser=args.browser,
+                               proxy=args.proxy, concurrency=args.concurrency, out=args.out,
+                               respect_robots=args.robots, sitemap=args.sitemap,
+                               same_domain=args.same_domain)
+        except BlockDetectedError as e:
+            print(f"⛔ {e}", file=sys.stderr)
+            print("   已停止采集：宁可不写，也不把封禁页写进数据。", file=sys.stderr)
+            print("   处置：冷却/换出口/降频后重试；核查台账 budget --list", file=sys.stderr)
+            try:
+                _od = Path(args.out or "outputs")
+                _od.mkdir(parents=True, exist_ok=True)
+                (_od / "blocked.json").write_text(json.dumps(
+                    {"blocked": True, "kind": e.kind, "url": e.url, "detail": e.detail,
+                     "at": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+                print(f"   证据已写 {_od / 'blocked.json'}", file=sys.stderr)
+            except Exception as _we:
+                print(f"⚠️ blocked.json 写盘失败（{type(_we).__name__}: {_we}）"
+                      "——请以本条与上方 stderr 中的 kind/url/detail 为封禁证据", file=sys.stderr)
+            return 5
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         else:
-            print(f"✅ 爬取完成: {result.get('total', 0)} 条 | 抓取 {result.get('fetched', 0)} 页 | 错误 {result.get('errors', 0)}")
+            _tot = result.get("total", 0)
+            if _tot:
+                print(f"✅ 爬取完成: {_tot} 条 | 抓取 {result.get('fetched', 0)} 页 | 错误 {result.get('errors', 0)}")
+            else:
+                print(f"⚠️ 爬取结束: 0 条 | 抓取 {result.get('fetched', 0)} 页 | 错误 {result.get('errors', 0)}"
+                      "（0 结果不假成功，请先诊断再重试）")
             for k, v in result.get("files", {}).items():
                 if Path(v).exists():
                     print(f"   {k}: {v}")
+        # R32 修复：nodata 曾无条件 exit 0——CI 门禁对全失败爬取亮绿灯
+        if result.get("nodata"):
+            return 3
         return 0
 
     if args.cmd == "fetch":
@@ -906,10 +2217,29 @@ def main() -> int:
                            article=args.article, table=args.table, proxy=args.proxy,
                            actions=actions, wait_selector=args.wait, links=args.links,
                            links_allow=args.links_allow, links_deny=args.links_deny,
-                           screenshot=args.screenshot, cdp=args.cdp)
+                           screenshot=args.screenshot, cdp=args.cdp,
+                           capture=args.capture or None)
         if result.get("error"):
             print(f"❌ {result['error']}", file=sys.stderr)
             return 1
+        if args.capture:
+            if result.get("capture_file"):
+                # 实战反馈六#3（知乎）：捕获文件存在曾即报成功——实际可能只有
+                # 1 条无关请求。条数过少按铁律 3 大声告警
+                _cap_lines = 0
+                try:
+                    with open(result["capture_file"], "rb") as _cf:
+                        _cap_lines = sum(1 for _ln in _cf if _ln.strip())
+                except OSError:
+                    pass
+                if _cap_lines < 3:
+                    print(f"⚠️ 捕获仅 {_cap_lines} 条记录——目标站接口大概率未触发"
+                          "（需滚动/登录/页面交互），此捕获不可用于 capture2config",
+                          file=sys.stderr)
+                else:
+                    print(f"📡 接口捕获已保存: {result['capture_file']}（{_cap_lines} 条）", file=sys.stderr)
+            else:
+                print(f"⚠️ 捕获未产出: {result.get('capture_error', '未知原因')}", file=sys.stderr)
         if args.json:
             # --json：stdout 只输出纯 JSON（可管道），保存提示走 stderr
             print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -917,8 +2247,32 @@ def main() -> int:
                 fp = save_result(result, args.out, as_json=True)
                 print(f"✅ 已保存: {fp}", file=sys.stderr)
             return 0
+        if getattr(args, "raw", False) and result.get("text") is not None:
+            # OCR R131 反馈 #4：fetch --raw 输出原始 HTML——反爬取证（@font-face、
+            # CSS 偏移、加密脚本）需要看原始字节而非 markdown 化结果
+            raw_html = result.get("html") or result.get("text", "")
+            if args.out:
+                Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+                Path(args.out).write_text(raw_html, encoding="utf-8")
+                print(f"✅ 原始 HTML 已保存: {args.out}（{len(raw_html)} 字符）", file=sys.stderr)
+            else:
+                sys.stdout.write(raw_html)
+            return 0
         content = result.get("markdown") or result.get("article") or result.get("selector") or result.get("text", "")
-        print(f"# {result['url']}  ({result['status']}, {len(result.get('text',''))}B)\n")
+        # 实战反馈六#3（知乎）：200 + 壳页（markdown 0 行）曾照样 ✅——工具说谎
+        # 比工具失败更误事。空/极短内容按铁律 3 大声告警并置 nodata 退出码
+        if len(content.strip()) < 200:
+            print(f"⛔ 内容为空或极短（{len(content.strip())} 字符）——大概率是壳页/"
+                  "渲染失败/被拦截，按铁律 3 走诊断：1) fetch --browser --capture 看接口 "
+                  "2) cli diagnose 3) 换 L4 登录态", file=sys.stderr)
+            # 审查六轮（L6）：告警归告警，正文仍打 stdout（取证/人工判断不丢数据）
+            print(content)
+            if args.out:
+                fp = save_result(result, args.out, as_json=False)
+                print(f"\n（空内容仍已保存供取证）: {fp}")
+            return 3
+        _deg = " [degraded:{}⚠️非curl_cffi]".format(result["backend"]) if result.get("degraded_backend") else ""
+        print(f"# {result['url']}  ({result['status']}, {len(result.get('text',''))}B){_deg}\n")
         print(content[:20000])
         if result.get("links"):
             print(f"\n--- {len(result['links'])} 个外链 ---")
@@ -930,6 +2284,10 @@ def main() -> int:
         return 0
 
     # run
+    if not args.task and not args.config:
+        # 审查修复（P2）：曾 TypeError 裸栈（Path(None)）
+        print("❌ run 需要 --config <v2配置> 或 --task <v3任务包> 之一", file=sys.stderr)
+        return 1
     if args.task:
         from .engine_v3 import run_task
         tp = Path(args.task)
@@ -943,11 +2301,41 @@ def main() -> int:
                 overrides[k] = val
         try:
             result = run_task(tp, overrides=overrides, limit=args.limit, resume=args.resume,
-                              dry_run=args.dry_run, log_file=args.log_file, start_url=args.url)
+                              dry_run=args.dry_run, log_file=args.log_file, start_url=args.url,
+                              max_requests=getattr(args, "max_requests", None))
         except KeyboardInterrupt:
             print("\n已中断", file=sys.stderr)
             return 130
+        except BlockDetectedError as e:
+            # 审查修复（P1）：--task 路径曾缺封禁终态处理——裸栈 + exit 1 +
+            # 无证据，而 v2 --config 路径有完整 exit 5 契约。补齐：
+            print(f"⛔ {e}", file=sys.stderr)
+            print("   已停止采集：宁可不写，也不把封禁页写进数据。", file=sys.stderr)
+            print("   处置：冷却/换出口/降频后重试；核查台账 budget --list", file=sys.stderr)
+            try:
+                _cfg = json.loads((tp / "config.json").read_text(encoding="utf-8"))
+                _od = Path(str((_cfg.get("output") or {}).get("dir", tp / "out")))
+                if not Path(_od).is_absolute():
+                    _od = tp / _od
+                _od.mkdir(parents=True, exist_ok=True)
+                (_od / "blocked.json").write_text(json.dumps(
+                    {"blocked": True, "kind": e.kind, "url": e.url, "detail": e.detail,
+                     "at": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+                print(f"   证据已写 {_od / 'blocked.json'}", file=sys.stderr)
+            except Exception as _we:
+                print(f"⚠️ blocked.json 写盘失败（{type(_we).__name__}: {_we}）"
+                      "——请以本条与上方 stderr 中的 kind/url/detail 为封禁证据", file=sys.stderr)
+            return 5
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result.get("stopped") == "max_requests":
+            print("🛑 请求预算硬闸触发（--max-requests / anti_bot.max_requests），已按检查点停",
+                  file=sys.stderr)
+            return 4
+        if result.get("nodata"):
+            print("⚠️ 0 条记录：nodata.json 已写入输出目录（0 结果不假成功，请先诊断再重试）",
+                  file=sys.stderr)
+            return 3
         return 0
     cfg_path = Path(args.config)
     try:
@@ -965,11 +2353,62 @@ def main() -> int:
     try:
         result = run_config(config, overrides=overrides, base_dir=cfg_path.resolve().parent,
                             resume=args.resume, limit=args.limit, dry_run=args.dry_run,
-                            log_file=args.log_file)
+                            log_file=args.log_file, max_requests=getattr(args, "max_requests", None))
     except KeyboardInterrupt:
         print("\n已中断，检查点已保存，可用 --resume 续跑", file=sys.stderr)
         return 130
+    except MaxRequestsExceeded as e:
+        # 注意必须显式捕获：它继承 BaseException（穿透客户端重试网），except Exception 接不住
+        print(f"🛑 请求预算硬闸：{e}", file=sys.stderr)
+        print("   已抓数据已按迭代落盘；如需继续请调大 --max-requests", file=sys.stderr)
+        return 4
+    except BlockDetectedError as e:
+        # 裁判文书网战训：封禁页命中必须硬停机 + 落证据（exit 5）
+        print(f"⛔ {e}", file=sys.stderr)
+        print("   已停止采集：宁可不写，也不把封禁页写进数据。"
+              "失败迭代已抓的内存记录已丢弃（此前已完成迭代的导出文件保留）。",
+              file=sys.stderr)
+        print("   处置：冷却/换出口/降频后重试；核查台账 budget --list", file=sys.stderr)
+        try:
+            _cfg = load_config(cfg_path)  # pyflakes：局部 as _lc 导入未用——模块级已导入
+            _od = Path(os.path.expandvars(os.path.expanduser(
+                str((_cfg.get("output") or {}).get("dir", "outputs")))))
+            _od.mkdir(parents=True, exist_ok=True)
+            (_od / "blocked.json").write_text(json.dumps(
+                {"blocked": True, "kind": e.kind, "url": e.url, "detail": e.detail,
+                 "at": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False, indent=1),
+                encoding="utf-8")
+            print(f"   证据已写 {_od / 'blocked.json'}", file=sys.stderr)
+        except Exception as _we:
+            # 审查修复 P1：证据写盘失败曾静默——exit 5 却找不到 blocked.json
+            print(f"⚠️ blocked.json 写盘失败（{type(_we).__name__}: {_we}）"
+                  "——请以本条与上方 stderr 中的 kind/url/detail 为封禁证据", file=sys.stderr)
+        return 5
+    except RateLimitedError as e:
+        # 审查修复 P1：9 种拦截类在 _request 先抛 RateLimitedError——曾裸栈崩
+        # exit 1 无证据。统一按"站点在推回"处理：落证据 + exit 5
+        print(f"⛔ 反爬拦截/限流：{e}", file=sys.stderr)
+        print("   已停止采集。处置：冷却/换出口/降频后重试（详见 anti-block-playbook）。",
+              file=sys.stderr)
+        try:
+            _cfg = load_config(cfg_path)  # pyflakes：局部 as _lc 导入未用——模块级已导入
+            _od = Path(os.path.expandvars(os.path.expanduser(
+                str((_cfg.get("output") or {}).get("dir", "outputs")))))
+            _od.mkdir(parents=True, exist_ok=True)
+            (_od / "blocked.json").write_text(json.dumps(
+                {"blocked": True, "kind": "rate_limited", "url": e.url,
+                 "detail": e.detail, "status": e.status,
+                 "at": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False, indent=1),
+                encoding="utf-8")
+            print(f"   证据已写 {_od / 'blocked.json'}", file=sys.stderr)
+        except Exception as _we:
+            print(f"⚠️ blocked.json 写盘失败（{type(_we).__name__}: {_we}）"
+                  "——请以 stderr 为封禁证据", file=sys.stderr)
+        return 5
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result.get("nodata"):
+        print("⚠️ 0 条记录：nodata.json 已写入输出目录（0 结果不假成功，请先诊断再重试）", file=sys.stderr)
+        return 3
     return 0
 
 

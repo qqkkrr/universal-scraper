@@ -16,11 +16,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .core import export_rows, log, die
+from .core import export_rows, log, die, safe_fname, MaxRequestsExceeded
+from .protocols import BlockDetectedError
 from .selectors import jpath, apply_extractor, regex_extract_all
 from .fetchers import HttpFetcher, BrowserScriptFetcher, BrowserFetcher, _resolve_template
 from .log import Logger
-from .config import validate as validate_config
+from .config import validate as validate_config, ConfigError
 from .middleware import MiddlewareChain
 from .proxy import ProxyPool
 from .storage import Checkpoint, SeenStore, record_key
@@ -42,9 +43,11 @@ def map_record(raw: Dict[str, Any], fields: Dict[str, Any]) -> Dict[str, Any]:
                 "已跳过映射、保留原始字段——请修正配置")
         return dict(raw)
     for name, spec in fields.items():
+        _strip = False
         if isinstance(spec, str):
             out[name] = jpath(raw, spec, None)
         elif isinstance(spec, dict):
+            _strip = bool(spec.get("strip_tags"))
             if "from" in spec:
                 out[name] = jpath(raw, spec["from"], spec.get("default"))
             elif "path" in spec:
@@ -54,7 +57,11 @@ def map_record(raw: Dict[str, Any], fields: Dict[str, Any]) -> Dict[str, Any]:
             elif "template" in spec:
                 try:
                     out[name] = spec["template"].format(**{k: (v if v is not None else "") for k, v in raw.items()})
-                except Exception:
+                except Exception as _tpl_e:
+                    # OCR R131（M）：模板变量缺失/格式错曾静默空串——排错无门
+                    import sys as _sys
+                    print(f"⚠️ 字段模板渲染失败 {name}: {type(_tpl_e).__name__}: {str(_tpl_e)[:80]}",
+                          file=_sys.stderr)
                     out[name] = ""
             elif "concat" in spec:
                 out[name] = "".join(str(jpath(raw, p, "")) for p in spec["concat"])
@@ -62,15 +69,23 @@ def map_record(raw: Dict[str, Any], fields: Dict[str, Any]) -> Dict[str, Any]:
                 out[name] = jpath(raw, spec.get("path", ""), None)
         else:
             out[name] = spec
+        # T1 实测（2026-09-27）：strip_tags 字段级选项——搜索类 API 高亮标签
+        # （gov.cn 的 <em>、通用搜索的 <b>/<mark>）是常见污染，取值后统一后处理
+        if _strip and isinstance(out.get(name), str):
+            import re as _re
+            out[name] = _re.sub(r"<[^>]+>", "", out[name])
     return out
 
 
 def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log_prefix: str = "") -> List[Dict[str, Any]]:
-    import re as _re
+    _re = re  # OCR R131（L）：局部 re 导入曾遮蔽模块级——统一用模块级引用
     for step in pipeline or []:
         st = step.get("type")
         if st == "filter":
-            field, op, value = step["field"], step.get("op", "contains"), step.get("value")
+            field, op, value = step.get("field"), step.get("op", "contains"), step.get("value")
+            if not field:
+                log(f"{log_prefix}filter 缺 field——步骤跳过", "WARN")
+                continue
             before = len(rows)
             # AI 配置防御：value 缺失/为 None 时按空串处理，避免 `None in str` 直接炸掉整单
             value = "" if value is None else str(value)
@@ -79,14 +94,26 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
             elif op == "eq":
                 rows = [r for r in rows if str(r.get(field)) == str(value)]
             elif op == "regex":
-                pat = _re.compile(step.get("pattern", ""))
+                # R94 修复（P1）：非法正则曾 re.error 炸掉整单（抓完不导出）
+                try:
+                    pat = _re.compile(str(step.get("pattern") or step.get("value") or ""))
+                except (_re.error, TypeError, ValueError) as e:
+                    log(f"{log_prefix}filter regex 编译失败（步骤跳过）: {e}", "WARN")
+                    continue
                 rows = [r for r in rows if pat.search(str(r.get(field) or ""))]
+            elif op == "non_empty":
+                rows = [r for r in rows if str(r.get(field) or "").strip()]
             elif op == "not_contains":
                 rows = [r for r in rows if value not in str(r.get(field) or "")]
             elif op == "between":
-                # batch2400 审查修复：一条脏值（"N/A"等）曾把全部行清空——逐行容错
-                lo = float(step.get("min", float("-inf")))
-                hi = float(step.get("max", float("inf")))
+                # batch2400 审查修复：一条脏值（"N/A"等）曾把全部行清空——逐行容错。
+                # R95 修复（P2）：配置里的 min/max 本身非数值时也曾 ValueError 炸整单
+                try:
+                    lo = float(step.get("min", float("-inf")))
+                    hi = float(step.get("max", float("inf")))
+                except (TypeError, ValueError) as e:
+                    log(f"{log_prefix}between min/max 非数值（步骤跳过）: {e}", "WARN")
+                    continue
                 kept = []
                 for r in rows:
                     try:
@@ -101,8 +128,10 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
             before = len(rows)
             seen = set(); uniq = []
             for r in rows:
-                k = tuple(str(r.get(kk)) for kk in (key if isinstance(key, list) else [key]))
-                if any(kk in ("None", "") for kk in k):
+                k = tuple(str(r.get(kk) or "") for kk in (key if isinstance(key, list) else [key]))
+                # OCR R131（M）：字面量 "None" 曾被当缺失跳过去重（对齐 pipelines
+                # 的同款修复）——None→"" 已由 or "" 处理
+                if any(kk == "" for kk in k):
                     uniq.append(r)
                     continue
                 if k not in seen:
@@ -111,11 +140,14 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
             log(f"{log_prefix}dedup[{key}]: {before} -> {len(rows)}")
         elif st == "rename":
             for r in rows:
-                for old, new in step.get("mapping", {}).items():
+                for old, new in (step.get("mapping") or {}).items():
                     if old in r:
                         r[new] = r[old]; del r[old]
         elif st == "cast":
-            field, ctype = step["field"], step.get("to", "str")
+            field, ctype = step.get("field"), step.get("to", "str")
+            if not field:
+                log(f"{log_prefix}cast 缺 field——步骤跳过", "WARN")
+                continue
             for r in rows:
                 v = r.get(field)
                 try:
@@ -125,14 +157,22 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
                         r[field] = float(str(v).replace(",", ""))
                     elif ctype == "str":
                         r[field] = str(v) if v is not None else ""
-                except (ValueError, TypeError):
+                except (ValueError, TypeError, OverflowError):
+                    # OCR R131（属性测试抓获）：超大整数经 float 转 int 抛 OverflowError
                     pass
         elif st == "add":
+            _af = step.get("field")
+            if not _af:
+                log(f"{log_prefix}add 缺 field——步骤跳过", "WARN")
+                continue
             for r in rows:
-                r[step["field"]] = step.get("value")
+                r[_af] = step.get("value")
         elif st == "transform":
             # 字段变换：op=unix_to_datetime（秒/毫秒时间戳自适应）| upper | lower
-            field, op = step["field"], step.get("op", "unix_to_datetime")
+            field, op = step.get("field"), step.get("op", "unix_to_datetime")
+            if not field:
+                log(f"{log_prefix}transform 缺 field——步骤跳过", "WARN")
+                continue
             fmt = step.get("fmt", "%Y-%m-%d %H:%M:%S")
             changed = 0
             for r in rows:
@@ -155,9 +195,20 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
             log(f"{log_prefix}transform[{field} {op}]: {changed} 条已变换")
         elif st == "regex_extract":
             # 正则提取变换（闲鱼战例）：从既有字段按 capture group 派生新字段
-            field = step["field"]
-            pat = _re.compile(step.get("pattern", ""))
-            grp = int(step.get("group", 1))
+            field = step.get("field")
+            if not field:
+                log(f"{log_prefix}regex_extract 缺 field——步骤跳过", "WARN")
+                continue
+            try:
+                pat = _re.compile(str(step.get("pattern", "")))
+            except (_re.error, TypeError, ValueError) as e:
+                log(f"{log_prefix}regex_extract 编译失败（步骤跳过）: {e}", "WARN")
+                continue
+            try:
+                grp = int(step.get("group", 1))
+            except (TypeError, ValueError):
+                log(f"{log_prefix}regex_extract group 非整数（按 1 处理）", "WARN")
+                grp = 1
             to = step.get("to") or (field + "_提取")
             n_hit = 0
             for r in rows:
@@ -171,7 +222,10 @@ def run_pipeline(rows: List[Dict[str, Any]], pipeline: List[Dict[str, Any]], log
             log(f"{log_prefix}regex_extract[{field}->{to}]: 命中 {n_hit}/{len(rows)}")
         elif st == "template":
             # 用已有字段拼新字段：tmpl 里 {字段名} 占位，如 "https://www.bilibili.com/video/{bvid}"
-            name, tmpl = step["field"], step.get("tmpl", "")
+            name, tmpl = step.get("field"), step.get("tmpl", "")
+            if not name or not isinstance(tmpl, str):
+                log(f"{log_prefix}template 缺 field 或 tmpl 非字符串——步骤跳过", "WARN")
+                continue
             for r in rows:
                 out = tmpl
                 for k, v in r.items():
@@ -201,15 +255,23 @@ def _tmpl_value(v: Any, row: Dict[str, Any]) -> Any:
 
 
 def fetch_detail_row(http, row: Dict[str, Any], detail: Dict[str, Any]) -> Dict[str, Any]:
-    url = row.get(detail.get("url_field", "url")) or ""
+    _uf = detail.get("url_field", "url")
+    # R88：优先用 run_config 补全的绝对地址（<url_field>_final）——原始字段
+    # 保持原样（裸 ID 字段曾连 POST body 插值一起被改写成 URL）
+    url = row.get(_uf + "_final") or row.get(_uf) or ""
     if not url:
         return row
     for tr in detail.get("url_transform", []):
+        # R88：兼容文档写法 {"type": "prefix", "value": "..."} 与简写 {"prefix": "..."}
+        if "type" in tr and "value" in tr:
+            tr = {tr["type"]: tr["value"]}
         if "replace" in tr:
             old, new = tr["replace"][0], tr["replace"][1]
             url = url.replace(old, new)
         elif "prefix" in tr:
-            url = tr["prefix"] + url
+            # 🛡️ 绝对链接不拼前缀（v3 同款）：防 https://host + https://host 双域名
+            if not url.startswith(("http://", "https://")):
+                url = tr["prefix"] + url
         elif "suffix" in tr:
             url = url + tr["suffix"]
     # 详情支持 POST（小米有品战例：评分/规格在 POST 网关里，body 用 {字段} 从列表行插值）
@@ -224,6 +286,21 @@ def fetch_detail_row(http, row: Dict[str, Any], detail: Dict[str, Any]) -> Dict[
     html = resp.get("text", "")
     row[detail.get("url_field", "url") + "_final"] = url
     row["detail_status"] = str(resp.get("status"))
+    # 裁判文书网战训（审查 P0 残留）：详情页的 200 封禁页曾按正常页抽取入库
+    # （detail_status="200"、exit 0）——命中即跳过抽取，绝不把封禁页写进数据
+    try:
+        from .antibot import detect_block as _db
+        _bd = _db(resp.get("status", 0), html, resp.get("headers"), url)
+        if _bd["kind"] not in ("none", "login", "http_error"):
+            row["detail_status"] = f"blocked:{_bd['kind']}"
+            row["detail_block_detail"] = _bd["detail"][:120]
+            return row
+    except Exception as _dbe:
+        # 审查修复 P0：裸 pass 曾让守卫失效时封禁页照常入库（detail_status="200"）
+        # ——判型失败按"疑似封禁"处理（宁可不写），并大声记录
+        row["detail_status"] = "blockcheck_error"
+        row["detail_block_detail"] = f"{type(_dbe).__name__}: {_dbe}"[:120]
+        return row
     # 详情返回 JSON 时 extract 走 type:json（jpath 点路径，含 [name=xx] 过滤）
     ctx_obj = None
     if detail.get("type") == "http_json":
@@ -234,6 +311,10 @@ def fetch_detail_row(http, row: Dict[str, Any], detail: Dict[str, Any]) -> Dict[
             ctx_obj = None
     for spec in detail.get("extract", []):
         row[spec["name"]] = apply_extractor(spec, html, html, ctx_obj)
+    # R118 修复（P1）：resume 哨兵字段——fetch_details 的 todo 过滤和检查点
+    # 合并门都以 detail_body 非空判定"已完成"，但此前全库无任何写入点，
+    # --resume 的详情跳过是静默 no-op。截断 500 字符做正文预览（防检查点膨胀）。
+    row["detail_body"] = html[:500]
     return row
 
 
@@ -241,31 +322,108 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
                   source: Optional[Dict[str, Any]] = None) -> List:
     if not detail.get("enabled"):
         return rows
+    # OCR R6：extract spec 缺 "name" 曾通过 validate、逐行抽取时才 KeyError——
+    # browser 后端整个崩、HTTP 路径每行 ERR:KeyError（同 R94"抓完整单才炸"）。
+    # 开抓前先报清楚。
+    for i, spec in enumerate(detail.get("extract", []) or []):
+        if isinstance(spec, dict) and not spec.get("name"):
+            raise ConfigError(f"detail.extract[{i}]", "extract 步骤缺少 name（抽取值要写入的列名）",
+                              '例如: {"type": "css", "name": "价格", "selector": ".price"}')
     concurrency = int(detail.get("concurrency", 1))
     interval = float(detail.get("interval", 0.5))
     timeout = float(anti.get("timeout", 15))
     todo = [r for r in rows if not (r.get("detail_body") or "").strip()]
+    # R90 修复（P2）：opt-in respect_robots 时详情请求也曾绕过 robots——
+    # 与 fetch_list 同闸
+    _robots = None
+    if anti.get("respect_robots"):
+        try:
+            from .robots import RobotsTxt
+            _robots = RobotsTxt(user_agent="universal-scraper/1.0")
+        except Exception:
+            _robots = None
+    if _robots is not None and todo:
+        _uf = detail.get("url_field", "url")
+
+        def _robot_ok(r):
+            u = r.get(_uf + "_final") or r.get(_uf) or ""
+            try:
+                return bool(u) and _robots.allowed(u)
+            except Exception:
+                return True
+        _skip = [r for r in todo if not _robot_ok(r)]
+        if _skip:
+            for r in _skip:
+                r["detail_status"] = "robots_disallowed"
+            # OCR R131（L）：todo 全集已在 _skip 判定中算过一次 _robot_ok——
+            # 二次全量重算改为集合差（同结果，一半开销）
+            _skip_ids = {id(r) for r in _skip}
+            todo = [r for r in todo if id(r) not in _skip_ids]
+            (logger or Logger()).warn(f"⛔ robots 禁止 {len(_skip)} 条详情 URL，已跳过")
     done = len(rows) - len(todo)
     (logger or Logger()).info(f"详情：共 {len(rows)}，已有 {done}，待抓 {len(todo)}（并发 {concurrency}）")
     if not todo:
         return rows
 
     # 详情 browser 后端（闲鱼战例）：登录态+JS 站的详情页 HTTP 全是空壳——
-    # 单次桥进程（可 cdp 附加）顺序导航全部 URL，一次连接抓完再统一抽取
+    # 单次浏览器实例顺序导航全部 URL，一次连接抓完再统一抽取。
+    # R101：backend 为 auto/playwright 且 playwright-python 可用时走进程内
+    # 渲染（无 JSONL 桥协议层）；否则回落 node 桥（CDP 附加备用通道）
     if str(detail.get("backend", "")).lower() == "browser":
-        from .fetchers import BrowserFetcher
-        bsrc = {"type": "browser", "url": todo[0].get(detail.get("url_field", "url")) or "about:blank",
-                "cdp": detail.get("cdp") or (source or {}).get("cdp"),
-                "headless": detail.get("headless", False)}
-        bf = BrowserFetcher(bsrc, anti, {}, Path("."))
         url_field = detail.get("url_field", "url")
-        urls = [r.get(url_field) or "" for r in todo]
-        pages = bf.fetch_pages([u for u in urls if u])
+        urls = [r.get(url_field + "_final") or r.get(url_field) or "" for r in todo]
+        _backend_mode = str(detail.get("browser_backend", "auto")).lower()
+        pages = None
+        _pw = None  # R102 修复（P1）：未初始化曾致 playwright 缺失/node 模式下 UnboundLocalError
+        if _backend_mode in ("auto", "playwright"):
+            try:
+                from .browser_pw import PWBrowserFetcher, playwright_available
+                if playwright_available():
+                    _pw = PWBrowserFetcher({"cdp": detail.get("cdp") or (source or {}).get("cdp")},
+                                           anti, {}, Path("."))
+                    # R101 修复（P2）：probe-launch 前置——chromium 二进制缺失时
+                    # launch 失败必须在此暴露并回落 node 桥，而不是逐页静默
+                    # browser_miss（曾违背 auto"能启动就用"契约）
+                    _pw.ensure()
+            except Exception as _pw_err:
+                (logger or Logger()).warn(f"playwright 初始化失败，回落 node 桥: {_pw_err}")
+                _pw = None
+        if _pw is not None:
+            try:
+                # R116：并发渲染——分片数跟 detail.concurrency（上限 3，浏览器实例重）
+                _workers = max(1, min(3, concurrency))
+                pages = _pw.fetch_pages([u for u in urls if u],
+                                        workers=_workers)  # ensure 已通过，此处幂等
+            finally:
+                # R113 修复（P3）：fetch_pages 中途异常曾跳过 close——浏览器进程泄漏
+                _pw.close()
+        if pages is None:
+            from .fetchers import BrowserFetcher
+            bsrc = {"type": "browser",
+                    "url": urls[0] if urls else "about:blank",
+                    "cdp": detail.get("cdp") or (source or {}).get("cdp"),
+                    "headless": detail.get("headless", False)}
+            bf = BrowserFetcher(bsrc, anti, {}, Path("."))
+            pages = bf.fetch_pages([u for u in urls if u])
         got = 0
         for r in todo:
-            url = r.get(url_field) or ""
+            url = r.get(url_field + "_final") or r.get(url_field) or ""
             html = pages.get(url, "")
             r[url_field + "_final"] = url
+            # R88：与 HTTP 详情同款封禁门——渲染出的封禁页绝不抽取入库
+            if html:
+                try:
+                    from .antibot import detect_block as _db
+                    _bd = _db(200, html, {}, url)
+                    if _bd["kind"] not in ("none", "login", "http_error"):
+                        r["detail_status"] = f"blocked:{_bd['kind']}"
+                        r["detail_block_detail"] = _bd["detail"][:120]
+                        continue
+                except Exception as _dbe:
+                    # R128 修复（OCR）：裸 pass 曾让封禁页照常入库（同 HTTP 路径 R88 口径）
+                    r["detail_status"] = "blockcheck_error"
+                    r["detail_block_detail"] = f"{type(_dbe).__name__}: {_dbe}"[:120]
+                    continue
             r["detail_status"] = "200" if html else "browser_miss"
             ctx_obj = None
             if detail.get("type") == "http_json":
@@ -278,7 +436,12 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
                 r[spec["name"]] = apply_extractor(spec, html, html, ctx_obj)
             if html:
                 got += 1
+                r["detail_body"] = html[:500]  # R118 哨兵（同 HTTP 路径）
         (logger or Logger()).info(f"详情(browser)：批抓 {got}/{len(todo)} 页成功")
+        # OCR R6：browser 后端此前从不落检查点（HTTP 路径都落）——中断后
+        # --resume 全部重抓。尾部与 HTTP 路径同口径落一次盘。
+        if checkpoint and todo:
+            checkpoint.save(rows, done + len(todo), len(rows))
         return rows
 
     # batch2400 审查修复：详情/下载与列表共用同一 HTTP 栈（make_http_client 透传
@@ -300,7 +463,10 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
                 checkpoint.save(rows, done + i, len(rows))
             time.sleep(interval)
     else:
-        with ThreadPoolExecutor(max_workers=concurrency) as ex:
+        # 审查修复 P1：硬闸(BaseException)穿透时，with 退出会等全部排队 future
+        # 各睡完 min_interval（千行任务=十几分钟假死）——中止路径须取消排队
+        ex = ThreadPoolExecutor(max_workers=concurrency)
+        try:
             futs = {ex.submit(_work, r): r for r in todo}
             for i, fut in enumerate(as_completed(futs), 1):
                 r = futs[fut]
@@ -311,6 +477,13 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
                 if checkpoint and i % detail.get("checkpoint_every", 20) == 0:
                     checkpoint.save(rows, done + i, len(rows))
                 time.sleep(interval / concurrency)
+        except BaseException:
+            ex.shutdown(wait=False, cancel_futures=True)
+            raise
+        ex.shutdown(wait=True)
+    # R118 修复（P3）：尾部不足 checkpoint_every 的行落盘（resume 少重抓）
+    if checkpoint and todo:
+        checkpoint.save(rows, done + len(todo), len(rows))
     return rows
 
 
@@ -326,14 +499,23 @@ def fetch_sitemap_urls(http, url: str, max_urls: int = 500,
     visited.add(url)
     urls: List[str] = []
     if url.rstrip("/").endswith("robots.txt"):
-        res = http.get(url)
+        try:
+            res = http.get(url)
+        except Exception as e:
+            log(f"sitemap robots.txt 拉取失败 {url}: {type(e).__name__}: {e}", "WARN")
+            return []
         for m in regex_extract_all(res.get("text", ""), r"Sitemap:\s*(\S+)", 1):
             urls.extend(fetch_sitemap_urls(http, m, max_urls, visited, _depth + 1))
         return urls[:max_urls]
-    res = http.get(url)
+    try:
+        res = http.get(url)
+    except Exception as e:
+        log(f"sitemap 拉取失败 {url}: {type(e).__name__}: {e}", "WARN")
+        return []
     html = res.get("text", "")
-    # 普通 sitemap 或 sitemap index
-    for m in regex_extract_all(html, r"<loc>\s*([^<]+?)\s*</loc>", 1):
+    # 普通 sitemap 或 sitemap index（cap=16MB：内部固定模式无 ReDoS 风险，
+    # 不吃用户模式的 64KB 截断——大 sitemap 曾被截丢后段 <loc>）
+    for m in regex_extract_all(html, r"<loc>\s*([^<]+?)\s*</loc>", 1, cap=16 * 1024 * 1024):
         u = m.strip()
         if u.endswith(".xml") or "sitemap" in u.lower():
             urls.extend(fetch_sitemap_urls(http, u, max_urls, visited, _depth + 1))
@@ -349,6 +531,25 @@ def download_files(rows, dl_cfg, anti, out_dir: Path, logger: Optional[Logger] =
     if not dl_cfg or not dl_cfg.get("enabled"):
         return 0
     url_field = dl_cfg.get("url_field", "url")
+    # R90 修复（P2）：opt-in respect_robots 时下载请求也曾绕过 robots
+    if anti.get("respect_robots"):
+        try:
+            from .robots import RobotsTxt as _RT
+            _rt = _RT(user_agent="universal-scraper/1.0")
+            _kept = []
+            for r in rows:
+                _u = r.get(url_field + "_final") or r.get(url_field) or ""
+                try:
+                    if _u and not _rt.allowed(_u):
+                        continue
+                except Exception:
+                    pass
+                _kept.append(r)
+            if len(_kept) != len(rows):
+                (logger or Logger()).warn(f"⛔ robots 禁止 {len(rows) - len(_kept)} 条下载 URL，已跳过")
+            rows = _kept
+        except Exception:
+            pass
     dest_dir = out_dir / dl_cfg.get("dir", "files")
     dest_dir.mkdir(parents=True, exist_ok=True)
     size_limit = int(dl_cfg.get("size_limit", 50 * 1024 * 1024))
@@ -358,86 +559,140 @@ def download_files(rows, dl_cfg, anti, out_dir: Path, logger: Optional[Logger] =
     from .core import make_http_client
     http = make_http_client({**anti, "min_interval": dl_cfg.get("interval", 0.3), "timeout": 60})
     done = 0
+    import threading as _th
+    _name_lock = _th.Lock()
 
     def _dl(r) -> int:
-        url = r.get(url_field) or ""
+        # R88：优先读 run_config 补全的绝对地址（<url_field>_final）
+        url = r.get(url_field + "_final") or r.get(url_field) or ""
         if not url:
             return 0
         try:
             resp = http.get(url, max_size=size_limit + 1)  # +1 才能检出"超限被截断"
             if not resp.get("ok"):
+                # R118 修复（P3）：HTTP 失败也写 download_error（与异常路径同口径）
+                r["download_error"] = f"HTTP {resp.get('status', 0)}"
                 return 0
             body = resp.get("body", b"")
             if len(body) > size_limit:
+                r["download_error"] = f"超限（>{size_limit // 1024 // 1024}MB）"
                 return 0
             name = str(r.get("id") or r.get("title") or url.split("/")[-1] or "file")
             ext = Path(url.split("?")[0]).suffix or ".bin"
             safe = "".join(c for c in name if c.isalnum() or c in "_-.")[:80] or "file"
-            fp = dest_dir / f"{safe}{ext}"
-            fp.write_bytes(body)
+            # 审查修复 P2：同名曾静默互覆（两个 report.pdf 只剩一个）。
+            # R78 修正：write_bytes 也须在锁内——曾只锁选择不锁写入，两 worker
+            # 可同时选中同一路径再互覆
+            with _name_lock:
+                fp = dest_dir / f"{safe}{ext}"
+                n = 2
+                while fp.exists():
+                    fp = dest_dir / f"{safe}_{n}{ext}"
+                    n += 1
+                fp.write_bytes(body)
             r["downloaded_file"] = str(fp)
             return 1
-        except Exception:
+        except Exception as e:
+            # 审查修复 P2：失败曾只 return 0——0 下载与"没文件"不可区分
+            r["download_error"] = f"{type(e).__name__}: {str(e)[:120]}"
             return 0
 
-    with ThreadPoolExecutor(max_workers=concurrency) as ex:
+    ex = ThreadPoolExecutor(max_workers=concurrency)
+    try:
         for fut in as_completed([ex.submit(_dl, r) for r in rows]):
             done += fut.result()
+    except BaseException:
+        # 硬闸/中断穿透：取消排队下载（同 fetch_details 的假死修复）
+        ex.shutdown(wait=False, cancel_futures=True)
+        raise
+    ex.shutdown(wait=True)
     (logger or Logger()).info(f"文件下载完成: {done}/{len(rows)} -> {dest_dir}")
     return done
 
 
 def _merge_url(url: str, base: str) -> str:
+    """相对链接 → 绝对地址。实战（books.toscrape detail 全 404）：曾用裸字符串
+    拼接——"../../../x" 相对页路径与 "//cdn/x" 协议相对都会拼坏。改标准
+    urljoin（浏览器语义）：/ 开头以 host 为根、"../" 正确回溯、协议相对补全。"""
     if not url:
         return ""
-    if url.startswith("http"):
+    if url.startswith(("http://", "https://")):
         return url
-    return base.rstrip("/") + ("/" + url.lstrip("/") if not url.startswith("/") else url)
+    if not base:
+        return url
+    from urllib.parse import urljoin
+    return urljoin(base, url)
 
 
 class GracefulExit:
-    """捕获 Ctrl+C，优雅保存检查点后退出。"""
+    """捕获 Ctrl+C，优雅保存检查点后退出。
+    R118 修复（P2）：连按两次 Ctrl+C 恢复默认硬中断——此前 handler 只置旗标
+    且被永久挂上，长详情阶段按多少次都要等跑完，用户只能强杀终端。"""
     def __init__(self, checkpoint: Optional[Checkpoint]):
         self.checkpoint = checkpoint
         self.stop = False
+        self._sigcount = 0
         signal.signal(signal.SIGINT, self._handler)
 
     def _handler(self, *a):
+        self._sigcount += 1
+        if self._sigcount >= 2:
+            # 第二次 Ctrl+C：恢复默认硬中断（立即退出，不再等阶段收尾）
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+            print("\n[Ctrl+C ×2] 立即硬退出（检查点已按节奏落盘）",
+                  file=__import__("sys").stderr)
+            raise KeyboardInterrupt
         self.stop = True
-        print("\n[Ctrl+C] 正在保存检查点并退出...", file=__import__("sys").stderr)
+        print("\n[Ctrl+C] 正在保存检查点并退出...（再按一次立即硬退出）",
+              file=__import__("sys").stderr)
 
-    def save(self, rows):
-        if self.checkpoint:
-            try:
-                self.checkpoint.save(rows, len(rows), len(rows))
-            except Exception:
-                pass
 
 
 def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = None,
                base_dir: Optional[Path] = None, resume: bool = False,
                limit: Optional[int] = None, log_file: Optional[Path] = None,
-               dry_run: bool = False) -> Dict[str, Any]:
+               dry_run: bool = False, max_requests: Optional[int] = None) -> Dict[str, Any]:
     config = validate_config(config)
     name = config.get("name", "task")
     vars = dict(config.get("vars", {}))
     if overrides:
         vars.update(overrides)
     anti = dict(config.get("anti_bot", {}))
+    # 任务级请求预算（NBS 考核战训："总请求数 ≤N"硬约束必须可审计、可硬闸——
+    # 此前请求计数只读不写，汇总恒打印"请求 0"）
+    from .core import set_request_budget
+    set_request_budget(int(max_requests or anti.get("max_requests") or 0))
     output = config.get("output", {})
     # 版权中心战例：~/Desktop 写法曾把波浪号当字面路径，在 CWD 下建出名为 '~' 的目录
     out_dir = Path(os.path.expandvars(os.path.expanduser(str(output.get("dir", "outputs")))))
     out_dir.mkdir(parents=True, exist_ok=True)
+    # 审查修复（P2，R5）：v1 曾无运行锁——cron 重叠 + 手动重跑会互踩同一
+    # out_dir（导出文件写花、checkpoint/seen 损坏）。复用 v3 的 fail-fast 锁
+    from .engine_v3 import _acquire_run_lock
+    _run_lock = _acquire_run_lock(out_dir)
+    # 审查二轮（H）：unlink 曾只在函数尾部正常路径——中途异常锁残留。整段
+    # try/finally 缩进风险大，用 atexit 兜底（正常路径 954 仍先行删除；残留场景
+    # 下次运行另有 PID 判死接管双保险）
+    import atexit as _atexit
+    _atexit.register(lambda: _run_lock.unlink(missing_ok=True))
     cap_dir = out_dir / ".captcha"
     cap_dir.mkdir(parents=True, exist_ok=True)
     anti["captcha_dir"] = str(cap_dir)
     session_dir = out_dir / ".session"
     session_dir.mkdir(parents=True, exist_ok=True)
     anti["session_dir"] = str(session_dir)
-    anti["session_name"] = anti.get("session_name") or name  # 可用配置指定，实现多任务共享登录态
+    anti["session_name"] = safe_fname(anti.get("session_name") or name)  # 可用配置指定，实现多任务共享登录态（R91：净化防路径逃逸）
 
-    logger = Logger(log_file=log_file or (out_dir / f".run_{name}.log"))
+    logger = Logger(log_file=log_file or (out_dir / f".run_{safe_fname(name)}.log"))
     middleware = MiddlewareChain(config.get("middleware"), logger=logger)
+    # R116：代理 API adapter（住宅/商业提取 API → 并入池；静态代理保留在前）
+    try:
+        from .proxy_api import merge_api_proxies
+        merge_api_proxies(anti, logger)
+    except Exception as _e:
+        # 审查二轮（M）：裸 pass 曾吞掉代理 API 配置错误（Key 写错/URL 错）——
+        # 任务静默按"无代理"跑完才被发现。大声记录后继续（代理缺失不阻塞任务）
+        logger.warn(f"代理 API 合并失败（按无代理 API 运行）: {type(_e).__name__}: {str(_e)[:120]}")
     proxy_pool = ProxyPool(anti.get("proxies"), anti.get("proxy_mode", "round_robin"))
     if anti.get("proxy"):
         proxy_pool = ProxyPool([anti["proxy"]])
@@ -446,7 +701,7 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
     inc = config.get("incremental", {})
     seen = None
     if inc.get("enabled"):
-        seen = SeenStore(out_dir / f".seen_{name}.txt")
+        seen = SeenStore(out_dir / f".seen_{safe_fname(name)}.txt")
         logger.info(f"增量模式已开启（已见 {len(seen)} 条）")
 
     iterate = config.get("iterate")
@@ -468,19 +723,21 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
         logger.info(f"===== 迭代: {it or '(默认)'} =====")
         source = _resolve_template(config.get("source", {}), ivars)
         pagination = _resolve_template(config.get("pagination", {}), ivars)
-        # 相对详情/下载链接的基准：默认取 source.url 的 origin（http(s)://host[:port]）
+        # 相对详情/下载链接的基准：实战（books.toscrape）曾只取 origin（host 根）
+        # ——相对页路径链接（../../../x）拼出 404。改用完整列表页 URL，
+        # urljoin 按浏览器语义解析（对 / 开头链接与 host 根基准结果一致）
         if not source.get("base_url") and source.get("url"):
             from urllib.parse import urlsplit
             _pu = urlsplit(source["url"])
             if _pu.scheme and _pu.netloc:
-                source["base_url"] = f"{_pu.scheme}://{_pu.netloc}"
+                source["base_url"] = source["url"]
         ftype = source.get("type")
         fetcher_cls = FETCHERS.get(ftype)
         if fetcher_cls is None:
             die(f"未知 source.type: {ftype}")
 
         # 断点续跑：加载该迭代已有结果
-        cp_path = out_dir / f".checkpoint_{name}_{it_name}.json"
+        cp_path = out_dir / f".checkpoint_{safe_fname(name)}_{safe_fname(it_name)}.json"
         checkpoint = Checkpoint(cp_path)
         graceful.checkpoint = checkpoint
         prev_rows = checkpoint.load_rows() if resume else []
@@ -503,8 +760,8 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
         anti_iter["_task_dir"] = str(out_dir)
         if proxy_pool.size:
             anti_iter["_proxy_pool"] = proxy_pool
-            if isinstance(fetcher_cls, HttpFetcher.__class__):
-                pass
+            # OCR R131（M）：恒真的 isinstance + 空 pass 死代码（HttpFetcher.__class__
+            # 是 type，任何类都 isinstance 成立）——删除
         cache_dir = out_dir / ".cache" if output.get("cache") else None
         fetcher = fetcher_cls(source, anti_iter, ivars, base_dir)
         if hasattr(fetcher, "http") and cache_dir:
@@ -514,7 +771,21 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             logger.info(f"[dry-run] 取数器 {ftype} 就绪: {source.get('url', source.get('bridge'))}")
             continue
 
-        rows_raw = fetcher.fetch_list(pagination)
+        try:
+            rows_raw = fetcher.fetch_list(pagination)
+        except (KeyboardInterrupt, MaxRequestsExceeded, BlockDetectedError):
+            raise
+        except Exception as e:
+            # 审查修复（P1，R5）：单迭代失败曾中止全部剩余迭代——多阶段配置里
+            # 一个源被 WAF 拦，后两个源的已采数据也跟着丢失出口。降级为跳过本迭代。
+            # R118 修复（P2）：resume 模式下失败迭代的检查点行曾随 continue 丢失——
+            # 合并导出只写成功迭代，主产物静默回退。改为沿用检查点行参与合并导出
+            if resume and prev_rows:
+                all_rows.extend(prev_rows)
+                logger.warn(f"迭代 {it_name} 抓取失败——沿用检查点 {len(prev_rows)} 条参与合并导出")
+            logger.error(f"迭代 {it_name} 抓取失败（跳过该迭代，继续其余）: "
+                         f"{type(e).__name__}: {str(e)[:140]}")
+            continue
         logger.info(f"原始记录: {len(rows_raw)}")
         if source.get("recon"):
             # 纯侦察模式（版权中心战例）：只要网络日志/现场证据，不做记录抽取与导出
@@ -558,13 +829,19 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
                 lab = iterate["labels"].get(str(it.get("stage", it.get(var_name))))
                 if lab:
                     r["iter_label"] = lab
-            r["url"] = _merge_url(r.get("url") or "", source.get("base_url", ""))
+            # OCR R131（实战反馈）：行内无 url 字段时曾无条件写 r["url"]=""——
+            # 恒空列被 verify 判"死列：抽取链路断裂"。仅在有值时补全绝对地址
+            _u = _merge_url(r.get("url") or "", source.get("base_url", ""))
+            if _u:
+                r["url"] = _u
             # 详情/下载的 URL 字段也补全为绝对地址（相对路径场景）
             _dlf = (config.get("download", {}) or {}).get("url_field")
             _dtf = (config.get("detail", {}) or {}).get("url_field")
             for _f in {_dlf, _dtf} - {None, "url"}:
                 if r.get(_f):
-                    r[_f] = _merge_url(str(r[_f]), source.get("base_url", ""))
+                    # R88：原字段不再原地改写（裸 ID 字段曾连 POST body 插值一起
+                    # 被污染成 URL）——绝对地址写 <字段>_final，消费方优先读它
+                    r[_f + "_final"] = _merge_url(str(r[_f]), source.get("base_url", ""))
             r["source_name"] = name
 
         # 中间件：数据产出
@@ -574,19 +851,28 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
         rows = run_pipeline(rows, _resolve_template(config.get("pipeline", []), ivars), log_prefix=f"[{name}] ")
 
         # 增量去重
+        _pending_keys = []  # 无增量/seen 为 None 时保持空列表（导出后标记点引用）
         if seen is not None:
             before = len(rows)
             kept = []
+            _pending_keys = []  # 审查修复 P1：延后到导出成功再标记（镜像 v3 契约）
             for r in rows:
                 key = record_key(r, inc.get("key", "id"))
                 if key and not seen.is_seen(key):
-                    seen.mark(key)
+                    _pending_keys.append(key)
                     kept.append(r)
             rows = kept
             logger.info(f"增量去重: {before} -> {len(rows)}（跳过已见）")
+            # 审查修复（P2，R6）：跨迭代同记录曾重复进合并导出——本迭代导出
+            # 成功后立即标记已见，下一迭代 is_seen 才能拦住。
+            # R10 复查修正：标记必须在 export_rows 成功【之后】（曾放 dedup
+            # 后立刻标——limit 截断/详情/导出崩溃会让这些行被 resume 永久跳过）
 
         if limit:
             rows = rows[:limit]
+            # R11 审查修复（P1）：截断曾不裁 keys——被截掉的行已标已见却从未
+            # 导出，后续全量跑会静默跳过它们
+            _pending_keys = _pending_keys[:len(rows)]
             logger.info(f"--limit {limit}: 截断到 {len(rows)} 条")
 
         # 详情
@@ -617,7 +903,7 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             all_rows.extend(prev_rows)
             logger.info("本次未抓到新记录，沿用检查点数据")
 
-        base = _resolve_template(output.get("base_name", name), ivars)
+        base = _resolve_template(output.get("base_name", safe_fname(name)), ivars)  # R93：净化防路径逃逸
         if len(iterations) > 1 and it:
             lab = iterate.get("labels", {}).get(str(it.get(var_name))) if iterate else None
             base = f"{base}_{lab or it_name}"
@@ -626,6 +912,11 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
                                 formats=output.get("formats") or ["json", "csv", "xlsx"])
             summary[base] = len(rows)
             logger.info(f"{base} 导出: {len(rows)} 条 -> " + ", ".join(f"{k}={v.name}" for k, v in paths.items()))
+            # 导出成功后立即标记已见（下一迭代 is_seen 拦住跨迭代重复；
+            # 必须在导出成功之后——R10 复查修正）
+            if seen is not None and _pending_keys and not dry_run:
+                for _k in _pending_keys:
+                    seen.mark(_k)
 
         if graceful.stop:
             break
@@ -636,13 +927,58 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
 
     # 合并导出
     if all_rows and not dry_run:
-        base = _resolve_template(output.get("base_name", name), vars)
+        base = _resolve_template(output.get("base_name", safe_fname(name)), vars)
         paths = export_rows(all_rows, out_dir, base + "_合并" if len(iterations) > 1 else base,
                             formats=output.get("formats") or ["json", "csv", "xlsx"])
         summary["_merged"] = len(all_rows)
         logger.info("合并导出: " + ", ".join(f"{k}={v.name}" for k, v in paths.items()))
         logger.info(f"总计 {len(all_rows)} 条")
+    # 审查修复 P1：导出成功后才标记已见（曾先标后导——导出崩溃=这些行被永久跳过）
+    if seen is not None:
+        try:
+            seen.flush()  # flush_every 不足额时此前一次都不落盘
+        except Exception as _flush_err:
+            # R128 修复（OCR）：静默吞曾致 resume 状态丢失不可感知
+            logger.error(f"seen.flush() 失败（增量去重状态可能未持久化）: "
+                         f"{type(_flush_err).__name__}: {_flush_err}")
     if dry_run:
         logger.info("[dry-run] 校验通过，未发起真实请求")
+    from .core import request_budget
+    _rq = request_budget()
+    logger.info("请求统计: {used}{limit}{rem}".format(
+        used=_rq["used"],
+        limit=f"/{_rq['limit']}" if _rq["limit"] else "",
+        rem=f"（剩 {_rq['remaining']}）" if _rq["limit"] else "") + " | "
+        + f"记录 {len(all_rows)}")
+    # 代理池战况（深度改进①）：v1 路径此前从不汇报 direct_fallbacks——
+    # 全池冷却期间静默直连，用户完全无感
+    if proxy_pool.size:
+        logger.info(f"代理池: {proxy_pool.summary()}")
+    # NBS 考核战训：0 条必须留证据（此前不落盘不报错、exit 0 假成功）
+    _nodata = (len(all_rows) == 0 and not dry_run)
+    _nodata_written = False
+    if _nodata:
+        try:
+            (out_dir / "nodata.json").write_text(json.dumps(
+                {"nodata": True, "name": name, "total": 0,
+                 "source_url": (config.get("source") or {}).get("url", ""),
+                 "budget": _rq, "at": time.strftime("%Y-%m-%d %H:%M:%S")},
+                ensure_ascii=False, indent=1), encoding="utf-8")
+            _nodata_written = True
+            logger.warn("⚠️ 0 条记录——已写 nodata.json 留证（0 结果不假成功），请按铁律 3 出诊断说明")
+        except Exception as e:
+            # 审查修复 P1：写盘失败曾静默——stderr 声称有证据而磁盘上没有
+            logger.error(f"nodata.json 写盘失败（{type(e).__name__}: {e}）——"
+                         f"0 条结论请直接引用本日志行作证据")
+    # R41 审查修复：Logger.tick("records") 全仓零调用点——汇总恒打印"记录 0"，
+    # 与上方"请求统计 ... | 记录 N"及导出文件自相矛盾。按最终导出集补一次 tick
+    # （循环外单次计入总数，迭代模式多迭代共享本 logger 也不会重复计数）
+    logger.tick("records", len(all_rows))
     logger.summary()
-    return {"name": name, "total": len(all_rows), "summary": summary}
+    try:
+        _run_lock.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return {"name": name, "total": len(all_rows), "summary": summary,
+            "nodata": _nodata, "nodata_evidence_written": _nodata_written,
+            "budget": _rq}

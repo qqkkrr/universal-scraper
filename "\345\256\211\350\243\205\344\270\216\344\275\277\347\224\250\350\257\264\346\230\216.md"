@@ -1,0 +1,39 @@
+# universal-scraper 安装与使用说明
+
+配置驱动的网络采集插件（Claude Code / ZCode skill 形态）。Full 版为本体；Lite 版为裁剪版（缺 bili/books/journal/proxy_api 等模块，其余与 Full 一致）。
+
+## 一、安装
+
+1. 把整个 `universal-scraper/` 文件夹放到你的 skill 目录：
+   - ZCode / Claude Code：`~/.agents/skills/universal-scraper/`
+2. Python 依赖（建议 3.10+，实测 3.12）：
+   ```
+   pip install requests curl_cffi pymupdf pdfplumber openpyxl charset_normalizer lxml beautifulsoup4
+   # 可选增强（按需）：
+   pip install patchright playwright ddddocr   # 浏览器桥/验证码（也可 node 侧装）
+   ```
+3. Node 依赖（仅浏览器桥/捕获类功能需要，`scripts/*.cjs`）：
+   ```
+   cd universal-scraper && npm install
+   # 浏览器内核：npx playwright install chromium
+   ```
+4. 自检：
+   ```
+   python3 -m universal_scraper.cli doctor
+   python3 -m universal_scraper.cli --help
+   ```
+
+## 二、快速上手
+
+- 最小示例配置：`configs/new_task.json`（scaffold 可再生成）
+- 跑一个任务：`python3 -m universal_scraper.cli run --config <配置.json>`
+- 单页预检：`cli dryparse <url>`；诊断封禁：`cli diagnose <url>`
+- 全部命令：`cli --help`；教学与配方：`references/`（anti-block-playbook 判型表 + recipes 案例库）
+
+## 三、约定与注意
+
+- 所有产物默认写在插件目录 `outputs/` 下（任务子目录）；cookies/浏览器登录态也存于
+  `outputs/.cookies` 与 `outputs/.browser_profile*`——**这是隐私数据，不要把你的 outputs/
+  目录发给别人**。
+- 无硬编码密钥：LLM 相关功能从环境变量读 key（未配置则相应功能优雅降级）。
+- 礼貌采集：内置 robots/限速/预算闸；请遵守目标站点条款与当地法规，仅用于合法合规用途。

@@ -16,7 +16,7 @@
  */
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseProxy, waitCloudflare } = require("./browser_common.cjs");
+const { parseProxy, waitCloudflare, applyResourceBlocking } = require("./browser_common.cjs");
 
 let chromium = null;
 // 优先 NODE_PATH 的 playwright（本地 patchright 旧版可能被 WAF 识别），再回退本地 patchright
@@ -26,16 +26,7 @@ const _cands = _nps.map((p) => _path.join(p, "playwright")).concat(["patchright"
 for (const _c of _cands) {
   try { chromium = require(_c).chromium; break; } catch (e) { /* 下一个 */ }
 }
-if (!chromium) {
-  // 夜间强化：模块加载期失败也必须走 JSON 错误协议（Python 侧靠 stdout JSON 解析错误，
-  // 裸栈会变成 EOF 无诊断）。浏览器方案不可用时 HTTP 直抓路线不受影响。
-  process.stdout.write(JSON.stringify({
-    type: "error",
-    message: "找不到 playwright/patchright——浏览器方案不可用。修复: bash "
-      + _path.join(__dirname, "setup.sh") + "（HTTP 直抓路线不受影响）",
-  }) + "\n");
-  process.exit(1);
-}
+if (!chromium) throw new Error("找不到 playwright/patchright");
 
 const os = require("node:os");
 const HOME = process.env.HOME || os.homedir() || "/tmp";
@@ -179,7 +170,19 @@ async function main() {
   const startPage = parseInt(arg("startPage", "1"), 10);
   const settle = parseInt(arg("settle", "1500"), 10);
 
-  const spec = JSON.parse(fs.readFileSync(specFile, "utf-8"));
+  // EPIPE 守护：父进程先退时，滞后的 console.log 会以未捕获异常杀死本进程、绕过 finish
+  if (process.stdout && typeof process.stdout.on === "function") {
+    process.stdout.on("error", () => { try { process.exit(0); } catch (e) {} });
+  }
+
+  let spec = null;
+  try {
+    spec = JSON.parse(fs.readFileSync(specFile, "utf-8"));
+  } catch (e) {
+    // 审查修复：spec 解析曾跑在 try 之外——坏配置文件只会裸栈崩，不产 JSON 错误协议
+    out({ type: "error", message: "spec 配置读取/解析失败: " + String((e && e.message) || e) });
+    process.exit(1);
+  }
   fs.mkdirSync(outDir, { recursive: true });
   if (captchaDir) fs.mkdirSync(captchaDir, { recursive: true });
   const storageState = arg("storageState", null);
@@ -234,16 +237,56 @@ function centerCaptcha(page) {
   }).catch(() => 0);
 }
   // 安全正则：非法 pattern 不抛异常（配置可能来自 LLM），返回 null 表示"永不匹配"
+  // OCR R131（H）：加长度上限防 ReDoS——恶意长 pattern 或嵌套量词可阻塞事件循环
   function safeRe(pattern) {
+    if (!pattern || typeof pattern !== "string" || pattern.length > 512) return null;
     try { return new RegExp(pattern); } catch (e) { return null; }
   }
   // 真实 Chrome（用户日常浏览器）比 Chrome for Testing 更接近真人，风控识别率低
   const CHROME_EXE = fs.existsSync(USER_CHROME) ? USER_CHROME : FULL_CHROME;
 
   let browser = null;
+  let persistentCtx = null;  // R8 修复：launchPersistentContext 的上下文（finish 必须关）
   let context = null;
   let page = null;
+  let ownCtx = false;  // 自建 context（非 CDP 附加宿主）——只有它才允许 context.route 拦截
   const ownPages = [];  // 本进程创建的标签页——finally 必须关闭（CDP 模式防泄漏）
+  // NMPA 战训修复：process.exit() 会立即终止进程、跳过 finally——ownPages 清理
+  // 形同虚设（2026-09-10 实测单次会话积到 30 个残留标签页，加剧瑞数等防护升级）。
+  // 统一出口：任何提前退出都走 finish()，先清理再退出；幂等防重入。
+  // 并行关页 + 统一 4.5s 死线（审查修复：串行逐页 1.5s 曾让多页场景后面的页
+  // 根本轮不到关）；close 失败计数打 diag（泄漏可见而非静默）。
+  // close() 若挂死，hardMs 硬退兜底（done 路径传 2000，保住"done 后 8s 内必退"）。
+  let finished = false;
+  async function finish(code, hardMs) {
+    if (finished) return;
+    finished = true;
+    const budget = Math.max(500, parseInt(hardMs, 10) || 6000);
+    const hardExit = setTimeout(() => { try { process.exit(code); } catch (e) {} }, budget);
+    if (hardExit.unref) hardExit.unref();
+    if (ownPages.length) {
+      const closed = await Promise.race([
+        Promise.all(ownPages.map(p => p.close().then(() => true, () => false))),
+        new Promise(r => setTimeout(() => r(null), Math.max(300, budget - 1500))),
+      ]);
+      if (closed === null) {
+        out({ type: "diag", message: `finish 清理超时：${ownPages.length} 个自建标签页未确认关闭（可能残留）` });
+      } else {
+        const okN = closed.filter(Boolean).length;
+        if (okN < ownPages.length) {
+          out({ type: "diag", message: `finish 清理: ${okN}/${ownPages.length} 页已关闭，${ownPages.length - okN} 页关闭失败（可能残留）` });
+        }
+      }
+    }
+    try { if (browser) await Promise.race([browser.close(), new Promise(r => setTimeout(r, 2500))]); } catch (e) {}
+    // R8 修复：持久上下文模式 browser 为 null——不关 persistentCtx 会留下
+    // 无主 headful Chrome 窗口（登录超时路径同样泄漏）
+    try {
+      if (persistentCtx) await Promise.race([persistentCtx.close(), new Promise(r => setTimeout(r, 2500))]);
+    } catch (e) {}
+    clearTimeout(hardExit);
+    process.exit(code);
+  }
   try {
     const headless = arg("headless", "1") !== "0";
     const ctxOpts = (!profileDir && storageState && fs.existsSync(storageState)) ? { storageState } : {};
@@ -287,6 +330,7 @@ function centerCaptcha(page) {
       context = browser.contexts()[0] || await browser.newContext();
       page = await context.newPage();
       ownPages.push(page);
+      // CDP 附加宿主浏览器：ownCtx 保持 false（route 会拦截用户自己的请求）
     } else if (profileDir) {
       // 持久档案模式：登录态保存在档案目录，登录一次永久复用（最接近真实浏览器）
       // headless 默认有头（登录需要），可显式 --headless 1 无头（登录态已存在时抓取用）
@@ -301,6 +345,8 @@ function centerCaptcha(page) {
         executablePath: CHROME_EXE,
         args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-blink-features=AutomationControlled", "--lang=zh-CN"],
       });
+      persistentCtx = context;  // R8 修复：持久上下文必须被 finish/finally 关闭
+      ownCtx = true;
       page = context.pages()[0] || await context.newPage();
       if (arg("headless", "0") === "0") focusWindowMac();  // 有头：窗口居中放大
     } else {
@@ -309,6 +355,7 @@ function centerCaptcha(page) {
       try {
         browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox", "--ignore-certificate-errors"] });
         context = await browser.newContext(ctxOpts);
+        ownCtx = true;
         page = await context.newPage();
       } catch (launchErr) {
         const fallbackCdp = "http://127.0.0.1:9222";
@@ -336,6 +383,9 @@ function centerCaptcha(page) {
         }
       }
     }
+    // 资源拦截（Crawlee blockRequests 对标，font/media 默认阻断）：仅对自建 context
+    // 启用——CDP 附加的是宿主真实浏览器，route 会拦截用户自己的请求，必须跳过
+    if (ownCtx) await applyResourceBlocking(context);
     // 控制台/页面错误捕获（诊断"页面为什么没加载数据"的关键）
     // 节流：每类最多输出 50 条，防止 JS 重页面刷爆协议流
     const diagBudget = { console: 50, pageerror: 50, reqfailed: 50, http4xx: 50 };
@@ -383,7 +433,7 @@ function centerCaptcha(page) {
     }
     // 上下文级捕获：附加 CDP 时同一 Chrome 的既有标签页 XHR 也会录到（智联战例——
     // page 级监听漏掉数据接口所在的既有标签页）。声明式 capture 仍按 url_pattern 过滤。
-    context.on("response", async (res) => {
+    const _onResponse = async (res) => {
       const u = res.url();
       if (res.status() >= 400) {
         if (diagBudget.http4xx-- > 0) out({ type: "http_4xx", status: res.status(), url: u.slice(0, 260) });
@@ -434,7 +484,14 @@ function centerCaptcha(page) {
         } catch (e) {}
       }
       const ctAll = res.headers()["content-type"] || "";
-      if (captureAll && res.status() < 400 && (ctAll.includes("json") || ctAll.includes("javascript"))) {
+      // OCR R131 反馈 #1：静态 JS/CSS/图片噪音滤除——抓数据接口不需要脚本资源，
+      // 滤掉后 capture_all 产物干净（30+ 条噪音 → 只剩真接口）
+      // 保留 application/javascript：JSONP 接口用这个 content-type
+      const _isStaticNoise = /\.(js|css|png|jpe?g|gif|svg|woff2?|ttf|ico|map)(\?|$)/i.test(u)
+        || ctAll.includes("text/css") || ctAll.includes("image/");
+      if (captureAll && res.status() < 400 && !u.endsWith(".js") && !u.includes("/static/")
+          && !u.includes("/assets/") && (ctAll.includes("json") || ctAll.includes("javascript"))
+          && !_isStaticNoise) {
         if (capturedAll.length < 2000) {
           try {
             // 小米有品战例：同时落盘请求体/方法/关键头——一次浏览器侦察即可改写成 http_json 配置
@@ -464,7 +521,11 @@ function centerCaptcha(page) {
           } catch (e) {}
         }
       }
-    });
+    };
+    // Node≥15：Playwright 的 EventEmitter 忽略 async 监听器返回的 promise——
+    // 响应销毁（res.url()/headers() 抛错）或落盘 IO 错误会变成 unhandledRejection
+    // 直接杀掉桥进程（done/capture 无法落盘），故整体兜底
+    context.on("response", async (res) => { try { await _onResponse(res); } catch (e) {} });
 
     // ===== 人工门卫（统一处理：登录 + 整页验证码，大众点评/美团等） =====
     // 1) 是否需要登录：无会话 → 需要；有会话但目标页仍显示登录 → 重新登录
@@ -523,7 +584,8 @@ function centerCaptcha(page) {
       } catch (e) { return false; }
     }
 
-    if (spec.login && spec.login.enabled || spec.verify && spec.verify.enabled) {
+    // OCR R131（M）：&& 优先于 || 是对的，但显式括号消除歧义
+    if ((spec.login && spec.login.enabled) || (spec.verify && spec.verify.enabled)) {
       const loginTxt = ["扫码登录", "账号登录", "APP扫码", "二维码已失效", "手机号登录"];
       const pollMs = 2000;
       const deadline = Date.now() + gateMaxWait;
@@ -550,7 +612,7 @@ function centerCaptcha(page) {
       while (!done && Date.now() < deadline) {
         if (stopRequested()) {
           out({ type: "stopped", message: "收到停止信号（.stop）" });
-          process.exit(0);
+          await finish(0);
         }
         // Boss直聘"点击按钮进行验证"：自动点一次（点击型验证，点完弹滑块交给用户拖）
         if (!autoClickedVerify) {
@@ -649,7 +711,7 @@ function centerCaptcha(page) {
           _cookieInfo = " | 登录cookie(" + requireCookie + "): " + (names || "❌ 未出现——说明尚未真正登录");
         }
         out({ type: "error", message: "人工验证/登录超时（" + Math.round(gateMaxWait / 1000) + "s）。当前页面: " + _u + " | 标题: " + _tt + _cookieInfo + "。请确保在弹出的窗口中完成滑块验证（WAF 滑块需拖动拼图）和扫码/账号登录" });
-        process.exit(1);
+        await finish(1);
       }
       // 登录/验证通过后，若被跳走（如移动版 dphome），强制回到目标页再抓
       try {
@@ -667,7 +729,19 @@ function centerCaptcha(page) {
         }
       } catch (e) {}
       if (storageState) {
-        await context.storageState({ path: storageState });
+        // R18 加固：storageState 含完整登录 Cookie，落盘必须 0600——
+        // Playwright 的 {path} 写入走默认 umask（0644），同机其他用户可读
+        try {
+          const _st = await context.storageState();
+          fs.writeFileSync(storageState, JSON.stringify(_st, null, 1), { mode: 0o600 });
+          // writeFileSync 的 mode 只在创建时生效：历史遗留的 0644 文件被覆盖后
+          // 权限不会变，必须显式 chmod 治愈（R18b 残留）
+          fs.chmodSync(storageState, 0o600);
+        } catch (e) {
+          await context.storageState({ path: storageState });
+          // 降级路径同样走默认 umask（0644）——必须补 chmod，否则 R18 加固被静默绕过
+          try { fs.chmodSync(storageState, 0o600); } catch (e2) {}
+        }
         out({ type: "verify_ok", storageState });
       }
       let _ck = "";
@@ -680,12 +754,15 @@ function centerCaptcha(page) {
 
     if (spec.js_pre) await page.evaluate(spec.js_pre);
     if (spec.wait && spec.wait.selector) {
-      await page.waitForSelector(spec.wait.selector, { timeout: spec.wait.timeout || 20000 }).catch(() => {});
+      // 审查修复（P2）：等待选择器超时曾静默吞掉——未渲染完的骨架页会被
+      // 当成 200 正常返回，"成功 0 条"无从排查
+      await page.waitForSelector(spec.wait.selector, { timeout: spec.wait.timeout || 20000 })
+        .catch(() => { out({ type: "wait_timeout", selector: spec.wait.selector }); });
     }
     await sleep(settle);
     if (stopRequested()) {
       out({ type: "stopped", message: "收到停止信号（.stop）" });
-      process.exit(0);
+      await finish(0);
     }
 
     // 真人浏览捕获模式：保持窗口打开，让用户手动操作（验证/登录/滚动），期间持续捕获接口
@@ -701,7 +778,7 @@ function centerCaptcha(page) {
       for (let s = 0; s < scrollCount; s++) {
         if (stopRequested()) {
           out({ type: "stopped", message: "收到停止信号（.stop）" });
-          process.exit(0);
+          await finish(0);
         }
         // 人类化：不是每次到底，而是分段滚动 + 随机停顿（模拟真人阅读节奏）
         if (beh.human_scroll) {
@@ -724,16 +801,20 @@ function centerCaptcha(page) {
       }
     }
 
-    // 把捕获到的 API 数据落盘
-    if (captureAll && capturedAll.length) {
-      fs.writeFileSync(path.join(outDir, "capture_all.json"), JSON.stringify(capturedAll, null, 1));
-      out({ type: "capture_file", name: "capture_all", file: path.join(outDir, "capture_all.json"), count: capturedAll.length });
-    }
-    for (const key of Object.keys(capturedBy)) {
-      const f = path.join(outDir, `${key}.json`);
-      fs.writeFileSync(f, JSON.stringify(capturedBy[key], null, 1));
-      out({ type: "capture_file", name: key, file: f, count: capturedBy[key].length });
-    }
+    // 把捕获到的 API 数据落盘（R8 修复：提取为函数——actions/翻页/detail 循环
+    // 还会持续追加捕获，done/return 前必须再 flush 一次，否则尾部 XHR 全丢）
+    const flushCaptures = () => {
+      if (captureAll && capturedAll.length) {
+        fs.writeFileSync(path.join(outDir, "capture_all.json"), JSON.stringify(capturedAll, null, 1));
+        out({ type: "capture_file", name: "capture_all", file: path.join(outDir, "capture_all.json"), count: capturedAll.length });
+      }
+      for (const key of Object.keys(capturedBy)) {
+        const f = path.join(outDir, `${key}.json`);
+        fs.writeFileSync(f, JSON.stringify(capturedBy[key], null, 1));
+        out({ type: "capture_file", name: key, file: f, count: capturedBy[key].length });
+      }
+    };
+    flushCaptures();
 
     // ===== spec.actions：页内动作链（闲鱼战例——排序点击/输入/等待，v1.9 起透传到桥） =====
     if (Array.isArray(spec.actions) && spec.actions.length) {
@@ -747,6 +828,20 @@ function centerCaptcha(page) {
           } else if (a.type === "type" || a.type === "fill") {
             await page.locator(a.selector).first().fill(String(a.value ?? ""), { timeout: a.timeout_ms || 10000 });
             out({ type: "diag", message: `actions[${ai}] fill ${a.selector} ✓` });
+          } else if (a.type === "type_real" || a.type === "fill_real") {
+            // R28 修复：SKILL.md 文档了 type_real（商标网战训：Angular/React 的
+            // fill() 合成事件不触发）但 v2 内联循环不认识它——静默跳过、表单没填
+            // 还报成功。实现与 browser_common.runActions 第 2 阶降级一致
+            const loc = page.locator(a.selector).first();
+            await loc.click({ timeout: a.timeout_ms || 10000 });
+            await loc.fill("", { timeout: 5000 }).catch(() => {});
+            const val = String(a.value ?? "");
+            if (typeof loc.pressSequentially === "function") {
+              await loc.pressSequentially(val, { delay: a.delay_ms || 80, timeout: a.timeout_ms || 20000 });
+            } else {
+              await page.keyboard.type(val, { delay: a.delay_ms || 80 });
+            }
+            out({ type: "diag", message: `actions[${ai}] type_real ${a.selector} ✓` });
           } else if (a.type === "press") {
             await page.keyboard.press(a.key || "Enter");
           } else if (a.type === "wait") {
@@ -759,6 +854,95 @@ function centerCaptcha(page) {
           } else if (a.type === "screenshot") {
             await page.screenshot({ path: a.path, fullPage: !!a.fullPage });
             out({ type: "diag", message: `actions[${ai}] screenshot -> ${a.path}` });
+          } else if (a.type === "extract_cards") {
+            // R50 新增：SPA 原子提取——单次 evaluate 拿全量卡片，解决虚拟列表
+            // stale handle 导致的选择器失效/数据丢失（小红书 278 卡片实战验证）
+            const raw = await page.evaluate((cfg) => {
+              const out = [];
+              document.querySelectorAll(cfg.container).forEach(el => {
+                const item = { _text: el.innerText.trim().slice(0, 200) };
+                for (const [field, sel] of Object.entries(cfg.fields || {})) {
+                  try {
+                    const el2 = el.querySelector(sel);
+                    if (el2) item[field] = el2.innerText.trim();
+                    // 属性选择器兜底（仅对合法属性名尝试，. 开头的 class 选择器会抛）
+                    if (!item[field] && /^[A-Za-z_][\w:-]*$/.test(sel)) {
+                      const el3 = el.querySelector(`[${sel}]`);
+                      if (el3) item[field] = el3.getAttribute(sel);
+                    }
+                  } catch (e) { /* 该字段提取失败，跳过 */ }
+                }
+                for (const attr of (cfg.attrs || [])) {
+                  try {
+                    const v = el.getAttribute(attr) || el.querySelector(`[${attr}]`)?.getAttribute(attr);
+                    if (v) item[attr] = v;
+                  } catch (e) { /* 跳过 */ }
+                }
+                const link = el.querySelector("a[href]");
+                if (link) item._href = link.getAttribute("href");
+                out.push(item);
+              });
+              return out;
+            }, { container: a.container, fields: a.fields || {}, attrs: a.attrs || [] });
+            for (const item of raw) {
+              out({ type: "extract_card", data: item });
+            }
+            out({ type: "diag", message: `actions[${ai}] extract_cards: ${raw.length} 张` });
+          } else if (a.type === "scroll_comments") {
+            // R50 新增：评论面板声明式滚动管线——懒加载 + 原子提取
+            const ccfg = a.comments || {};
+            const cContainer = ccfg.container || ".comments-el, .comments-container";
+            const cItem = ccfg.item || ".comment-item";
+            const cMax = ccfg.max || 100;
+            const cFields = ccfg.fields || {
+              content: ".content .text, .note-text",
+              user: ".author .name, .author .username",
+              date: ".content .date, .date",
+              likes: ".like .count, .like-wrapper span",
+            };
+            await page.mouse.move(1150, 450);
+            await page.waitForSelector(cItem, { timeout: 8000 }).catch(() => {});
+            const collected = [];
+            const seenKeys = new Set();
+            let staleRounds = 0;
+            let lastCount = 0;
+            while (collected.length < cMax && staleRounds < 5) {
+              const batch = await page.evaluate((sel) => {
+                const out = [];
+                document.querySelectorAll(sel.container).forEach(container => {
+                  container.querySelectorAll(sel.item).forEach(el => {
+                    const id = el.getAttribute("id") || el.innerText.slice(0, 60);
+                    if (!id || out.some(o => o._id === id)) return;
+                    const item = { _id: id };
+                    for (const [field, selector] of Object.entries(sel.fields || {})) {
+                      const el2 = el.querySelector(selector);
+                      item[field] = el2 ? el2.innerText.trim() : "";
+                    }
+                    const replies = [];
+                    el.querySelectorAll("[class*='reply']").forEach(rep => {
+                      const rt = rep.querySelector(".content .text, .note-text");
+                      if (rt) replies.push({ content: rt.innerText.trim() });
+                    });
+                    if (replies.length) item.replies = replies;
+                    out.push(item);
+                  });
+                });
+                return out;
+              }, { container: cContainer, item: cItem, fields: cFields });
+              for (const it of batch) {
+                const key = it._id || JSON.stringify(it).slice(0, 60);
+                if (!seenKeys.has(key)) {
+                  seenKeys.add(key);
+                  collected.push(it);
+                }
+              }
+              if (collected.length >= cMax) break;
+              if (batch.length === lastCount) { staleRounds++; } else { staleRounds = 0; lastCount = batch.length; }
+              await page.mouse.move(1150, 450);
+              await page.mouse.wheel(0, 3000);
+              await page.waitForTimeout(1500 + Math.floor(Math.random() * 1000));
+            }
+            out({ type: "comments", count: collected.length, data: collected });
           }
           if (a.wait_ms) await sleep(a.wait_ms);
         } catch (e) {
@@ -785,17 +969,20 @@ function centerCaptcha(page) {
         }
       }
       out({ type: "done", pages: n });
-      setTimeout(() => { try { process.exit(0); } catch (e) {} }, 8000).unref();
+      flushCaptures();  // R8：detail 循环的尾部 XHR 捕获必须落盘
+      setTimeout(() => { void finish(0, 2000); }, 8000).unref();
       return;
     }
 
     let pagesDone = 0;
+    let _capAtPageStart = captureAll ? capturedAll.length : 0;  // R102 战报：翻页捕获零增长检测
+    let _pagesNoNewCap = 0;
     // startPage：定向分页（配深链 URL 使用，如列表第 1161 页）——页号从 startPage 计
     for (let p = startPage; p <= maxPages; p++) {
       // 验证码/滑块处理
       if (captchaDir && (spec.captcha || spec.slider)) {
         const ok = await handleCaptcha(page, spec, captchaDir, captchaTimeout);
-        if (!ok) { out({ type: "error", message: "验证码处理失败/超时" }); process.exit(1); }
+        if (!ok) { out({ type: "error", message: "验证码处理失败/超时" }); await finish(1); }
       }
       // 保存本页 HTML
       const html = await page.evaluate(() => document.documentElement.outerHTML);
@@ -840,26 +1027,52 @@ function centerCaptcha(page) {
         const nxt = String(pg.template || "").replace("{page}", String(p + 1));
         if (!nxt || nxt === String(pg.template)) {
           out({ type: "error", message: "url 翻页需要 template 且含 {page} 占位" });
-          process.exit(1);
+          await finish(1);
         }
         await page.goto(nxt, { waitUntil: pg.wait_until || "domcontentloaded", timeout: pg.timeout_ms || 30000 });
         await sleep(pg.wait_ms || 1800);
         changed = true;
       }
       if (pg.type !== "none" && !changed) break;
+      // R102 战报修复：capture 模式下翻页后捕获数零增长——曾连翻 N 页只有
+      // 首页 1 个接口响应，用户把空转当成功。连续 3 页零新捕获即大声提示
+      if (captureAll) {
+        if (capturedAll.length === _capAtPageStart) {
+          _pagesNoNewCap++;
+          if (_pagesNoNewCap === 3) {
+            out({ type: "diag", message: `⚠️ 连续 ${_pagesNoNewCap} 页零新接口捕获（累计 ${capturedAll.length} 个）`
+                + "——翻页后捕获疑似空转：接口 URL 含页参时改用 url 深链翻页 + 声明式 capture，"
+                + "或检查翻页点击是否真的触发了数据请求" });
+          }
+        } else {
+          _pagesNoNewCap = 0;
+          _capAtPageStart = capturedAll.length;
+        }
+      }
+    }
+    // 汇总口径提示（影视飓风战例：42 捕获里只有 1 个目标接口，runner 零提示）
+    if (captureAll && pagesDone > 1 && capturedAll.length <= 1) {
+      out({ type: "diag", message: `⚠️ 翻了 ${pagesDone} 页仅捕获到 ${capturedAll.length} 个接口响应`
+          + "——捕获疑似空转，结果可能只有第一页数据" });
     }
     out({ type: "done", pages: pagesDone });
-    // done 已发出：8s 内必须退出（即使 browser.close 挂住，也不让 Python 等 EOF 卡死）
-    setTimeout(() => { try { process.exit(0); } catch (e) {} }, 8000).unref();
+    flushCaptures();  // R8：actions/翻页期间的尾部 XHR 捕获必须落盘
+    // done 已发出：8s 内必须退出（即使 browser.close 挂住，也不让 Python 等 EOF 卡死）。
+    // done 路径的 finish 只给 2s 清理预算：8s 定时 + 2s = 最坏 10s，别让清理拖过 EOF 红线
+    setTimeout(() => { void finish(0, 2000); }, 8000).unref();
   } catch (e) {
     out({ type: "error", message: String((e && e.message) || e) });
-    process.exit(1);
+    await finish(1);
   } finally {
     // 闲鱼战例：CDP 附加模式下 browser.close() 只断连接，自建标签页会泄漏积压
     // （曾积到 62 个标签页拖垮 Chrome）——先关掉我们自己开的页再断开
     for (const p of ownPages) { try { await p.close(); } catch (e) {} }
-    if (browser) await browser.close();
+    // 审查修复（P1）：close() 拒绝（浏览器已崩/target closed）曾变 unhandledRejection
+    // 把退出码翻成非零——done 已发出，Python 侧 rc!=0 会丢弃全部已抓 records
+    if (browser) { try { await browser.close(); } catch (e) {} }
+    // R8 修复：持久上下文模式补关闭
+    if (persistentCtx) { try { await persistentCtx.close(); } catch (e) {} }
   }
 }
 
-main();
+main().catch((e) => { try { console.error(String((e && e.message) || e)); } catch (_) {} process.exit(1); });

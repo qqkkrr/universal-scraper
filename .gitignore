@@ -1,31 +1,21 @@
+# 依赖与运行时产物
+node_modules/
 __pycache__/
 *.pyc
 .DS_Store
-node_modules/
 outputs/
-vendor/
-tasks/
-.challenges_tmp/
-*.egg-info/
-build/
-dist/
-challenges/learnspider/static/
-challenges/learnspider/*.sql
-challenges/learnspider/db.sqlite3
-challenges/learnspider/__pycache__/
-challenges/results.json
-challenges2/results.json
-challenges/learnspider_results.json
 
-# 安全：禁止提交环境变量/密钥
-.env
-*.env
-.env.*
-!.env.example
-
-# 测试运行产物（不入库）
-tests/run500_results.json
-tests/smoke_report.md
-tests/tasks_*.json
-tests/batch_*.jsonl
+# 本机私有配置（含 API Key，严禁提交）
 configs/settings.json
+configs/schedules.json
+configs/learned/
+configs/_adaptive_strategies.json
+configs/auto_precise_*.json*
+
+# 登录态 / Cookie（0600 私密）
+*.session
+*.session.json
+*.cookie.txt
+.cookie.txt
+jobs_history.json
+*.log

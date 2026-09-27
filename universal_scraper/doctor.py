@@ -36,8 +36,9 @@ def _py_ok(name: str) -> bool:
 def check_deps() -> List[Dict[str, str]]:
     out = []
     for m in REQUIRED_PY:
-        out.append({"item": f"python 依赖 {m}", "ok": _py_ok(m),
-                    "hint": "python3 -m pip install " + m if not _py_ok(m) else ""})
+        ok = _py_ok(m)  # OCR R131（M）：importlib 探测曾每模块跑两次
+        out.append({"item": f"python 依赖 {m}", "ok": ok,
+                    "hint": "python3 -m pip install " + m if not ok else ""})
     for m in OPTIONAL_PY:
         ok = _py_ok(m)
         out.append({"item": f"python 可选 {m}", "ok": ok,
@@ -67,23 +68,44 @@ def check_node() -> List[Dict[str, str]]:
 
 def check_browsers() -> List[Dict[str, str]]:
     home = Path.home()
-    cands = [
-        ("用户 Chrome", Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")),
-        ("headless shell", Path(home) / "Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
-        ("Chrome for Testing", Path(home) / "Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
-    ]
+    # OCR R131（M）：探测路径仅 macOS——非 darwin 平台逐项报"未找到"全是误报，
+    # 显式降级为平台提示而非三行红叉
+    import sys as _sys
+    if _sys.platform != "darwin":
+        return [{"item": "浏览器安装", "ok": True,
+                 "hint": f"当前平台 {_sys.platform} 的浏览器体检仅支持 macOS 路径——"
+                         "请用 `npx playwright install chromium` 自行确认"}]
+    cands = [("用户 Chrome", Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))]
+    # OCR R131（M）：Playwright 构建号（如 1208）曾硬编码——升级后体检恒报
+    # "未找到"。动态枚举 ms-playwright 下全部已装构建（新→旧），逐个探测两种布局
+    import glob as _glob
+    _pw = Path(home) / "Library/Caches/ms-playwright"
+    _builds = (sorted(_glob.glob(str(_pw / "chromium_headless_shell-*")), reverse=True)
+               + sorted(_glob.glob(str(_pw / "chromium-*")), reverse=True))
+    if not _builds:
+        # 审查二轮（M）：曾把中文提示塞进 Path 当候选路径——输出怪异。独立提示项
+        return [{"item": "Playwright Chromium", "ok": False,
+                 "hint": "未安装任何构建——运行 npx playwright install chromium"}]
+    for bd in _builds:
+        b = Path(bd)
+        layouts = [
+            b / "chrome-headless-shell-mac-arm64" / "chrome-headless-shell",
+            b / "chrome-mac-arm64" / "Google Chrome for Testing.app" / "Contents" / "MacOS" / "Google Chrome for Testing",
+        ]
+        found = next((p for p in layouts if p.exists()), None)
+        cands.append((b.name, found or layouts[0]))
     return [{"item": n, "ok": p.exists(), "hint": "" if p.exists() else f"未找到: {p}"} for n, p in cands]
 
 
 def check_port(port: int = 8642) -> List[Dict[str, str]]:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        s.bind(("127.0.0.1", port))
-        return [{"item": f"端口 {port}", "ok": True, "hint": "空闲"}]
+        # OCR R7：socket() 本身可能抛 OSError（fd 耗尽等）——其余 check_* 都优雅降级，
+        # 唯独这里曾让整个 doctor 崩掉。创建一并纳入 try，with 保证句柄释放
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", port))
+            return [{"item": f"端口 {port}", "ok": True, "hint": "空闲"}]
     except OSError:
         return [{"item": f"端口 {port}", "ok": False, "hint": "被占用（可能 WebUI 已在运行）"}]
-    finally:
-        s.close()
 
 
 def check_repo() -> List[Dict[str, str]]:
@@ -104,7 +126,9 @@ def check_outputs() -> List[Dict[str, str]]:
     d = ROOT / "outputs"
     try:
         d.mkdir(parents=True, exist_ok=True)
-        probe = d / ".doctor_probe"
+        # 审查修复：固定探测名在并发 doctor 双跑下互踩（write 撞 unlink 曾误报
+        # "目录不可写"）——拼 PID 保证各进程各测各的
+        probe = d / f".doctor_probe_{os.getpid()}"
         probe.write_text("1", encoding="utf-8")
         probe.unlink()
         return [{"item": "outputs 目录", "ok": True, "hint": str(d)}]
@@ -112,9 +136,32 @@ def check_outputs() -> List[Dict[str, str]]:
         return [{"item": "outputs 目录", "ok": False, "hint": str(e)}]
 
 
+def check_network() -> List[Dict[str, str]]:
+    """网络链路组（信息性）：代理/出口状态。ok=True 表示"可诊断"而非"无代理"——
+    代理开启是状态不是错误，hint 里给出精确措辞（商标网战训：进程在跑但未启用
+    曾被误报成"系统代理已开启"）。"""
+    out: List[Dict[str, str]] = []
+    try:
+        from .net import detect_system_proxy
+        sp = detect_system_proxy()
+        if sp.get("enabled"):
+            out.append({"item": "网络出口（系统代理）", "ok": True,
+                        "hint": f"⚠️ 代理已启用（{', '.join(sp.get('sources') or [])}）——"
+                                f"直连请求可能被劫持，先 cli ip 确认真实出口"})
+        elif sp.get("processes"):
+            out.append({"item": "网络出口（代理进程）", "ok": True,
+                        "hint": f"有代理进程（{', '.join(sp['processes'])}）但系统代理未启用——"
+                                f"当前大概率未被劫持"})
+        else:
+            out.append({"item": "网络出口", "ok": True, "hint": "直连（无代理接管）"})
+    except Exception as e:
+        out.append({"item": "网络出口", "ok": True, "hint": f"检测失败（不影响使用）: {e}"})
+    return out
+
+
 def run() -> Dict[str, object]:
     checks = (check_deps() + check_node() + check_browsers() +
-              check_port() + check_repo() + check_outputs())
+              check_port() + check_repo() + check_outputs() + check_network())
     ok_n = sum(1 for c in checks if c["ok"])
     return {"total": len(checks), "ok": ok_n, "checks": checks}
 

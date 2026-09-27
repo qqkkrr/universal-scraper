@@ -213,8 +213,12 @@ def _extract_json(raw: str) -> dict:
 
 def _llm_chat(messages: List[Dict[str, str]], timeout: int = 120) -> str:
     """LLM 调用带硬超时 + 空响应重试（模型偶尔返回空/纯空白，提高温度再补一次）。"""
-    from .llm import LLMClient
+    from .llm import LLMClient, _get_key
     import time as _t
+
+    # R95 修复（P2）：无 Key 曾仍发起 6 次空 Bearer 请求并把 401 误报成网络波动
+    if not _get_key():
+        raise RuntimeError("未配置 API Key——AI 功能需要先配置（webui 设置页或 `llm --key <key>`）")
 
     def _call(temp: float) -> str:
         box: Dict[str, Any] = {}
@@ -540,6 +544,10 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
                        "success_selector": "body"},
         }
         _src = cfg["source"]
+        # R31 修复：刷新类型标记——xiaohongshu/api.zhihu 同时在 _spa 名单里，
+        # _st 不刷新会让下面的 SPA 分支把刚建好的 browser+login 配置整个覆盖掉
+        # （headless 无登录态撞登录墙，且 verify 标记丢失导致确定性升级也不触发）
+        _st = "browser"
     # SPA/JS 单页应用入口：AI 常把这类配成 http 直抓（拿到的是空壳 HTML，0 条）。
     # 识别常见 SPA 入口 → 强制浏览器渲染
     _spa = any(k in _su0 for k in ("/problem-list/", "leetcode.cn", "/explore/", "xiaohongshu.com/explore",
@@ -1773,6 +1781,15 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
             return {}
         rows = dr["rows"]
         sample = rows[:5]
+        # R31 修复：快路径此前零质量检查——曾发生"精配抓到商品页冒充目标数据"
+        # 的同类事故在 _try_precise_first/_try_auto_precise 都有门，唯独这里没有。
+        # 关键字段缺失或意图不符 → 回退 AI 流程重新路由
+        _miss = _missing_key_field(description or "", sample)
+        _intent_bad = _intent_check(description or "", sample, log) if not _miss else ""
+        if _miss or _intent_bad:
+            _why = _miss or _intent_bad
+            log(f"⚠️ 精配[{site}]直接跑结果未过质量门（{_why}），回退 AI 流程")
+            return {}
         files = dr.get("files") or {}
         total = len(rows)
         cfg = {"name": name, "start_urls": [seed], "_force_run_site": site}
@@ -2189,6 +2206,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     _llm_ev_tried = False
     _entry_rescued = False
     _auto_precise_tried = False
+    # R31 修复：把循环内的质量门判定带出来——循环耗尽时（每轮都 intent 失败/
+    # 关键字段缺失），循环后不能只看 total>0 就报"✅ 成功"，也不能把被自己
+    # 否决的配置再沉淀进 learned（每轮都否决却每轮都存 = 毒化学习库）
+    _final_intent_bad = ""
+    _final_miss = ""
     for round_i in range(1, _loop_rounds + 1):
         # 写任务包
         (task_dir / "modules").mkdir(parents=True, exist_ok=True)
@@ -2273,14 +2295,20 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         if result.get("total", 0) > 0 and real and not _miss:
             _intent_bad = _intent_check(description, sample, log)
             if not _intent_bad:
+                # R31b 修复：本轮通过质量门 → 清掉之前轮次的失败标志，
+                # 否则循环后误报"⚠️ 部分成功"（陈旧原因）
+                _final_intent_bad = ""
+                _final_miss = ""
                 log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
                 break
+            _final_intent_bad = _intent_bad
             log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
             # 已学配置产生的内容不是用户要的 → 该配置是坏的，立即删掉（防止每轮都复用坏配置空转）
             if _learned:
                 _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
                                            reason=f"意图校验失败：{_intent_bad[:50]}", log=log)
         if _miss:
+            _final_miss = _miss
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
@@ -2296,9 +2324,11 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                 return _ap
 
         # 🛡️ 反爬/验证拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
-        # 覆盖 waf/cloudflare/verify/captcha/anti_bot/rate_limit 等：http 硬刚只会一直 0 条
+        # 覆盖 waf/cloudflare/verify/captcha/anti_bot/rate_limit/session_flagged 等：
+        # http 硬刚只会一直 0 条。R21 修复：session_flagged（盒马系 RGV587/ERRCODE_NOT_LOGIN
+        # 风控标记）此前缺席——淘宝/盒马类任务不升级、空烧 http 重试与 LLM 自修轮
         _blk = (result or {}).get("block_stats") or {}
-        _BLOCK_UPGRADE_KINDS = ("waf", "cloudflare", "verify", "captcha", "anti_bot", "rate_limit")
+        _BLOCK_UPGRADE_KINDS = ("waf", "cloudflare", "verify", "captcha", "anti_bot", "rate_limit", "session_flagged")
         _any_block = any(_blk.get(k) for k in _BLOCK_UPGRADE_KINDS)
         if _any_block and ((cfg.get("source") or {}).get("type") == "http"):
             log("🛡️ 检测到反爬拦截（" + "、".join(f"{k}×{_blk[k]}" for k in _BLOCK_UPGRADE_KINDS if _blk.get(k))
@@ -2320,6 +2350,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     last_result = dict(last_result or {})
                     last_result["total"] = fb["total"]
                     last_result["llm_extract"] = True
+                    _final_intent_bad = ""   # R31b：抽取出有效内容视为通过质量门
+                    _final_miss = ""
                     log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
                     break
 
@@ -2499,6 +2531,24 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         verify = None
 
     if total > 0 and real:
+        # R31 修复：循环内质量门否决过最后结果时，不能报"✅ 成功"、也不能把
+        # 刚被否决的配置沉淀进 learned（毒化学习库）
+        if _final_intent_bad or _final_miss:
+            _why = _final_intent_bad or f"关键字段【{_final_miss}】为空"
+            log(f"⚠️ 部分成功：抓到 {total} 条，但质量门未通过（{_why}）——结果可能不是用户要的内容，建议人工核对或换入口重试")
+            return {
+                "name": name,
+                "config": cfg,
+                "task_dir": str(task_dir),
+                "result": last_result,
+                "log": last_log[-3000:],
+                "sample": sample,
+                "files": files,
+                "summary": f"⚠️ 部分成功：{total} 条，但质量门未通过（{_why}）",
+                "verify": verify,
+                "done": True,
+                "quality_gate_failed": True,
+            }
         # 🧠 自动学习：成功后沉淀为「已学精配」，下次同站直接复用
         # 🧠 质量下降检测：本次用了已学配置但字段完整率显著偏低（网站半改版）→ 删除 learned 重建
         if _learned and verify and verify.get("checks"):
@@ -2595,6 +2645,9 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     if os.environ.get("US_BATCH") != "1":
         if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
             round_timeout = max(round_timeout, 360)
+    # R31 修复：循环内质量门判定带出循环（同 auto_task）——耗尽时不能只看 total>0 报成功
+    _final_intent_bad = ""
+    _final_miss = ""
     for round_i in range(1, _loop_rounds + 1):
         # 每轮按当前配置重算超时（WAF 自动升级浏览器后要等人工滑块，需放宽到 10 分钟）
         _src0 = config.get("source", {}) or {}
@@ -2658,14 +2711,20 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         if result.get("total", 0) > 0 and real and not _miss:
             _intent_bad = _intent_check(description, sample, log)
             if not _intent_bad:
+                # R31b 修复：本轮通过质量门 → 清掉之前轮次的失败标志，
+                # 否则循环后误报"⚠️ 部分成功"（陈旧原因）
+                _final_intent_bad = ""
+                _final_miss = ""
                 log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
                 break
+            _final_intent_bad = _intent_bad
             log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
             # 已学配置产生的内容不是用户要的 → 该配置是坏的，立即删掉（防止每轮都复用坏配置空转）
             if _learned:
                 _drop_learned_by_start_url((config.get("start_urls") or [""])[0],
                                            reason=f"意图校验失败：{_intent_bad[:50]}", log=log)
         if _miss:
+            _final_miss = _miss
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
@@ -2701,6 +2760,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                     last_result = dict(last_result or {})
                     last_result["total"] = fb["total"]
                     last_result["llm_extract"] = True
+                    _final_intent_bad = ""   # R31b：抽取出有效内容视为通过质量门
+                    _final_miss = ""
                     log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
                     break
 
@@ -2824,6 +2885,24 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         verify = None
 
     if total > 0 and real:
+        # R31 修复：循环内质量门否决过最后结果时，不能报"✅ 成功"、也不能把
+        # 刚被否决的配置沉淀进 learned（毒化学习库）
+        if _final_intent_bad or _final_miss:
+            _why = _final_intent_bad or f"关键字段【{_final_miss}】为空"
+            log(f"⚠️ 部分成功：抓到 {total} 条，但质量门未通过（{_why}）——结果可能不是用户要的内容，建议人工核对或换入口重试")
+            return {
+                "name": name,
+                "config": config,
+                "task_dir": str(task_dir),
+                "result": last_result,
+                "log": last_log[-3000:],
+                "sample": sample,
+                "files": files,
+                "summary": f"⚠️ 部分成功：{total} 条，但质量门未通过（{_why}）",
+                "verify": verify,
+                "done": True,
+                "quality_gate_failed": True,
+            }
         # 🧠 自动学习：成功后沉淀为「已学精配」，下次同站直接复用
         # 🧠 质量下降检测：本次用了已学配置但字段完整率显著偏低（网站半改版）→ 删除 learned 重建
         if _learned and verify and verify.get("checks"):

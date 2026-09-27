@@ -32,12 +32,14 @@ def browser_drive_crawl(page, url: str, scroll_rounds: int = 10,
     Args:
         page: Playwright Page（已附着到调试 Chrome）
         url: 目标页面 URL
-        scroll_rounds: 最大滚动轮数（每轮等 2s）
+        scroll_rounds: 最大滚动轮数（每轮滚动后固定等 2s）
         max_items: 最大条数
-        wait_ms: 每轮滚动后等待时间（ms）
+        wait_ms: 首次打开后的等待时间（ms）——OCR R131（M）：docstring 曾误写
+            "每轮滚动后"，实际只作用于 goto 后的首屏等待
 
     Returns:
-        {title, url, items: [{text, href}], html_len, screenshots: []}
+        {title, url, items: [{text, href}], html_len}——OCR R131（M）：曾承诺
+        screenshots 字段但实现从未返回，删除虚假文档
     """
     def _log(m):
         if log:
@@ -109,6 +111,8 @@ def browser_drive_crawl_full(page, url: str, scroll_rounds: int = 10,
     try:
         full_text = page.inner_text("body")
         result["full_text"] = full_text[:50000]
-    except Exception:
-        pass
+    except Exception as e:
+        # OCR R131（M）：取全文失败曾静默——下游关键词统计缺字段无从排查
+        if log:
+            log(f"⚠️ 页面全文提取失败（{type(e).__name__}: {str(e)[:80]}）——关键词统计将缺失")
     return result

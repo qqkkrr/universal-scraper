@@ -25,7 +25,6 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 # 常见翻页参数名（探测用）
 PAGE_KEYS = {"page", "pageno", "pagenum", "currentpage", "current", "pageindex",
              "pageidx", "pageIndex", "pagenumber"}
-SIZE_KEYS = {"pagesize", "pageSize", "size", "limit", "perpage", "rows"}
 
 # 静态资源/噪声响应过滤（生成配置无意义）
 NOISE_URL_PAT = re.compile(r"\.(js|css|png|jpe?g|gif|svg|woff2?|ttf|ico|map)(\?|$)", re.I)
@@ -65,6 +64,125 @@ def _page_param_holders(params: Dict[str, Any]) -> Dict[str, Any]:
         else:
             out[k] = v
     return out
+
+
+def _dig(obj: Any, dotted: str) -> Any:
+    cur = obj
+    for part in dotted.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+            cur = cur[int(part)]
+        else:
+            return None
+    return cur
+
+
+def _sample_records(json_obj: Any, records_path: str) -> list:
+    """从捕获响应里取样本记录（链式检测用）。"""
+    if not isinstance(json_obj, (dict, list)):
+        return []
+    v = _dig(json_obj, records_path) if records_path else None
+    if isinstance(v, list):
+        return [r for r in v if isinstance(r, dict)][:20]
+    if isinstance(json_obj, list):
+        return [r for r in json_obj if isinstance(r, dict)][:20]
+    if isinstance(json_obj, dict):
+        for k in ("records", "items", "list", "results", "data", "rows"):
+            v = json_obj.get(k)
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                return [r for r in v if isinstance(r, dict)][:20]
+    return []
+
+
+def _detect_chains(samples: list, log=print) -> list:
+    """api_chain 脚手架（归档功能请求）：检测"列表端点 ↔ 参数化详情端点"链。
+
+    证据两级：①值匹配——详情请求的参数值（?id=12345）出现在列表样本里 →
+    高置信；②键名匹配（detailId ↔ detail_id）→ 提示级。GET 形态的详情给出
+    可直接试跑的 scaffold（pipeline.template 生成 url 字段 + detail.url_field）；
+    POST 体详情暂只报告关系（引擎 detail 走 URL 取数，体参数需自定义 fetcher）。"""
+    from urllib.parse import parse_qsl
+    chains = []
+    lists = [(cfg, rows) for cfg, rows in samples if rows]
+    singles = [(cfg, rows) for cfg, rows in samples if not rows]
+    for b_cfg, _rows_b in singles:
+        b_src = b_cfg.get("source") or {}
+        # 详情端参数候选：URL query 键值 + json_body 浅层标量键值
+        params: Dict[str, Any] = {}
+        try:
+            params.update({k: v for k, v in parse_qsl(urlsplit(b_src.get("url", "")).query)})
+        except Exception:
+            pass
+        jb = b_src.get("json_body")
+        if isinstance(jb, dict):
+            params.update({k: v for k, v in jb.items() if isinstance(v, (str, int, float))})
+        if not params:
+            continue
+        for a_cfg, a_rows in lists:
+            a_fields = set()
+            for r in a_rows[:5]:
+                a_fields.update(r.keys())
+            best = None
+            for k, v in params.items():
+                if not k or k in ("page", "pageSize", "pageNo", "pageNum", "limit",
+                                  "size", "currentPage", "pageIndex", "token", "_t"):
+                    continue  # 翻页/令牌参数不构成链
+                v_s = str(v)
+                if not v_s or v_s in ("0", "1", "true", "false", "null", "undefined"):
+                    continue
+                for f in a_fields:
+                    hit = None
+                    for r in a_rows[:10]:
+                        if f in r and v_s and str(r.get(f)) == v_s:
+                            hit = ("value", f, v_s)
+                            break
+                    if hit is None:
+                        _norm = lambda s: s.lower().replace("_", "").replace("-", "")
+                        if _norm(k) == _norm(f):
+                            hit = ("name", f, v_s)
+                    if hit:
+                        if best is None or (hit[0] == "value" and best[0] != "value"):
+                            best = hit
+            if best is None:
+                continue
+            kind, field, val = best
+            b_url = b_src.get("url", "")
+            post_only = bool(b_src.get("json_body") or b_src.get("body"))
+            # 审查 M2：曾按 f"={val}" 裸替换——"?a=12&id=12" 会替换错参数、
+            # "?id=1234&x=12" 会截断别的值。按参数名锚定（?k= 或 &k= 起头）
+            _tmpl_url = ""
+            if not post_only and val:
+                _tmpl_url = re.sub(rf"([?&]{re.escape(k)}=){re.escape(val)}(?=&|$)",
+                                   rf"\g<1>{{{field}}}", b_url, count=1)
+            if _tmpl_url and _tmpl_url != b_url:
+                b_url = _tmpl_url
+                scaffold = {
+                    "name": f"{a_cfg.get('name','list')}_{b_cfg.get('name','detail')}_chain",
+                    "source": a_cfg.get("source"),
+                    "pagination": a_cfg.get("pagination"),
+                    # pipeline.template 契约：str.format 单花括号占位（pagination 的
+                    # {{page}} 是另一套引擎侧替换，勿混淆）
+                    "pipeline": [{"type": "template", "field": "url", "tmpl": b_url}],
+                    "detail": {"enabled": True, "url_field": "url"},
+                    "_hint": "api_chain 脚手架：先 --limit 2 验证列表；"
+                             "detail.extract 按详情响应补（契约见 SKILL.md「详情页」行）",
+                }
+            else:
+                scaffold = None
+            chains.append({
+                "list": a_cfg.get("name"), "detail": b_cfg.get("name"),
+                "confidence": kind, "param": "（见 evidence）", "field": field,
+                "evidence": (f"详情参数值 {val!r} 命中列表样本字段 {field!r}" if kind == "value"
+                             else f"参数键名对应 {field!r}（未验证值，置信较低）"),
+                "scaffold": scaffold,
+            })
+            break  # 一个详情端只挂一个最像的列表
+    if chains:
+        n_ok = sum(1 for c in chains if c["scaffold"])
+        log(f"🔗 检测到 {len(chains)} 条 列表→详情 链（{n_ok} 条已生成可试跑脚手架，"
+            "POST 体详情需自定义 fetcher）")
+    return chains
 
 
 def one_config(item: Dict[str, Any], referer: str = "") -> Optional[Dict[str, Any]]:
@@ -153,6 +271,7 @@ def generate(capture_file: str | Path, referer: str = "",
     if not isinstance(data, list):
         return {"error": f"捕获文件顶层应为 list，实际 {type(data).__name__}"}
     configs = []
+    samples: list = []  # [(cfg, 样本记录)]——api_chain 链式检测原料
     seen = set()
     for idx, item in enumerate(data):
         if not isinstance(item, dict):
@@ -164,8 +283,11 @@ def generate(capture_file: str | Path, referer: str = "",
             continue
         if not src:
             continue
-        key = src["url"] + "|" + src.get("method", "GET") + "|" + json.dumps(
-            src.get("json_body") or src.get("body", ""), ensure_ascii=False, sort_keys=True)
+        # OCR R131（M）：`|` 分隔符曾碰撞——URL/body 中合法出现 `|` 时两个不同
+        # 请求生成同 key 被误去重。改用 length-prefix 编码消除歧义
+        _m = src.get("method", "GET")
+        _b = json.dumps(src.get("json_body") or src.get("body", ""), ensure_ascii=False, sort_keys=True)
+        key = f"{len(src['url'])}:{src['url']}|{len(_m)}:{_m}|{len(_b)}:{_b}"
         if key in seen:
             continue
         seen.add(key)
@@ -187,13 +309,25 @@ def generate(capture_file: str | Path, referer: str = "",
                "_hint": ("先 run --limit 2 小样：单对象响应加 source.single_record=true；"
                          "需要翻页时在 url/body 里把页码改为 {{page}} 并配 max_pages")}
         configs.append(cfg)
+        samples.append((cfg, _sample_records(item.get("json"), rp)))
+    # api_chain 链式检测（归档功能请求）：列表端点 ↔ 参数化详情端点
+    chains = _detect_chains(samples, log=log) if len(samples) > 1 else []
     result = {"capture_file": str(fp), "count": len(configs), "configs": configs}
+    if chains:
+        result["chains"] = chains
     log(f"⚡ 生成 {len(configs)} 份 http_json 配置草案（含方法/请求体/翻页模板，先小样再全量）")
     if out:
         p = Path(out).expanduser()
         if p.is_dir() or not p.suffix:  # 目录（或无后缀路径）→ 目录模式
             p = p / "gen_configs.json"
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+        # R37 修复：单配置时直接写配置对象本体——此前写 {capture_file,configs}
+        # 信封，run --config/validate 加载报"缺少必填字段 name"，命令自己提示
+        # 的"先 --limit 2 小样验证"根本走不通。
+        # 审查二轮（M）：单配置裸写曾把 chains 一并丢掉——有链式检测结果时
+        # 仍走信封（要单配置时用户自取 configs[0]）
+        _write_envelope = len(configs) != 1 or bool(result.get("chains"))
+        p.write_text(json.dumps(configs[0] if not _write_envelope else result,
+                                ensure_ascii=False, indent=1), encoding="utf-8")
         result["saved"] = str(p)
     return result

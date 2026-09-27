@@ -62,17 +62,33 @@ def download_attachments(urls_file: str | Path, out_dir: str | Path,
     client = make_http_client({"min_interval": interval, "timeout": 60,
                                "http_backend": "auto", "max_retries": 1})
     ok, skip, fail = [], [], []
+    _name_owner: dict = {}   # name -> url（审查 P2，R15：同名不同 URL 的碰撞检测）
     for it in items:
         url, name = it["url"], (it.get("name") or "").strip()
-        if not name:
+        if name:
+            # 审查修复（P2，R15）：显式 name 曾绕过白名单——路径穿越/NUL 字节
+            # 可写穿 out_dir 或炸掉整个批次。统一走 allowlist
+            name = re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_", name)[:80] or "attach.bin"
+        else:
             name = re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_",
                           url.rsplit("/", 1)[-1].split("?")[0])[:80] or "attach.bin"
         if not name.lower().endswith(".pdf"):
             name += ".pdf"
         dest = out / name
+        # OCR R131（H）：撞名检测曾被 exists() 短路——首个 URL 下载失败/尚未落盘
+        # 时，第二个同 URL 撞名者直接静默覆盖。先查登记表再谈文件
+        if _name_owner.get(name) not in (None, url):
+            # 同名不同 URL：不是断点续跑，是两个不同附件撞名——如实记失败
+            err = f"文件名碰撞：{url} 与已下载的 {_name_owner.get(name)} 同名"
+            fail.append({"name": name, "error": err})
+            log(f"  ✗ {name}: {err}")
+            continue
         if dest.exists() and dest.stat().st_size > min_kb * 1024:
+            if name not in _name_owner:
+                _name_owner[name] = url
             skip.append(name)
             continue
+        _name_owner[name] = url
         # 安全边界失败（私网/环回/坏协议）是确定性的：不进入重试循环
         try:
             _guard_url(url)
@@ -105,6 +121,39 @@ def download_attachments(urls_file: str | Path, out_dir: str | Path,
             "total": len(items), "dir": str(out)}
 
 
+def table_quality_report(tables: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """表格提取质量门（招行年报摘要战训：无框线中文表格退化为 列1..N 垃圾列，
+    却照样报"✅ 12 页表格/106 行"——完整率查不出语义垃圾）。
+
+    检测两类退化：列名回退占比（列N/col_N）≥0.5、空单元格率 ≥0.6。
+    退化时 degraded=True 并给出改道建议；调用方应把警告连同数据一起交付。"""
+    import re as _re
+    rows = [r for t in (tables or []) for r in (t.get("rows") or [])]
+    n_rows = len(rows)
+    fallback = 0
+    cells = empty = 0
+    for r in rows:
+        keys = [k for k in r.keys() if not str(k).startswith("_")]
+        if keys and all(_re.match(r"^(列|col_?)\d+$", str(k)) for k in keys):
+            fallback += 1
+        for k, v in r.items():
+            if str(k).startswith("_"):
+                continue
+            cells += 1
+            if not str(v or "").strip():
+                empty += 1
+    empty_rate = (empty / cells) if cells else 1.0
+    fallback_rate = (fallback / n_rows) if n_rows else 0.0
+    # 审查修复 P2：0 表格同样是假成功（扫描件/图片型 PDF 常见）——归入退化
+    degraded = (bool(rows) and (fallback_rate >= 0.5 or empty_rate >= 0.6)) or n_rows == 0
+    return {"rows": n_rows, "fallback_col_rows": fallback,
+            "fallback_rate": round(fallback_rate, 2),
+            "empty_rate": round(empty_rate, 2), "degraded": degraded,
+            "hint": ("表格疑似无框线/版式型——pdfplumber 几何还原失效，"
+                     "当前输出可能是垃圾列。建议改用文本版式解析（按词坐标聚类）或人工核对"
+                     if degraded else "")}
+
+
 def extract_tables(pdf_path: str | Path, pages: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     """表格型 PDF → 行记录（每页一个 {page, rows:[{列名:值}]}）。
 
@@ -117,7 +166,13 @@ def extract_tables(pdf_path: str | Path, pages: Optional[List[int]] = None) -> L
         raise FileNotFoundError(f"PDF 不存在: {fp}")
     if fp.read_bytes()[:4] != b"%PDF":
         raise ValueError(f"不是有效 PDF: {fp}")
-    pages = [p for p in (pages or []) if p >= 1]  # 审查修复：0/负页码曾静默读成最后一页
+    # 审查修复：0/负页码曾静默读成最后一页
+    # OCR R131 终审（H）：调用方显式给了 pages 但过滤后为空（全是 0/负数）——
+    # 曾静默提取全部页面（违背调用方意图）。区分 None（默认全页）与空列表
+    if pages is not None:
+        pages = [p for p in pages if p >= 1]
+        if not pages:
+            raise ValueError("pages 过滤后为空（原值全是 0/负页码？）——有效页码从 1 开始")
 
     try:
         import pdfplumber  # type: ignore
@@ -126,25 +181,32 @@ def extract_tables(pdf_path: str | Path, pages: Optional[List[int]] = None) -> L
 
     if pdfplumber is not None:
         results = []
-        with pdfplumber.open(str(fp)) as pdf:
-            for pno in pages or range(1, len(pdf.pages) + 1):
-                page = pdf.pages[pno - 1] if pno - 1 < len(pdf.pages) else None
-                if page is None:
-                    continue
-                tables = page.extract_tables()
-                for tb in tables or []:
-                    if not tb or len(tb) < 2:
+        # OCR R131（H）：pdfplumber 装了但依赖坏（缺 pdfminer.six）时，open/提取
+        # 抛 ImportError——曾穿透 except 落到 pypdf 静默降级，违背 docstring 的
+        # "必须大声抛出"。依赖性故障按声明上抛；捕获后 re-raise 带语境
+        try:
+            with pdfplumber.open(str(fp)) as pdf:
+                for pno in pages or range(1, len(pdf.pages) + 1):
+                    page = pdf.pages[pno - 1] if pno - 1 < len(pdf.pages) else None
+                    if page is None:
                         continue
-                    header = [(c or "").strip() for c in tb[0]]
-                    rows = []
-                    for raw in tb[1:]:
-                        row = {}
-                        for i, cell in enumerate(raw):
-                            key = header[i] if i < len(header) and header[i] else f"col_{i+1}"
-                            row[key] = (cell or "").strip()
-                        rows.append(row)
-                    results.append({"page": pno, "rows": rows})
-        return results
+                    tables = page.extract_tables()
+                    for tb in tables or []:
+                        if not tb or len(tb) < 2:
+                            continue
+                        header = [(c or "").strip() for c in tb[0]]
+                        rows = []
+                        for raw in tb[1:]:
+                            row = {}
+                            for i, cell in enumerate(raw):
+                                key = header[i] if i < len(header) and header[i] else f"col_{i+1}"
+                                row[key] = (cell or "").strip()
+                            rows.append(row)
+                        results.append({"page": pno, "rows": rows})
+            return results
+        except ImportError as e:
+            raise ImportError(f"pdfplumber 已安装但依赖损坏（{e}）——按契约不静默降级，"
+                              "请修复依赖：pip install --force-reinstall pdfplumber") from e
 
     try:
         from pypdf import PdfReader  # type: ignore

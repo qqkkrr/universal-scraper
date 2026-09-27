@@ -19,6 +19,22 @@ CONFIG_DIR = ROOT / "configs"
 TASKS_DIR = ROOT / "tasks"
 
 
+def _assert_http_url(url: str) -> str:
+    """SSRF 边界（与 journals.py 同型）：仅 http/https；host 解析到
+    私网/环回/保留地址即拒绝。OCR 图源与探测 URL 都过这道闸。"""
+    import socket
+    import ipaddress
+    import urllib.parse
+    sp = urllib.parse.urlsplit(url)
+    if sp.scheme not in ("http", "https"):
+        raise ValueError(f"仅允许 http/https URL: {url}")
+    for info in socket.getaddrinfo(sp.hostname, None):
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+            raise ValueError(f"拒绝私有/保留地址: {sp.hostname} -> {ip}")
+    return url
+
+
 # ---------------------------------------------------------------------------
 # 探测
 # ---------------------------------------------------------------------------
@@ -168,22 +184,9 @@ def _normalize_engine_cfg(scheme: Dict[str, Any]) -> Dict[str, Any]:
     return cfg
 
 
-def _register_engine_config(cfg: Dict[str, Any], host: str, log: Optional[Callable[[str], None]] = None) -> Path:
-    """把 engine 配置写成任务包 tasks/auto_precise_<host>/config.json 并注册。"""
-    name = f"auto_precise_{_sanitize_host(host)}"
-    task_dir = TASKS_DIR / name
-    task_dir.mkdir(parents=True, exist_ok=True)
-    cfg.setdefault("name", name)
-    (task_dir / "config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    meta = {"host": host, "kind": "engine", "name": name, "task_dir": str(task_dir)}
-    (CONFIG_DIR / f"auto_precise_{_sanitize_host(host)}.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 注册到运行时注册表（sites.py 的配置型精配）
-    from . import sites as _sites
-    _sites.register_config_precise(host, task_dir, kind="engine")
-    if log:
-        log(f"✅ 精配已保存: configs/auto_precise_{_sanitize_host(host)}.json（任务包 tasks/{name}）")
-    return task_dir
+# OCR R131（M）：_register_engine_config 无任何调用方（R33 修复后注册逻辑
+# 内联进 _tactic_engine_probe 的"先试跑后注册"流程）；直接调用本函数会绕过
+# 试跑、把毒配置写进注册表。删除死代码
 
 
 def _run_engine_probe(task_dir: Path, limit: int, log: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
@@ -211,25 +214,13 @@ def _run_engine_probe(task_dir: Path, limit: int, log: Optional[Callable[[str], 
     return {"rows": rows, "files": files, "error": ""}
 
 
-def _build_image_ranking_runner(cfg: Dict[str, Any], host: str, log: Optional[Callable[[str], None]] = None) -> Path:
-    """图片榜单：保存为 run 型精配（下载图片 → 千问视觉 OCR → 行）。"""
-    from . import sites as _sites
-    name = f"auto_precise_{_sanitize_host(host)}"
-    meta = {"host": host, "kind": "image_ranking", "name": name, "entry": cfg.get("entry", ""),
-            "img_src_hint": (cfg.get("parsers") or {}).get("img_hint", "")}
-    (CONFIG_DIR / f"auto_precise_{_sanitize_host(host)}.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    _sites._register_image_precise(meta)
-    if log:
-        log(f"✅ 图片榜单精配已注册: {name}（entry={meta['entry']}）")
-    return CONFIG_DIR / f"auto_precise_{_sanitize_host(host)}.json"
+# OCR R131（M）：_build_image_ranking_runner 无任何调用方（注册流程已改为
+# image_ranking meta + _image_ranking_run 直跑），删除死代码
 
 
 def _image_ranking_run(meta: Dict[str, Any], url: str, limit: int = 20,
                        log: Optional[Callable[[str], None]] = None) -> list:
     """图片榜单运行器：浏览器渲染 entry → 收集目标图片 → 下载 → OCR → 行。"""
-    import requests
     from .llm import LLMClient
     entry = meta.get("entry") or url
     hint = meta.get("img_src_hint") or ""
@@ -265,13 +256,13 @@ def _image_ranking_run(meta: Dict[str, Any], url: str, limit: int = 20,
         if log:
             log(f"🖼️ 正在 OCR 第 {i}/{len(imgs)} 张榜单图…")
         try:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            r = requests.get(src, timeout=40, verify=False,
-                             headers={"User-Agent": "Mozilla/5.0"})
-            r.raise_for_status()
+            src = _assert_http_url(src)  # SSRF 边界：协议/私网校验后才下载
+            from .core import fetch_bytes
+            content = fetch_bytes(src, timeout=40, headers={"User-Agent": "Mozilla/5.0"})
+            if content is None:
+                raise RuntimeError(f"图片下载失败: {fetch_bytes.last_error}")
             data_url = "data:image/" + (src.rsplit(".", 1)[-1] if "." in src else "png") + ";base64," + \
-                       __import__("base64").b64encode(r.content).decode()
+                       __import__("base64").b64encode(content).decode()
             prompt = ("这是排行榜/榜单表格图片。请逐行OCR表格内容，把每一行输出为JSON对象，"
                       "字段名用中文（如：排名、品牌、价值、公司、行业等，按表头原样）。"
                       "只输出JSON数组，数字务必准确，不要解释。")
@@ -307,13 +298,25 @@ def _image_ranking_run(meta: Dict[str, Any], url: str, limit: int = 20,
     fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
         import csv
-        with open(out_dir / f"{base}.csv", "w", newline="", encoding="utf-8-sig") as f:
-            keys = list(rows[0].keys())
-            w = csv.DictWriter(f, fieldnames=keys)
-            w.writeheader()
-            w.writerows(rows)
-    except Exception:
-        pass
+        import io
+        # R15 修复：LLM/OCR 行 schema 不定——表头取全行键并集（rows[0] 会在后续行
+        # 多键时让 DictWriter 报废）；内部溯源键 _image/_page 只留 JSON，不进 CSV；
+        # 导出文件名净化到安全字符集，经 out_dir.joinpath 限定在 outputs/ 内
+        csv_rows = [{k: v for k, v in r.items() if k not in ("_image", "_page")} for r in rows]
+        keys: list = []
+        for r in csv_rows:
+            for k in r:
+                if k not in keys:
+                    keys.append(k)
+        fname = re.sub(r"[^0-9A-Za-z._-]+", "_", f"{base}.csv").strip(".") or "export.csv"
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=keys)
+        w.writeheader()
+        w.writerows(csv_rows)
+        (out_dir.joinpath(fname)).write_bytes(buf.getvalue().encode("utf-8-sig"))
+    except Exception as e:
+        if log:
+            log(f"⚠️ CSV 导出失败: {e}")
     return rows
 
 
@@ -334,6 +337,7 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
         if log:
             log("📄 识别到 PDF 直链，下载探测…")
         try:
+            _assert_http_url(url)  # R15b 补充：PDF 快探同样过 SSRF 边界
             fp = download_pdf(url, timeout=40)
             size = fp.stat().st_size
             fp.unlink(missing_ok=True)
@@ -352,13 +356,20 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
     if log:
         log(f"🔍 HTTP 快探: {url}")
     try:
-        import requests
-        r = requests.get(url, timeout=20, verify=False,
-                          headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"})
-        text = re.sub(r"<[^>]+>", " ", r.text or "")
-        text = re.sub(r"\s+", " ", text).strip()
-        if r.status_code == 200 and len(text) >= 300:
-            html = r.text or ""
+        from .core import fetch_bytes
+        _assert_http_url(url)  # SSRF 边界：协议/私网校验后才快探
+        body = fetch_bytes(url, timeout=20,
+                           headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"})
+        if body is None:
+            _m = re.search(r"HTTP (\d+)", fetch_bytes.last_error or "")
+            status_code = int(_m.group(1)) if _m else 0
+            text = ""
+        else:
+            status_code = 200
+            text = re.sub(r"<[^>]+>", " ", body.decode("utf-8", "ignore"))
+            text = re.sub(r"\s+", " ", text).strip()
+        if status_code == 200 and len(text) >= 300:
+            html = body.decode("utf-8", "ignore")
             imgs = [mm.group(1) for mm in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html)
                     if not re.search(r"logo|icon|qrcode|wechat|avatar", mm.group(1), re.I)]
             pdfs = [mm.group(1) for mm in re.finditer(r'(?:href|src|fileurl)=["\']([^"\']*?\.(?:pdf|docx?|xlsx?)[^"\']*)["\']', html, re.I)]
@@ -374,7 +385,7 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
                 log(f"✅ HTTP 直连可用（{len(text)} 字符 | 大图={len(d['bigImages'])} | PDF={len(d['pdfLinks'])} | Vue={d['hasVue']} | 表格={len(d['tables'])}）")
             return {"url": url, "seed": seed, "http_status": 200, "waf": False, "detect": d}
         if log:
-            log(f"⚠️ HTTP {r.status_code} / 内容 {len(text)} 字符（疑似 WAF 或 JS 壳），改浏览器探测…")
+            log(f"⚠️ HTTP {status_code} / 内容 {len(text)} 字符（疑似 WAF 或 JS 壳），改浏览器探测…")
     except Exception as e:
         if log:
             log(f"⚠️ HTTP 失败（{type(e).__name__}），改浏览器探测…")
@@ -430,7 +441,7 @@ def generate_precise(description: str, url: str, config: Optional[Dict[str, Any]
 
     # 阶段 2：战术决策（规则优先，LLM 兜底）
     from .tactics import decide_tactic, sanitize_host
-    decision = decide_tactic(description, detect, log=_lg)
+    decision = decide_tactic(description, detect)  # OCR R131（M）：decide_tactic 删死参数 log
     tactic = decision.get("tactic")
     _lg(f"🧩 选定战术: {tactic}（{decision.get('reason')}）")
 
@@ -689,6 +700,12 @@ def _tactic_cookie_click_probe(meta: Dict[str, Any], url: str, limit: int,
         m = re.search(r"(.*?)(?:--(?:schId|infoId|orgId|itemId|pid|fid)|[?&/](?:id|Id))[-=]?[0-9A-Za-z_-]{1,40}(.*)$", u)
         if m:
             tmpl = m.group(1) + "{id}" + m.group(2)  # 占位符，cookie_click_run 会替换
+            # 审查修复：推断结果曾只存局部变量——试跑成功后 meta 落盘注册时
+            # url_template 恒为空，注册后的 cookie_click_run 永远生成不了"详情链接"。
+            # 写回 meta.params（试跑成功路径的 meta 即调用方持久化对象）
+            _mp = meta.get("params")
+            if isinstance(_mp, dict):
+                _mp.setdefault("url_template", tmpl)
     for r in rows:
         r.pop("_site", None)
     base = f"auto_precise_{_sanitize_host(meta.get('host',''))}"
@@ -760,13 +777,25 @@ def _llm_direct_extract(meta: Dict[str, Any], url: str, limit: int,
     fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
         import csv
-        with open(ROOT / "outputs" / f"{base}.csv", "w", newline="", encoding="utf-8-sig") as f:
-            keys = list(rows[0].keys())
-            w = csv.DictWriter(f, fieldnames=keys)
-            w.writeheader()
-            w.writerows(rows)
-    except Exception:
-        pass
+        import io
+        # R15 修复：同 _image_ranking_run——LLM 行 schema 不定，表头取键并集；
+        # 内部键不进 CSV；文件名净化 + joinpath 限定在 outputs/ 内
+        csv_rows = [{k: v for k, v in r.items() if k not in ("_image", "_page")} for r in rows]
+        keys: list = []
+        for r in csv_rows:
+            for k in r:
+                if k not in keys:
+                    keys.append(k)
+        fname = re.sub(r"[^0-9A-Za-z._-]+", "_", f"{base}.csv").strip(".") or "export.csv"
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=keys)
+        w.writeheader()
+        w.writerows(csv_rows)
+        (ROOT / "outputs").mkdir(exist_ok=True)
+        ((ROOT / "outputs").joinpath(fname)).write_bytes(buf.getvalue().encode("utf-8-sig"))
+    except Exception as e:
+        if log:
+            log(f"⚠️ CSV 导出失败: {e}")
     if log:
         log(f"✅ LLM 直抽成功：{len(rows)} 行")
     return rows, _export_files(base), f"LLM 直抽 {len(rows)} 行"
@@ -781,9 +810,26 @@ def _tactic_engine_probe(meta: Dict[str, Any], url: str, limit: int,
     scheme = _ask_scheme(meta.get("description") or "", sample, log=log)
     scheme = _normalize_engine_cfg(scheme)
     host = meta.get("host", "")
-    task_dir = _register_engine_config(scheme, host, log=log)
+    # R33 审查修复（P1）：先写任务包并试跑，通过后才写 meta/注册表——旧顺序
+    # 先注册后试跑，失败的"毒配置"留在注册表+磁盘，该 host 后续任务静默 0 条
+    name = f"auto_precise_{_sanitize_host(host)}"
+    task_dir = TASKS_DIR / name
+    task_dir.mkdir(parents=True, exist_ok=True)
+    scheme.setdefault("name", name)
+    (task_dir / "config.json").write_text(json.dumps(scheme, ensure_ascii=False, indent=2), encoding="utf-8")
     probe = _run_engine_probe(task_dir, limit, log=log)
     if probe.get("error") or not probe.get("rows"):
-        # CSS 兜底失败 → LLM 直抽（成功即收，不空转重跑）
+        # 探测失败：删除刚写的配置（LLM 直抽兜底，不留下毒配置）
+        # OCR R131（L）：task_dir 目录本身曾不删——孤儿空目录在 tasks/ 累积
+        import shutil as _sh
+        _sh.rmtree(task_dir, ignore_errors=True)
         return _llm_direct_extract(meta, url or (meta.get("params") or {}).get("entry", ""), limit, log)
+    # 试跑通过 → 正式持久化注册
+    (CONFIG_DIR / f"auto_precise_{_sanitize_host(host)}.json").write_text(
+        json.dumps({"host": host, "kind": "engine", "name": name, "task_dir": str(task_dir)},
+                   ensure_ascii=False, indent=2), encoding="utf-8")
+    from . import sites as _sites
+    _sites.register_config_precise(host, task_dir, kind="engine")
+    if log:
+        log(f"✅ 精配已保存: configs/auto_precise_{_sanitize_host(host)}.json（任务包 tasks/{name}）")
     return probe["rows"], probe.get("files", {}), f"engine 试跑 {len(probe['rows'])} 条"

@@ -6,13 +6,23 @@
  */
 const fs = require("node:fs");
 const path = require("node:path");
-const { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy, waitCloudflare } = require("./browser_common.cjs");
+const { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy, waitCloudflare, applyResourceBlocking } = require("./browser_common.cjs");
 const out = (o) => console.log(JSON.stringify(o));
 function arg(n, d) { const i = process.argv.indexOf("--" + n); return i >= 0 ? process.argv[i + 1] : d; }
 
 async function main() {
   const url = arg("url");
   const outFile = arg("out");
+  // 审查修复（H）：url/out 缺失曾走到 launch 后才以晦涩错误崩（page.goto expected
+  // string / writeFileSync undefined）——入口即校验，错误信息可操作
+  if (!url || !/^https?:\/\//.test(url)) {
+    out({ type: "error", message: `缺少或非法 --url（http/https）: ${String(url).slice(0, 60)}` });
+    process.exit(1);  // 浏览器未启动，直接退出无泄漏
+  }
+  if (!outFile) {
+    out({ type: "error", message: "缺少 --out（HTML 落盘路径）" });
+    process.exit(1);
+  }
   const headless = arg("headless", "1") !== "0";
   const scrollCount = parseInt(arg("scrollCount", "0"), 10);
   const scrollWait = parseInt(arg("scrollWait", "1500"), 10);
@@ -26,6 +36,9 @@ async function main() {
   const stopFile = arg("stopFile", null);
   const stopRequested = () => stopFile && fs.existsSync(stopFile);
   let browser = null;
+  // 审查修复（P1）：process.exit 同步终止会跳过 finally 的 browser.close() →
+  // 无头 Chrome 孤儿（R8 战训同款）。改 flag+return，finally 里清理后再退
+  let exitAfter = null;
   try {
     browser = await loadChromium().launch({ headless, executablePath: CHROMIUM_EXE, args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-blink-features=AutomationControlled"] });
     const ctxOpts = storageState && fs.existsSync(storageState) ? { storageState } : {};
@@ -33,6 +46,7 @@ async function main() {
     if (proxy) ctxOpts.proxy = proxy;
     const context = await browser.newContext(ctxOpts);
     if (stealth) await applyStealth(context);
+    await applyResourceBlocking(context);  // Crawlee 对标：font/media 默认阻断（自建 context）
     const page = await context.newPage();
     await page.goto(url, { timeout: 90000, waitUntil: "domcontentloaded" });
     await waitCloudflare(page, context).catch(() => {});
@@ -41,19 +55,23 @@ async function main() {
     if (actionsJson) await runActions(page, JSON.parse(actionsJson));
     if (waitSel) await page.waitForSelector(waitSel, { timeout: 30000 }).catch(() => {});
     for (let s = 0; s < scrollCount; s++) {
-      if (stopRequested()) { out({ type: "stopped", url }); process.exit(0); }
+      if (stopRequested()) { out({ type: "stopped", url }); exitAfter = 0; return; }
       await page.evaluate(() => { const _h = document.documentElement ? document.documentElement.scrollHeight : (document.body ? document.body.scrollHeight : 0); window.scrollTo(0, _h); window.dispatchEvent(new Event("scroll")); });
       await sleep(scrollWait);
     }
-    if (stopRequested()) { out({ type: "stopped", url }); process.exit(0); }
+    if (stopRequested()) { out({ type: "stopped", url }); exitAfter = 0; return; }
     const html = await page.evaluate(() => document.documentElement.outerHTML);
     fs.writeFileSync(outFile, html);
-    out({ type: "html", file: outFile, url: page.url(), bytes: html.length });
+    // OCR R131（L）：html.length 是 UTF-16 码元数——中文页面下虚高。用 Buffer 报字节数
+    out({ type: "html", file: outFile, url: page.url(), bytes: Buffer.byteLength(html, "utf-8") });
   } catch (e) {
     out({ type: "error", message: String((e && e.message) || e) });
-    process.exit(1);
+    exitAfter = 1;
+    return;
   } finally {
-    if (browser) await browser.close();
+    // 审查修复（P1）：close 拒绝曾变 unhandledRejection 翻转退出码（html 已发出）
+    if (browser) { try { await browser.close(); } catch (e) {} }
+    if (exitAfter !== null) process.exit(exitAfter);
   }
 }
-main();
+main().catch((e) => { try { console.error(String((e && e.message) || e)); } catch (_) {} process.exit(1); });

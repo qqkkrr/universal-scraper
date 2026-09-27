@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,6 +30,28 @@ _JOIN_BY_COL = {
     "；": ("依据", "法规", "条例", "规定", "办法", "通知", "文号"),
     "、": ("部门", "单位", "机构", "联系人", "地址"),
 }
+
+
+_OOXML_XML_MAX = 20 * 1024 * 1024
+
+
+def _parse_ooxml_xml_safe(xml: bytes):
+    """审查二轮（CRITICAL）：docx 的 document.xml 曾直接 ET 解析——恶意文档的
+    billion-laughs 实体展开可打穿解析进程。OOXML 规范不允许自定义 DTD 实体，
+    出现 DOCTYPE/ENTITY 即拒绝；超限拒绝；零依赖消除攻击面。
+    返回 Element 或 {"error": str}。"""
+    if len(xml) > _OOXML_XML_MAX:
+        return {"error": f"Word XML 超限（{len(xml)}B > {_OOXML_XML_MAX}B）"}
+    # 审查三轮（H）：曾只扫前 8192B——DOCTYPE/ENTITY 移到中段可绕过。全量扫描
+    # （已限 20MB，代价可控）
+    lowered = xml.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        return {"error": "Word XML 含非法 DOCTYPE/ENTITY（疑似恶意文档）"}
+    from xml.etree import ElementTree as _ET
+    try:
+        return _ET.fromstring(xml)
+    except Exception as e:
+        return {"error": f"Word XML 解析失败: {type(e).__name__}: {e}"}
 
 
 def is_pdf_url(url: str) -> bool:
@@ -185,10 +208,22 @@ def extract_tables_from_pdf(path: str) -> List[Dict[str, Any]]:
     ctx: Dict[str, str] = {}  # 跨页上下文（类别/部门/备注）
     with pdfplumber.open(path) as pdf:
         for pi, page in enumerate(pdf.pages, 1):
-            tables = page.extract_tables()
+            # 审查修复（P2，R15）：单页损坏曾掀翻整个循环——已累计的前 N 页
+            # 表格全部丢弃，还降级成全文模式毫无提示
+            try:
+                tables = page.extract_tables()
+            except Exception as e:
+                print(f"⚠️ 第{pi}页表格提取失败（跳过该页）: {type(e).__name__}: {str(e)[:80]}",
+                      file=sys.stderr)
+                continue
             for ti, table in enumerate(tables, 1):
                 if not table:
                     continue
+                # OCR R131（M）：prev_seq/ctx 曾跨表泄漏——同页第二张表（无关表）
+                # 继承第一张表的序号/上下文，产出串行错数据。每表重置
+                if ti > 1:
+                    prev_seq = ""
+                    ctx = {}
                 # 找表头行（前 4 行内），列名做空白归一
                 hdr_idx, hdr = -1, []
                 for i, row in enumerate(table[:4]):
@@ -298,7 +333,9 @@ def normalize_field_names(rows: List[Dict[str, Any]], fields: List[str]) -> List
                 score = 100
             if score > best_score:
                 best_col, best_score = col, score
-        if best_col and best_score >= 1:
+        # 阈值 ≥2：单字符重合即改名曾把"入党时间"错映射到字段"人数"一类
+        # （中文字符歧义太大）；不达标列按契约保留原名（审查七轮 N36）
+        if best_col and best_score >= 2:
             mapping[best_col] = f
             used.add(best_col)
     if not mapping:
@@ -335,9 +372,12 @@ def parse_pdf_auto(path: str, fields: Optional[List[str]] = None,
                 if fields:
                     rows = normalize_field_names(rows, fields)
                 return {"kind": "table", "rows": rows, "tables": len(by_table)}
-    except Exception:
-        # pdfplumber 失败不致命，回退文本
-        pass
+    except Exception as e:
+        # pdfplumber 失败不致命，回退文本——但留痕（OCR R131（M）：
+        # 依赖损坏 vs 文件损坏 vs 逻辑 bug 曾一律无声降级）
+        import sys as _sys
+        print(f"⚠️ pdfplumber 表格提取失败，回退文本模式（{type(e).__name__}: {str(e)[:80]}）",
+              file=_sys.stderr)
     try:
         from pdfminer.high_level import extract_text
         txt = extract_text(path) or ""
@@ -363,21 +403,24 @@ def parse_xlsx(path: str, fields: Optional[List[str]] = None) -> Dict[str, Any]:
     rows_iter = ws.iter_rows(values_only=True)
     header = None
     rows: List[Dict[str, Any]] = []
-    for r in rows_iter:
-        vals = ["" if v is None else str(v).strip() for v in r]
-        if not any(vals):
-            continue
-        if header is None:
-            # 第一行非空即表头（含关键词更好，但不强求）
-            header = [v or f"列{i + 1}" for i, v in enumerate(vals)]
-            continue
-        rec: Dict[str, Any] = {}
-        for i, v in enumerate(vals):
-            if i < len(header) and v:
-                rec[header[i]] = v
-        if rec:
-            rows.append(rec)
-    wb.close()
+    # OCR R131（M）：wb.close 曾只在 happy path——解析中途抛异常时句柄泄漏
+    try:
+        for r in rows_iter:
+            vals = ["" if v is None else str(v).strip() for v in r]
+            if not any(vals):
+                continue
+            if header is None:
+                # 第一行非空即表头（含关键词更好，但不强求）
+                header = [v or f"列{i + 1}" for i, v in enumerate(vals)]
+                continue
+            rec: Dict[str, Any] = {}
+            for i, v in enumerate(vals):
+                if i < len(header) and v:
+                    rec[header[i]] = v
+            if rec:
+                rows.append(rec)
+    finally:
+        wb.close()
     if not rows:
         return {"kind": "error", "error": "Excel 无数据行"}
     if fields:
@@ -419,19 +462,28 @@ def attachment_to_rows(url: str, proxy: Optional[str] = None,
         return {"kind": "error", "error": f"附件下载失败: {e}"}
     try:
         if low.endswith((".xlsx", ".xls")):
-            r = parse_xlsx(str(fp), fields=fields)
+            # 审查修复（P1，R15）：openpyxl 读不了 .xls/加密 .xlsx 曾裸抛——
+            # 违反"每分支都返回 kind:error"契约并炸掉调用方批量循环
+            try:
+                r = parse_xlsx(str(fp), fields=fields)
+            except Exception as e:
+                return {"kind": "error",
+                        "error": f"Excel 解析失败（.xls/加密文件不受支持，请转 .xlsx）: "
+                                 f"{type(e).__name__}: {e}",
+                        "_pdf": url}
             r["_pdf"] = url
             return r
         if low.endswith((".docx", ".doc")):
             # Word 附件：zip 解包 document.xml 抽文本（不装额外依赖）
             try:
                 import zipfile
-                from xml.etree import ElementTree as ET
                 txt_parts = []
                 with zipfile.ZipFile(fp) as z:
                     if "word/document.xml" in z.namelist():
                         xml = z.read("word/document.xml")
-                        root = ET.fromstring(xml)
+                        root = _parse_ooxml_xml_safe(xml)
+                        if isinstance(root, dict):  # 守卫返回错误字典
+                            return {"kind": "error", **root, "_pdf": url}
                         for p in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
                             t = "".join(n.text or "" for n in p.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"))
                             if t.strip():

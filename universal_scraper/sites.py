@@ -275,7 +275,9 @@ def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
     req = urllib.request.Request(url, headers=hdrs)
     try:
         with opener.open(req, timeout=timeout) as r:
-            raw = r.read(1000000)
+            # R31 审查修复（P1）：曾只读 1MB——大型 JSONP/榜单接口被截断后
+            # json.loads 失败，假报"解析 0 条"。改为读全量（timeout 已限）
+            raw = r.read()
             enc = r.headers.get("Content-Encoding", "").lower()
             if enc == "gzip":
                 try:
@@ -289,6 +291,16 @@ def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
         return {"ok": False, "status": e.code, "html": "", "final_url": url, "error": f"HTTP {e.code}"}
     except Exception as e:
         return {"ok": False, "status": 0, "html": "", "final_url": url, "error": f"{type(e).__name__}: {e}"}
+
+
+def _gov_request(method: str, url: str, proxy: Optional[str] = None, **kw):
+    """政府站点 HTTP 请求（R12 审查修复）：统一走 TLS 证书校验——此前各精配对
+    gov.cn 静默关闭了校验（Cookie 也走未校验通道）；curl 实测 miit/std/chinatax/
+    nhsa/USGS 证书链均有效，无需豁免。顺带收敛 7 处重复的代理装配。"""
+    import requests as _req
+    if proxy:
+        kw.setdefault("proxies", {"http": proxy, "https": proxy})
+    return _req.request(method, url, **kw)
 
 
 def parse_site_html(url: str, html: str) -> List[Dict[str, Any]]:
@@ -308,6 +320,18 @@ def parse_site_html(url: str, html: str) -> List[Dict[str, Any]]:
     for r in rows:
         r.setdefault("_site", site)
     return rows
+
+
+def _row_keys(rows: List[Dict[str, Any]]) -> List[str]:
+    """导出表头 = 全部行的键并集（首行键序优先，后续新键按出现顺序追加）。
+    R14c 根治：eastmoney/fundrank 等解析器按数据有无构造行键，用 rows[0] 定
+    表头会在后续行多键时让 DictWriter 整张 CSV 报废、XLSX 静默丢列。"""
+    seen: List[str] = []
+    for r in rows:
+        for k in r:
+            if k != "_site" and k not in seen:
+                seen.append(k)
+    return seen
 
 
 def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
@@ -343,7 +367,7 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
         try:
             import csv
             with open(out_dir / f"{name}.csv", "w", newline="", encoding="utf-8-sig") as f:
-                w = csv.DictWriter(f, fieldnames=[k for k in rows[0] if k != "_site"])
+                w = csv.DictWriter(f, fieldnames=_row_keys(rows))
                 w.writeheader()
                 w.writerows([{k: v for k, v in r.items() if k != "_site"} for r in rows])
             files["csv"] = f"outputs/{name}.csv"
@@ -352,7 +376,7 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
         try:
             from openpyxl import Workbook
             wb = Workbook(); ws = wb.active
-            keys = [k for k in rows[0] if k != "_site"]
+            keys = _row_keys(rows)
             ws.append(keys)
             for r in rows:
                 ws.append([r.get(k, "") for k in keys])
@@ -365,14 +389,26 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
             ret["warning"] = "；".join(_warns)
         return ret
     fetch = s.get("fetch") or fetch_html
+    # R12 审查修复（P1）：专用 fetch（如 nhsa 的 requests 直连）抛 HTTPError/
+    # ConnectionError 时曾穿透 run_site，CLI 路径直接见堆栈——这里统一折进错误字典。
+    # R14 审查修复：删除 except TypeError 兜底（回退 fetch_html）——已实测全部注册
+    # fetch 签名兼容 (url, cookie, proxy)，该兜底唯一会命中的场景是 fetch 内部真
+    # TypeError，静默换通用抓取反而掩盖缺陷、误导诊断方向。
     try:
         res = fetch(url, cookie=cookie, proxy=proxy)
-    except TypeError:
-        res = fetch_html(url, cookie=cookie, proxy=proxy)
+    except Exception as e:
+        return {"total": 0, "rows": [], "files": {},
+                "error": f"抓取异常 {type(e).__name__}: {e}"}
     if not res.get("ok"):
         return {"total": 0, "rows": [], "files": {},
                 "error": f"抓取失败 HTTP {res.get('status')}: {res.get('error','')}"}
-    rows = s["parse"](res.get("html", ""), url)
+    try:
+        rows = s["parse"](res.get("html", ""), url)
+        if not isinstance(rows, list):
+            raise TypeError(f"解析器返回 {type(rows).__name__} 而非 list")
+    except Exception as e:
+        return {"total": 0, "rows": [], "files": {},
+                "error": f"解析异常 {type(e).__name__}: {e}"}
     if limit and int(limit) > 0:
         rows = rows[:int(limit)]
     # 空壳行防线：全字段为空的"成功"行按失败处理（防精配假成功）
@@ -396,7 +432,7 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
     try:
         import csv
         with open(out_dir / f"{name}.csv", "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.DictWriter(f, fieldnames=[k for k in rows[0] if k != "_site"])
+            w = csv.DictWriter(f, fieldnames=_row_keys(rows))
             w.writeheader()
             w.writerows([{k: v for k, v in r.items() if k != "_site"} for r in rows])
         files["csv"] = f"outputs/{name}.csv"
@@ -405,7 +441,7 @@ def run_site(url: str, cookie: str = "", proxy: Optional[str] = None,
     try:
         from openpyxl import Workbook
         wb = Workbook(); ws = wb.active
-        keys = [k for k in rows[0] if k != "_site"]
+        keys = _row_keys(rows)
         ws.append(keys)
         for r in rows:
             ws.append([r.get(k, "") for k in keys])
@@ -473,6 +509,9 @@ def parse_douban(html: str, url: str) -> List[Dict[str, Any]]:
 
 def match_douban(url: str) -> bool:
     if "book.douban.com" in url and any(k in url for k in ("/subject/", "/subject_search", "/buylinks")):
+        return False
+    # R80 修复（P2）：movie.douban.com 曾恒命中本站——douban_movie 精配不可达
+    if "movie.douban.com" in url:
         return False
     return "douban.com" in url and any(k in url for k in ("movie", "book", "group", "/subject/", "search"))
 
@@ -697,6 +736,9 @@ def parse_netease(html, url):
 
 
 def match_netease(url):
+    # R80 修复（P1）：music.163.com 曾被新闻站点抢占——netease_music 永不可达
+    if "music.163.com" in (url or "").lower():
+        return False
     return "163.com" in url
 
 
@@ -1133,10 +1175,17 @@ def parse_browser_generic(html, url, site):
 
 SITE_DOMAINS = {"jd": "jd.com", "weibo": "weibo.com", "zhihu": "zhihu.com",
                 "douyin": "douyin.com", "kuaishou": "kuaishou.com"}
+# R80 修复（P2）：浏览器兜底注册早于精配站点——weibo/zhihu 的热榜 URL
+# （s.weibo.com/top、api.../hot-lists）曾恒被兜底抢占，weibo_hot/zhihu_hot
+# 除魔法令牌外不可达。含这些路径片段的 URL 不归兜底管，落到后面的精配
+_SITE_EXCLUDE = {"weibo": ("s.weibo.com", "/hot", "hotsearch", "top/summary"),
+                 "zhihu": ("hot-list", "/hot")}
 for _name, _dom in SITE_DOMAINS.items():
     def _mk(_n, _d):
+        _ex = _SITE_EXCLUDE.get(_n, ())
         def matcher(url):
-            return _d in url
+            u = (url or "").lower()
+            return _d in u and not any(x in u for x in _ex)
         def parse(html, url):
             return parse_browser_generic(html, url, _n)
         return matcher, parse
@@ -1775,8 +1824,9 @@ def match_miit(url: str) -> bool:
         "appqhyhqyzxzzxd" in u or "jgsj/xgj" in u or "zwgk/zcwj/wjfb/tz" in u)
 
 
-from pdfminer.high_level import extract_pages
-from pdfminer.layout import LTTextContainer, LTTextLine, LTRect, LTLine, LTChar
+# R36 修复：pdfminer 改为按需加载——模块级 import 曾让纯列表命令 `sites`
+# 在未装 pdfminer 的环境裸崩 ModuleNotFoundError。真正入口只有 _parse_miit_pdf，
+# 在其顶部加载并注入模块全局（下方 helpers 以全局名引用这些符号）
 
 FIELD_ALIASES = {
     "seq": ["序号", "序"],
@@ -1949,6 +1999,14 @@ def _restore_spaces(line, vxs, col_fields):
     return {k: re.sub(r"\s+", " ", v).strip() for k, v in cells2.items() if v.strip()}
 
 def _parse_miit_pdf(path):
+    # R36：pdfminer 按需加载（见上方注释）——注入模块全局供下方 helpers 使用
+    global extract_pages, LTTextContainer, LTTextLine, LTRect, LTLine, LTChar
+    try:
+        from pdfminer.high_level import extract_pages
+        from pdfminer.layout import LTTextContainer, LTTextLine, LTRect, LTLine, LTChar
+    except ImportError as _e:
+        raise RuntimeError("解析 PDF 需要 pdfminer.six：pip install pdfminer.six"
+                           "（完整环境脚本 setup.sh 见 Full 版）") from _e
     out = []
     col_fields = None
     for page in extract_pages(path):
@@ -2082,7 +2140,6 @@ def _miit_run(url: str, cookie: str = "", proxy: Optional[str] = None,
     if not articles:
         raise RuntimeError("工信部列表/详情 0 条（可能被 WAF 拦截或栏目结构变化）")
     # 下载附件并解析
-    import requests as _req
     out_dir = _P("outputs/miit_attachments")
     out_dir.mkdir(parents=True, exist_ok=True)
     headers = {"User-Agent": UA,
@@ -2104,8 +2161,7 @@ def _miit_run(url: str, cookie: str = "", proxy: Optional[str] = None,
         fname = re.sub(r"[^0-9A-Za-z._-]+", "_", pdf_url.rsplit("/", 1)[-1]) or "attach.bin"
         fp = out_dir / fname
         try:
-            r = _req.get(pdf_url, headers=headers, timeout=40, verify=False,
-                         proxies={"http": proxy, "https": proxy} if proxy else None)
+            r = _gov_request("GET", pdf_url, headers=headers, timeout=40, proxy=proxy)
             r.raise_for_status()
             fp.write_bytes(r.content)
             if fp.suffix.lower() in (".xls", ".xlsx"):
@@ -2125,7 +2181,8 @@ def _miit_run(url: str, cookie: str = "", proxy: Optional[str] = None,
                              "source": item.get("source", ""),
                              "version": item.get("version", ""),
                              "issue": item.get("issue", ""),
-                             "report_url": report_url, "pdf_url": pdf_url})
+                             "report_url": report_url, "pdf_url": pdf_url,
+                             "_error": ""})  # R14b：与失败行 schema 对齐，防 DictWriter 表头错位
         except Exception as e:
             rows.append({"report_title": title, "publish_date": pub_date,
                          "app_name": "", "developer": "", "source": "",
@@ -2177,7 +2234,7 @@ def _register_image_precise(meta: Dict[str, Any]):
 def _register_tactic_precise(meta: Dict[str, Any]):
     """注册战术型精配：meta 含 host/tactic/params（entry/seed/item_css/url_template/fields/img_src_hint）。
 
-    html_engine 不是 run 型战术（它应由 _register_engine_config 注册成 engine 任务包）。
+    html_engine 不是 run 型战术（它应由 precise_auto._tactic_engine_probe 的试跑-注册流程落成 engine 任务包）。
     历史遗留的 tactic:html_engine 配置属于毒配置：忽略并删除，避免 run_site 误报“未支持的战术”。
     """
     host = (meta.get("host") or "").lower().strip()
@@ -2346,15 +2403,13 @@ def match_std(url: str) -> bool:
 
 def _std_run(url: str, cookie: str = "", proxy: Optional[str] = None,
              limit: int = 20) -> List[Dict[str, Any]]:
-    import requests as _req
     from urllib.parse import urlparse, parse_qs, quote
     from lxml import html as _LH
     q = parse_qs(urlparse(url).query).get("q", [""])[0].strip() or "电动自行车"
     if "stdPage" not in (url or ""):
         url = f"https://std.samr.gov.cn/search/stdPage?q={quote(q)}&tid="
     headers = {"User-Agent": UA, "Referer": f"https://std.samr.gov.cn/search/std?q={quote(q)}"}
-    r = _req.get(url, headers=headers, timeout=20, verify=False,
-                 proxies={"http": proxy, "https": proxy} if proxy else None)
+    r = _gov_request("GET", url, headers=headers, timeout=20, proxy=proxy)
     r.raise_for_status()
     doc = _LH.fromstring(r.text)
     rows: List[Dict[str, Any]] = []
@@ -2380,6 +2435,11 @@ def _std_run(url: str, cookie: str = "", proxy: Optional[str] = None,
             "tid": tid,
             "pid": pid,
             "详情链接": f"https://std.samr.gov.cn/gb/search/gbDetailed?id={pid}&tid={tid}" if pid else "",
+            # R14b 修复：三键在构造时统一初始化——避免"失败行多 _error 键"的行间
+            # schema 不齐，DictWriter 以 rows[0] 定表头时会因多余键整张 CSV 报废
+            "实施日期": "",
+            "发布日期": "",
+            "_error": "",
         })
     # 详情补抓实施日期
     _max = 20 if int(limit or 0) <= 20 else int(limit or 20)
@@ -2387,14 +2447,18 @@ def _std_run(url: str, cookie: str = "", proxy: Optional[str] = None,
         if not row.get("pid"):
             continue
         try:
-            dr = _req.get(row["详情链接"], headers=headers, timeout=20, verify=False)
+            dr = _gov_request("GET", row["详情链接"], headers=headers, timeout=20, proxy=proxy)
             dtxt = re.sub(r"<[^>]+>", " ", dr.text or "")
             m = re.search(r"实施日期[：:\s]*([0-9]{4}[-/年][0-9]{1,2}[-/月][0-9]{1,2})", dtxt)
             row["实施日期"] = m.group(1).replace("/", "-").replace("年", "-").replace("月", "-") if m else ""
             m2 = re.search(r"发布日期[：:\s]*([0-9]{4}[-/年][0-9]{1,2}[-/月][0-9]{1,2})", dtxt)
             row["发布日期"] = m2.group(1).replace("/", "-").replace("年", "-").replace("月", "-") if m2 else ""
-        except Exception:
+        except Exception as e:
+            # R14 审查修复：详情失败不再静默降级成"无日期"——补齐两列 schema 防
+            # CSV 表头错位，并按行留 _error 痕迹（参考 miit 的做法）
             row["实施日期"] = ""
+            row["发布日期"] = ""
+            row["_error"] = f"详情抓取失败 {type(e).__name__}"
     if not rows:
         raise RuntimeError("标准搜索 0 条（接口可能变更）")
     return rows
@@ -2533,10 +2597,8 @@ def _zige_run(url: str, cookie: str = "", proxy: Optional[str] = None,
     from .pdf_table import download_pdf, extract_pdf_links, is_pdf_url
     pdf_url = url if is_pdf_url(url) else None
     if pdf_url is None:
-        import requests as _req
         headers = {"User-Agent": UA}
-        r = _req.get(url, headers=headers, timeout=40, verify=False,
-                     proxies={"http": proxy, "https": proxy} if proxy else None)
+        r = _gov_request("GET", url, headers=headers, timeout=40, proxy=proxy)
         r.raise_for_status()
         pdfs = extract_pdf_links(r.text or "", url)
         if not pdfs:
@@ -2568,11 +2630,9 @@ def match_eq(url: str) -> bool:
 
 def _eq_run(url: str, cookie: str = "", proxy: Optional[str] = None,
             limit: int = 0) -> List[Dict[str, Any]]:
-    import requests as _req
     from datetime import datetime, timedelta, timezone
     headers = {"User-Agent": UA}
-    r = _req.get(url, headers=headers, timeout=40, verify=False,
-                 proxies={"http": proxy, "https": proxy} if proxy else None)
+    r = _gov_request("GET", url, headers=headers, timeout=40, proxy=proxy)
     r.raise_for_status()
     data = r.json()
     feats = data.get("features") or []
@@ -2678,7 +2738,6 @@ def match_tax(url: str) -> bool:
 def _tax_run(url: str, cookie: str = "", proxy: Optional[str] = None,
              limit: int = 0) -> List[Dict[str, Any]]:
     from urllib.parse import urlparse, parse_qs
-    import requests as _req
     q = parse_qs(urlparse(url).query)
     word = (q.get("searchWord") or [""])[0].strip() or "增值税"
     column = (q.get("column") or [""])[0].strip() or "政策法规"
@@ -2690,11 +2749,10 @@ def _tax_run(url: str, cookie: str = "", proxy: Optional[str] = None,
         "uc": 1,
         "left_right_index": "",
     }
-    r = _req.post("https://www.chinatax.gov.cn/search5/search/s", data=form,
-                  timeout=40, verify=False,
-                  headers={"User-Agent": UA,
-                           "Referer": "https://www.chinatax.gov.cn/"},
-                  proxies={"http": proxy, "https": proxy} if proxy else None)
+    r = _gov_request("POST", "https://www.chinatax.gov.cn/search5/search/s", data=form,
+                     timeout=40, proxy=proxy,
+                     headers={"User-Agent": UA,
+                              "Referer": "https://www.chinatax.gov.cn/"})
     r.raise_for_status()
     data = r.json()
     st = ((data.get("searchResultAll") or {}).get("searchTotal")) or []
@@ -2774,15 +2832,13 @@ def match_nhsa(url: str) -> bool:
 
 def _nhsa_fetch(url: str, cookie: str = "", proxy: Optional[str] = None):
     """nhsa 专用 fetch：requests + smart_decode（页面编码易误判，curl_cffi 会卡）。"""
-    import requests as _req
     import warnings as _w
     _w.filterwarnings("ignore")
     from .core import smart_decode
     hdrs = {"User-Agent": UA}
     if cookie:
         hdrs["Cookie"] = cookie
-    r = _req.get(url, timeout=20, verify=False, headers=hdrs,
-                 proxies={"http": proxy, "https": proxy} if proxy else None)
+    r = _gov_request("GET", url, timeout=20, headers=hdrs, proxy=proxy)
     r.raise_for_status()
     html = smart_decode(r.content, dict(r.headers))
     return {"ok": True, "status": r.status_code, "html": html,
@@ -2830,3 +2886,1221 @@ def parse_nhsa(html: str, url: str) -> List[Dict[str, Any]]:
 
 register("nhsa", match_nhsa, parse_nhsa, fetch=_nhsa_fetch,
          desc="国家医保局：政策法规栏目（col104 datastore 45条，标题/文号/日期）")
+
+
+# ===========================================================================
+# R50 新增：学术/财经/新闻/招聘 P0 精配站点（公开 API / 零反爬）
+# 统一走 fetch_html 基础设施（域名硬编码，用户关键词仅进 query 参数）
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# arXiv 论文搜索（公开 XML API，零反爬）
+# ---------------------------------------------------------------------------
+_ARXIV_BASE = "https://export.arxiv.org/api/query"
+
+def match_arxiv_api(url: str) -> bool:
+    u = (url or "").lower()
+    return "arxiv.org" in u and ("abs/" in u or "export.arxiv.org/api" in u)
+
+
+def _arxiv_api_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
+    _parsed = _up(url)
+    _qs = _pq(_parsed.query)
+    # 单篇模式: /abs/2501.12948 → 按 ID 查
+    m_abs = re.search(r"/abs/([0-9.v]+)", url)
+    if m_abs:
+        paper_id = m_abs.group(1)
+        api = f"https://export.arxiv.org/api/query?id_list={paper_id}&max_results=1"
+    else:
+        q = _qs.get("search_query", ["all:LLM"])[0] or "all:LLM"
+        max_r = min(int(limit) or 20, 100)
+        api = (f"{_ARXIV_BASE}?search_query={_q(q)}"
+               f"&max_results={max_r}&sortBy=submittedDate&sortOrder=descending")
+    r = fetch_html(api, timeout=30)
+    if not r.get("ok"):
+        raise RuntimeError(f"arXiv API 请求失败: {r.get('error', '')}")
+    _xml = r.get("html", "<feed/>")
+    if "<!DOCTYPE" in _xml[:2048] or "<!ENTITY" in _xml[:2048]:
+        raise ValueError("XML 包含 DOCTYPE/ENTITY，已拒绝解析")
+    import xml.etree.ElementTree as ET
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    tree = ET.fromstring(_xml)
+    rows = []
+    for entry in tree.findall("a:entry", ns):
+        rows.append({
+            "标题": (entry.findtext("a:title", "", ns) or "").strip(),
+            "摘要": (entry.findtext("a:summary", "", ns) or "").strip()[:300],
+            "作者": ", ".join(a.findtext("a:name", "", ns) for a in entry.findall("a:author", ns)),
+            "链接": (entry.findtext("a:id", "", ns) or "").strip(),
+            "发布日期": (entry.findtext("a:published", "", ns) or "")[:10],
+            "分类": ", ".join(c.get("term", "") for c in entry.findall("a:category", ns)),
+        })
+    return rows
+
+
+register("arxiv_api", match_arxiv_api, lambda h, u: [], run=_arxiv_api_run,
+         desc="arXiv 论文搜索（公开 XML API，关键词从 URL query 取）")
+
+
+# ---------------------------------------------------------------------------
+# Crossref DOI/论文搜索（公开 JSON API，零反爬）
+# ---------------------------------------------------------------------------
+_CROSSREF_BASE = "https://api.crossref.org/works"
+
+def match_crossref(url: str) -> bool:
+    return "api.crossref.org/works" in (url or "").lower()
+
+
+def _crossref_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
+    q = _pq(_up(url).query).get("query", ["machine learning"])[0] or "machine learning"
+    max_r = min(int(limit) or 20, 100)
+    api = f"{_CROSSREF_BASE}?query={_q(q)}&rows={max_r}&sort=published&order=desc"
+    r = fetch_html(api, timeout=30)
+    if not r.get("ok"):
+        raise RuntimeError(f"Crossref 请求失败: {r.get('error', '')}")
+    data = json.loads(r.get("html", "{}"))
+    items = data.get("message", {}).get("items", [])
+    rows = []
+    for it in items:
+        title_list = it.get("title", [])
+        rows.append({
+            "标题": title_list[0] if title_list else "",
+            "DOI": it.get("DOI", ""),
+            "期刊": (it.get("container-title") or [""])[0],
+            "发表日期": "-".join(str(d) for d in (it.get("published-print", {}).get("date-parts", [[None]])[0] or it.get("published-online", {}).get("date-parts", [[0]])[0])),
+            "引用数": it.get("is-referenced-by-count", 0),
+            "类型": it.get("type", ""),
+            "URL": it.get("URL", ""),
+        })
+    return rows
+
+
+register("crossref", match_crossref, lambda h, u: [], run=_crossref_run,
+         desc="Crossref DOI/论文搜索（公开 JSON API）")
+
+
+# ---------------------------------------------------------------------------
+# OpenAlex 学术图谱（2.5 亿篇，公开 JSON API）
+# ---------------------------------------------------------------------------
+_OPENALEX_BASE = "https://api.openalex.org/works"
+
+def match_openalex(url: str) -> bool:
+    return "api.openalex.org" in (url or "").lower()
+
+
+def _openalex_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
+    q = _pq(_up(url).query).get("search", ["machine learning"])[0] or "machine learning"
+    max_r = min(int(limit) or 20, 200)
+    api = f"{_OPENALEX_BASE}?search={_q(q)}&per_page={max_r}&select=id,title,publication_date,cited_by_count,authorships"
+    r = fetch_html(api, timeout=30)
+    if not r.get("ok"):
+        raise RuntimeError(f"OpenAlex 请求失败: {r.get('error', '')}")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("results", []):
+        authors = ", ".join(a.get("author", {}).get("display_name", "")
+                            for a in (it.get("authorships") or [])[:5])
+        rows.append({
+            "标题": it.get("title", ""),
+            "DOI": (it.get("doi") or "").replace("https://doi.org/", ""),
+            "作者": authors,
+            "发表日期": it.get("publication_date", ""),
+            "引用数": it.get("cited_by_count", 0),
+            "URL": it.get("id", "").replace("https://openalex.org/", "https://doi.org/"),
+        })
+    return rows
+
+
+register("openalex", match_openalex, lambda h, u: [], run=_openalex_run,
+         desc="OpenAlex 学术搜索（2.5 亿篇公开论文）")
+
+
+# ---------------------------------------------------------------------------
+# Hacker News（Algolia 即时搜索 API）
+# ---------------------------------------------------------------------------
+_HN_BASE = "https://hn.algolia.com/api/v1/search"
+
+def match_hn(url: str) -> bool:
+    return "hn.algolia.com" in (url or "").lower()
+
+
+def _hn_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import quote as _q
+    q = "large language model"
+    m = re.search(r"query=([^&]+)", url)
+    if m:
+        q = _q(m.group(1))
+    api = f"{_HN_BASE}?query={_q(q)}&hitsPerPage={limit}"
+    r = fetch_html(api, timeout=30)
+    if not r.get("ok"):
+        raise RuntimeError(f"HN 请求失败: {r.get('error', '')}")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for h in data.get("hits", []):
+        rows.append({
+            "标题": h.get("title") or h.get("story_title") or "",
+            "作者": h.get("author", ""),
+            "得分": h.get("points", 0),
+            "评论数": h.get("num_comments", 0),
+            "URL": h.get("url") or f"https://news.ycombinator.com/item?id={h.get('objectID','')}",
+            "日期": (h.get("created_at") or "")[:10],
+        })
+    return rows
+
+
+register("hackernews", match_hn, lambda h, u: [], run=_hn_run,
+         desc="Hacker News 搜索（Algolia API）")
+
+
+# ---------------------------------------------------------------------------
+# bioRxiv 预印本（公开 API）
+# ---------------------------------------------------------------------------
+_BIORXIV_BASE = "https://api.biorxiv.org/details/biorxiv"
+
+def match_biorxiv(url: str) -> bool:
+    return "biorxiv.org" in (url or "").lower()
+
+
+def _biorxiv_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from datetime import datetime, timedelta
+    end = datetime.now()
+    start = end - timedelta(days=365)
+    api = (f"{_BIORXIV_BASE}/"
+           f"{start.strftime('%Y-%m-%d')}/{end.strftime('%Y-%m-%d')}/{limit}")
+    r = fetch_html(api, timeout=30)
+    if not r.get("ok"):
+        raise RuntimeError(f"bioRxiv 请求失败: {r.get('error', '')}")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("collection", [])[:limit]:
+        rows.append({
+            "标题": it.get("title", ""),
+            "作者": it.get("authors", ""),
+            "DOI": it.get("doi", ""),
+            "摘要": (it.get("abstract", "") or "")[:300],
+            "发布日期": it.get("date", ""),
+            "分类": it.get("category", ""),
+        })
+    return rows
+
+
+register("biorxiv", match_biorxiv, lambda h, u: [], run=_biorxiv_run,
+         desc="bioRxiv 生医预印本（最近一年）")
+
+
+# ---------------------------------------------------------------------------
+# 新浪行情（纯文本，零反爬）
+# ---------------------------------------------------------------------------
+_SINA_BASE = "https://hq.sinajs.cn/list="
+
+def match_sina_quote(url: str) -> bool:
+    return "hq.sinajs.cn" in (url or "").lower() or "sina_quote" in (url or "").lower()
+
+def _sina_quote_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import urlparse as _up, parse_qs as _pq
+    symbols = _pq(_up(url).query).get("list", ["sh000001,sz399001"])
+    if isinstance(symbols, list):
+        symbols = ",".join(symbols)
+    api = f"{_SINA_BASE}list={symbols}"
+    r = fetch_html(api, timeout=15)
+    if not r.get("ok"):
+        raise RuntimeError(f"新浪行情请求失败: {r.get('error','')}")
+    text = r.get("html", "")
+    rows = []
+    for line in text.splitlines():
+        m = re.match(r'var hq_str_(\w+)="(.+)"', line.strip())
+        if not m:
+            continue
+        sym, data = m.group(1), m.group(2).split(",")
+        if len(data) >= 6:
+            rows.append({"代码": sym, "名称": data[0], "开盘": data[1],
+                         "昨收": data[2], "最新": data[3], "最高": data[4],
+                         "最低": data[5]})
+    return rows
+
+register("sina_quote", match_sina_quote, lambda h, u: [], run=_sina_quote_run,
+         desc="新浪实时行情（URL: hq.sinajs.cn/list=sh000001,sz399001）")
+
+
+# ---------------------------------------------------------------------------
+# 腾讯行情（纯文本，零反爬）
+# ---------------------------------------------------------------------------
+_TENCENT_BASE = "https://qt.gtimg.cn/q="
+
+def match_tencent_quote(url: str) -> bool:
+    return "qt.gtimg.cn" in (url or "").lower() or "tencent_quote" in (url or "").lower()
+
+def _tencent_quote_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import urlparse as _up, parse_qs as _pq
+    symbols = _pq(_up(url).query).get("q", ["sh000001"])
+    if isinstance(symbols, list):
+        symbols = ",".join(symbols)
+    api = f"{_TENCENT_BASE}{symbols}"
+    r = fetch_html(api, timeout=15)
+    if not r.get("ok"):
+        raise RuntimeError(f"腾讯行情请求失败: {r.get('error','')}")
+    text = r.get("html", "")
+    rows = []
+    for line in text.splitlines():
+        m = re.match(r'v_(\w+)="(.+)"', line.strip())
+        if not m:
+            continue
+        sym, data = m.group(1), m.group(2).split("~")
+        if len(data) > 6:
+            rows.append({"代码": sym, "名称": data[1], "最新": data[3],
+                         "昨收": data[4], "开盘": data[5], "成交量": data[6]})
+    return rows
+
+register("tencent_quote", match_tencent_quote, lambda h, u: [], run=_tencent_quote_run,
+         desc="腾讯实时行情（URL: qt.gtimg.cn/q=sh000001）")
+
+
+# ---------------------------------------------------------------------------
+# 36氪科技新闻（SSR HTML）
+# ---------------------------------------------------------------------------
+def match_36kr(url: str) -> bool:
+    return "36kr.com" in (url or "").lower()
+
+def _36kr_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://36kr.com/information/web_news/latest", timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("36氪请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(r'<a[^>]*class="[^"]*article-item-title[^"]*"[^>]*>([^<]+)</a>', text):
+        rows.append({"标题": m.group(1).strip()})
+    if not rows:
+        for m in re.finditer(r'"widgetTitle":"([^"]+)"', text):
+            try:
+                title = m.group(1).encode().decode("unicode_escape", errors="ignore")
+                rows.append({"标题": title})
+            except Exception:
+                pass
+    return rows[:limit or 20]
+
+register("kr36", match_36kr, lambda h, u: [], run=_36kr_run,
+         desc="36氪科技新闻（最新快讯+文章标题）")
+
+
+# ---------------------------------------------------------------------------
+# PubMed 医学论文（E-utilities 公开 API，零反爬）
+# ---------------------------------------------------------------------------
+_PUBMED_EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+
+def match_pubmed(url: str) -> bool:
+    return "pubmed.ncbi.nlm.nih.gov" in (url or "").lower()
+
+def _pubmed_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
+    q = _pq(_up(url).query).get("term", ["machine learning"])[0] or "machine learning"
+    max_r = min(int(limit) or 20, 100)
+    esearch = f"{_PUBMED_EUTILS}/esearch.fcgi?db=pubmed&term={_q(q)}&retmax={max_r}&retmode=json"
+    r = fetch_html(esearch, timeout=30)
+    if not r.get("ok"):
+        raise RuntimeError(f"PubMed esearch 失败: {r.get('error','')}")
+    ids = json.loads(r.get("html", "{}")).get("esearchresult", {}).get("idlist", [])
+    if not ids:
+        return []
+    esummary = f"{_PUBMED_EUTILS}/esummary.fcgi?db=pubmed&id={','.join(ids)}&retmode=json"
+    r2 = fetch_html(esummary, timeout=30)
+    if not r2.get("ok"):
+        raise RuntimeError(f"PubMed esummary 失败: {r2.get('error','')}")
+    data = json.loads(r2.get("html", "{}")).get("result", {})
+    rows = []
+    for pid in ids:
+        d = data.get(pid, {})
+        rows.append({
+            "PMID": pid,
+            "标题": d.get("title", ""),
+            "期刊": d.get("source", ""),
+            "日期": d.get("pubdate", ""),
+            "作者": ", ".join(a.get("name", "") for a in d.get("authors", [])[:5]),
+            "DOI": next((x.get("value", "") for x in d.get("articleids", []) if x.get("idtype") == "doi"), ""),
+        })
+    return rows
+
+register("pubmed", match_pubmed, lambda h, u: [], run=_pubmed_run,
+         desc="PubMed 医学论文搜索（E-utilities 公开 API）")
+
+
+# ---------------------------------------------------------------------------
+# 证监会处罚公告（SSR HTML，低反爬）
+# ---------------------------------------------------------------------------
+def match_csrc(url: str) -> bool:
+    return "csrc.gov.cn" in (url or "").lower()
+
+def _csrc_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("http://www.csrc.gov.cn/csrc/c101928/zfxxgk_zdgk.shtml", timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("证监会请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(
+        r'<a[^>]*href="([^"]+)"[^>]*title="([^"]*(?:处罚|罚单|监管|警示)[^"]*)"[^>]*>', text):
+        rows.append({"标题": m.group(2).strip(), "链接": m.group(1).strip()})
+    return rows[:limit or 20]
+
+register("csrc_penalty", match_csrc, lambda h, u: [], run=_csrc_run,
+         desc="证监会处罚公告列表")
+
+
+# ---------------------------------------------------------------------------
+# 信用中国失信查询（公开 API）
+# ---------------------------------------------------------------------------
+def match_creditchina(url: str) -> bool:
+    return "creditchina.gov.cn" in (url or "").lower()
+
+def _creditchina_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
+    company = _pq(_up(url).query).get("company", [""])[0]
+    if not company:
+        raise RuntimeError("URL 需含 ?company=企业名称 参数")
+    api = f"https://public.creditchina.gov.cn/private-api/catalogSearchHome?keyword={_q(company)}&scenes=defaultscenario&tableName=credit_xyzx&searchState=2&entityType=1,2,4,5,6,7,8"
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError(f"信用中国请求失败: {r.get('error','')}")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("result", {}).get("records", [])[:limit or 20]:
+        rows.append({
+            "企业名称": it.get("name", ""),
+            "类型": it.get("type", ""),
+            "决定文号": it.get("decisionDocNo", ""),
+            "处罚内容": (it.get("penaltyContent", "") or "")[:200],
+            "决定日期": it.get("decisionDate", ""),
+        })
+    return rows
+
+register("creditchina", match_creditchina, lambda h, u: [], run=_creditchina_run,
+         desc="信用中国失信/行政处罚查询（URL: ?company=企业名称）")
+
+
+# ---------------------------------------------------------------------------
+# OpenReview（AI/ML 论文+审稿意见，公开 API v2）
+# ---------------------------------------------------------------------------
+_OR_API = "https://api2.openreview.net/notes"
+
+def match_openreview(url: str) -> bool:
+    return "openreview.net" in (url or "").lower()
+
+def _openreview_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
+    venue = _pq(_up(url).query).get("venue", ["NeurIPS.2024.Conference"])[0]
+    api = f"{_OR_API}?content.venue={_q(venue)}&limit={min(limit or 20, 50)}"
+    r = fetch_html(api, timeout=30)
+    if not r.get("ok"):
+        raise RuntimeError(f"OpenReview 请求失败: {r.get('error','')}")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("notes", []):
+        c = it.get("content", {})
+        title_v = c.get("title", {})
+        rows.append({
+            "标题": title_v.get("value", "") if isinstance(title_v, dict) else str(title_v),
+            "作者": ", ".join(c.get("authors", {}).get("value", [])) if isinstance(c.get("authors"), dict) else "",
+            "摘要": (c.get("abstract", {}).get("value", "") or "")[:300],
+            "Forum": f"https://openreview.net/forum?id={it.get('id','')}",
+        })
+    return rows
+
+register("openreview", match_openreview, lambda h, u: [], run=_openreview_run,
+         desc="OpenReview AI/ML 论文+审稿（公开 API v2）")
+
+
+# ---------------------------------------------------------------------------
+# 掘金（技术文章，公开 API）
+# ---------------------------------------------------------------------------
+def match_juejin(url: str) -> bool:
+    return "juejin.cn" in (url or "").lower()
+
+def _juejin_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from .core import make_http_client
+    # R65 修复：payload 此前只构建未发送（fetch_html 是 GET 无 body）；且旧路由
+    # content/article/query_list 已下线（"请求路由不存在"）——换现行路由 + POST
+    api = "https://api.juejin.cn/content_api/v1/article/query_list"
+    payload = json.dumps({"id_type": 2, "cursor": "0", "sort_type": 2,
+                          "category_id": "", "limit": min(limit or 20, 50)}).encode()
+    client = make_http_client({"min_interval": 0.5, "timeout": 20, "max_retries": 1})
+    r = client.post(api, data=payload, headers={"Content-Type": "application/json"})
+    if not r.get("ok"):
+        raise RuntimeError(f"掘金 API 请求失败: {r.get('error', '')}")
+    data = json.loads(r.get("body", r.get("text", "{}")))
+    if data.get("err_no") != 0:
+        raise RuntimeError(f"掘金 API 错误: {data.get('err_msg', '')}")
+    if not data.get("data"):
+        # 实测：未登录/数据中心出口一律 success+空数组（服务端门槛）——
+        # 如实报错并指引带登录态，别让小白拿到静默 0 条
+        raise RuntimeError("掘金返回空列表（匿名访问被服务端门槛拦截）——"
+                           "请用浏览器登录掘金后导出 Cookie，在任务里配 cookie 重试")
+    rows = []
+    for it in data.get("data", []):
+        content = it.get("content", {})
+        author_info = it.get("author_user_info", {})
+        rows.append({
+            "标题": content.get("title", ""),
+            "作者": author_info.get("user_name", "") if isinstance(author_info, dict) else "",
+            "浏览量": content.get("view_count", 0),
+            "点赞数": content.get("like_count", 0),
+            "URL": f"https://juejin.cn/post/{content.get('content_id', '')}",
+        })
+    return rows
+
+register("juejin", match_juejin, lambda h, u: [], run=_juejin_run,
+         desc="掘金技术文章（公开 API，热门文章列表）")
+
+
+# ---------------------------------------------------------------------------
+# 少数派（公开 JSON API）
+# ---------------------------------------------------------------------------
+def match_sspai(url: str) -> bool:
+    return "sspai.com" in (url or "").lower()
+
+def _sspai_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    api = f"https://sspai.com/api/v1/articles?limit={limit or 20}&offset=0"
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("少数派 API 请求失败")
+    data = json.loads(r.get("html", "{}"))
+    items = data.get("data", [])
+    rows = []
+    for it in items[:limit or 20]:
+        author = ""
+        if isinstance(it.get("author"), dict):
+            author = it["author"].get("nickname", "")
+        rows.append({"标题": it.get("title", ""),
+                     "作者": author,
+                     "摘要": (it.get("summary", "") or "")[:150],
+                     "URL": f"https://sspai.com/post/{it.get('id','')}"})
+    return rows
+
+register("sspai", match_sspai, lambda h, u: [], run=_sspai_run,
+         desc="少数派数字生活文章（公开 API）")
+
+
+# ---------------------------------------------------------------------------
+# V2EX（公开 JSON API）
+# ---------------------------------------------------------------------------
+def match_v2ex(url: str) -> bool:
+    return "v2ex.com" in (url or "").lower()
+
+def _v2ex_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://www.v2ex.com/api/topics/hot.json", timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("V2EX API 请求失败")
+    data = json.loads(r.get("html", "[]"))
+    rows = []
+    for it in data[:limit or 20]:
+        member = it.get("member", {})
+        rows.append({"标题": it.get("title", ""),
+                     "作者": member.get("username", "") if isinstance(member, dict) else "",
+                     "内容摘要": (it.get("content", "") or "")[:80],
+                     "回复数": it.get("replies", 0),
+                     "URL": it.get("url", "")})
+    return rows
+
+register("v2ex", match_v2ex, lambda h, u: [], run=_v2ex_run,
+         desc="V2EX 热门讨论（公开 API）")
+
+
+# ---------------------------------------------------------------------------
+# GitHub Trending：与 github_trending（1211 行，parse 型）完全同域——
+# R80 去重：先注册者恒先命中，gh_trending 此前是不可达的死注册，已删除
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Google News RSS（零反爬，含 DOCTYPE 安全检查）
+# ---------------------------------------------------------------------------
+def match_gnews_rss(url: str) -> bool:
+    return "news.google.com/rss" in (url or "").lower() or "gnews_rss" in (url or "").lower()
+
+def _gnews_rss_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import quote as _q
+    q = "大模型"
+    m = re.search(r"[?&]q=([^&]+)", url)
+    if m:
+        q = m.group(1)
+    api = f"https://news.google.com/rss/search?q={_q(q)}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("Google News RSS 请求失败")
+    _xml_text = r.get("html", "<rss/>")
+    if "<!DOCTYPE" in _xml_text[:2048] or "<!ENTITY" in _xml_text[:2048]:
+        raise ValueError("XML 包含 DOCTYPE/ENTITY，已拒绝解析")
+    import xml.etree.ElementTree as ET
+    tree = ET.fromstring(_xml_text)
+    rows = []
+    for item in tree.iter("item"):
+        rows.append({"标题": (item.findtext("title") or "").strip(),
+                     "链接": (item.findtext("link") or "").strip(),
+                     "日期": (item.findtext("pubDate") or "").strip(),
+                     "来源": (item.findtext("source") or "").strip()})
+    return rows[:limit or 20]
+
+register("gnews_rss", match_gnews_rss, lambda h, u: [], run=_gnews_rss_run,
+         desc="Google News RSS 新闻聚合（关键词搜索）")
+
+
+# ---------------------------------------------------------------------------
+# 阮一峰周刊（纯静态，零反爬）
+# ---------------------------------------------------------------------------
+def match_ruanyifeng(url: str) -> bool:
+    return "ruanyifeng.com/blog" in (url or "").lower()
+
+def _ruanyifeng_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://www.ruanyifeng.com/blog/", timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("阮一峰博客请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(r'<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', text):
+        rows.append({"标题": m.group(2).strip(), "URL": m.group(1).strip()})
+    return rows[:limit or 20]
+
+register("ruanyifeng_blog", match_ruanyifeng, lambda h, u: [], run=_ruanyifeng_run,
+         desc="阮一峰科技爱好者周刊（最新文章列表）")
+
+
+# ===========================================================================
+# R50 批量新增：高频精配站点（P0/P1/P2）
+# ===========================================================================
+
+# --- Semantic Scholar（学术搜索，公开 API，注意限速 100req/5min）---
+_S2_BASE = "https://api.semanticscholar.org/graph/v1/paper/search"
+
+def match_s2(url: str) -> bool:
+    return "semanticscholar.org" in (url or "").lower()
+
+def _s2_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    import time as _t
+    from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
+    q = _pq(_up(url).query).get("query", ["large language model"])[0]
+    fields = "title,abstract,authors,year,citationCount"
+    api = f"{_S2_BASE}?query={_q(q)}&limit={min(limit or 20, 100)}&fields={fields}"
+    _t.sleep(2)  # S2 限速 1req/sec
+    r = fetch_html(api, timeout=30)
+    if not r.get("ok"):
+        raise RuntimeError(f"Semantic Scholar 请求失败: {r.get('error','')}")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("data", []):
+        rows.append({
+            "标题": it.get("title", ""),
+            "作者": ", ".join(a.get("name", "") for a in it.get("authors", [])[:5]),
+            "年份": it.get("year", ""),
+            "引用数": it.get("citationCount", 0),
+            "摘要": (it.get("abstract", "") or "")[:300],
+        })
+    return rows
+
+register("s2", match_s2, lambda h, u: [], run=_s2_run,
+         desc="Semantic Scholar 学术搜索（公开 API，限速 1req/s）")
+
+# --- Unpaywall（开放获取全文链接）---
+_UNPAYWALL_BASE = "https://api.unpaywall.org/v2"
+
+def match_unpaywall(url: str) -> bool:
+    return "unpaywall.org" in (url or "").lower()
+
+def _unpaywall_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import urlparse as _up, parse_qs as _pq
+    doi = _pq(_up(url).query).get("doi", [""])[0]
+    if not doi:
+        raise RuntimeError("URL 需含 ?doi=10.xxxx/xxxxx 参数")
+    api = f"{_UNPAYWALL_BASE}/{doi}?email=user@example.com"
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("Unpaywall 请求失败")  # pyflakes：f 无占位符
+    data = json.loads(r.get("html", "{}"))
+    best = data.get("best_oa_location", {}) or {}
+    return [{"DOI": doi, "是否开放获取": data.get("is_oa", False),
+             "免费全文链接": best.get("url_for_pdf", "") or best.get("url", ""),
+             "出版日期": data.get("published_date", ""),
+             "期刊": data.get("journal_name", "")}]
+
+register("unpaywall", match_unpaywall, lambda h, u: [], run=_unpaywall_run,
+         desc="Unpaywall 开放获取查询（URL: ?doi=10.xxxx/xxxxx）")
+
+# --- 东方财富 A 股行情（公开 JSON API）---
+_EM_QUOTES = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+
+def match_em_quotes(url: str) -> bool:
+    return "push2.eastmoney.com" in (url or "").lower() or "em_quotes" in (url or "").lower()
+
+def _em_quotes_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import urlparse as _up, parse_qs as _pq
+    secids = _pq(_up(url).query).get("secids", ["1.000001,0.399001"])
+    if isinstance(secids, list):
+        secids = ','.join(secids)
+    fields = "f2,f3,f12,f14"
+    api = (f"{_EM_QUOTES}?secids={secids}&fields={fields}"
+           f"&fltt=2&invt=2&ut=bd1d9ddb04089700cf9c27f6f7426281")
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("东方财富行情请求失败")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("data", {}).get("diff", []):
+        rows.append({"代码": it.get("f12", ""), "名称": it.get("f14", ""),
+                     "最新价": it.get("f2", ""), "涨跌幅": it.get("f3", "")})
+    return rows
+
+register("em_quotes", match_em_quotes, lambda h, u: [], run=_em_quotes_run,
+         desc="东方财富 A 股行情（公开 JSON API）")
+
+# --- 上交所公告 ---
+def match_sse(url: str) -> bool:
+    return "sse.com.cn" in (url or "").lower() or "sse_ann" in (url or "").lower()
+
+def _sse_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    api = ("https://query.sse.com.cn/security/stock/queryCompanyBulletinNew.do"
+           f"?jsonCallBack=jsonpCallback&isPagination=true&pageHelp.pageSize={limit or 20}"
+           f"&start_date=2026-01-01&end_date=2026-12-31&type=&bulletinType=")
+    r = fetch_html(api, timeout=20, cookie=cookie)
+    if not r.get("ok"):
+        raise RuntimeError("上交所公告请求失败")
+    text = r.get("html", "")
+    m = re.search(r"jsonpCallback\((.*)\)", text, re.S)
+    if not m:
+        raise RuntimeError("上交所返回非 JSONP 响应（可能被拦截）")
+    data = json.loads(m.group(1))
+    rows = []
+    for it in data.get("pageHelp", {}).get("data", []):
+        rows.append({"标题": it.get("title", ""), "代码": it.get("security_Code", ""),
+                     "日期": it.get("SSEDATE", ""),
+                     "URL": f"http://www.sse.com.cn/disclosure/listedinfo/announcement/{it.get('URL','')}"})
+    return rows
+
+register("sse_ann", match_sse, lambda h, u: [], run=_sse_run,
+         desc="上交所公告（JSON API）")
+
+# --- 银保监/金融监管总局处罚 ---
+def match_nfra_penalty(url: str) -> bool:
+    return "nfra.gov.cn" in (url or "").lower() or "cbirc" in (url or "").lower() or "nfra_penalty" in (url or "").lower()
+
+def _nfra_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://www.nfra.gov.cn/cn/static/data/DocInfo/SelectByDocId/data_list.json", timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("金融监管总局处罚请求失败")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("data", [])[:limit or 20]:
+        rows.append({"当事人": it.get("partyName", ""), "处罚文号": it.get("punishmentNumber", ""),
+                     "处罚日期": it.get("punishmentDate", ""), "金额": it.get("amount", "")})
+    return rows
+
+register("nfra_penalty", match_nfra_penalty, lambda h, u: [], run=_nfra_run,
+         desc="金融监管总局处罚公开（银保监/金监总局）")
+
+# --- NPM Registry（公开 API）---
+def match_npm(url: str) -> bool:
+    return "npmjs.com" in (url or "").lower() or "npm_registry" in (url or "").lower()
+
+def _npm_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    pkg = re.search(r"npmjs\.com/package/([^/?]+)", url or "")
+    if not pkg:
+        raise RuntimeError("URL 需含包名: npmjs.com/package/<name>")
+    api = f"https://registry.npmjs.org/{pkg.group(1)}"
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("NPM 请求失败")  # pyflakes：f 无占位符
+    data = json.loads(r.get("html", "{}"))
+    latest = data.get("dist-tags", {}).get("latest", "")
+    return [{"包名": data.get("name", ""), "最新版本": latest,
+             "描述": data.get("description", ""),
+             "许可证": data.get("license", ""),
+             "主页": data.get("homepage", "")}]
+
+register("npm_registry", match_npm, lambda h, u: [], run=_npm_run,
+         desc="NPM 包信息查询（URL: npmjs.com/package/<name>）")
+
+# --- PyPI（公开 API）---
+def match_pypi(url: str) -> bool:
+    return "pypi.org/project/" in (url or "").lower() or "pypi_project" in (url or "").lower()
+
+def _pypi_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    pkg = re.search(r"pypi\.org/project/([^/?]+)", url or "")
+    if not pkg:
+        raise RuntimeError("URL 需含包名: pypi.org/project/<name>")
+    api = f"https://pypi.org/pypi/{pkg.group(1)}/json"
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("PyPI 请求失败")  # pyflakes：f 无占位符
+    data = json.loads(r.get("html", "{}"))
+    info = data.get("info", {})
+    return [{"包名": info.get("name", ""), "版本": info.get("version", ""),
+             "描述": (info.get("summary", "") or "")[:200],
+             "作者": info.get("author", ""), "许可证": info.get("license", "")}]
+
+register("pypi_project", match_pypi, lambda h, u: [], run=_pypi_run,
+         desc="PyPI 包信息查询（URL: pypi.org/project/<name>）")
+
+# --- Wikipedia 中文百科（MediaWiki API）---
+def match_wikipedia(url: str) -> bool:
+    return "zh.wikipedia.org" in (url or "").lower()
+
+def _wikipedia_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import urlparse as _up
+    title = _up(url).path.split("/wiki/")[-1] if "/wiki/" in url else "人工智能"
+    api = (f"https://zh.wikipedia.org/w/api.php?action=query&format=json"
+           f"&prop=extracts&explaintext=1&titles={title}")
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("Wikipedia 请求失败")
+    data = json.loads(r.get("html", "{}"))
+    pages = data.get("query", {}).get("pages", {})
+    for pid in pages:
+        return [{"标题": pages[pid].get("title", ""),
+                 "摘要": (pages[pid].get("extract", "") or "")[:500]}]
+    return []
+
+register("wikipedia", match_wikipedia, lambda h, u: [], run=_wikipedia_run,
+         desc="Wikipedia 中文百科（MediaWiki API）")
+
+
+# ===========================================================================
+# R50 批量新增（第二批）：生活/基金/房产/招聘/技术
+# ===========================================================================
+
+# --- 天天基金（公开 JSON API，东方财富旗下）---
+_FUND_BASE = "https://fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx"
+
+def match_fund_eastmoney(url: str) -> bool:
+    return "fund.eastmoney.com" in (url or "").lower() or "fund_rank" in (url or "").lower()
+
+def _fund_eastmoney_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    api = f"{_FUND_BASE}?t=1&Lj=0&page=1,1&size={min(limit or 20, 100)}"
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("天天基金请求失败")
+    text = r.get("html", "")
+    m = re.search(r"var db=(\[.*?\]);", text, re.S)
+    if not m:
+        return []
+    raw = json.loads(m.group(1))
+    rows = []
+    for it in raw[:limit or 20]:
+        if isinstance(it, list) and len(it) > 5:
+            rows.append({"代码": it[0], "名称": it[1], "最新净值": it[3] if len(it) > 3 else ""})
+    return rows
+
+register("fund_eastmoney", match_fund_eastmoney, lambda h, u: [], run=_fund_eastmoney_run,
+         desc="天天基金排行（公开 JSON API）")
+
+
+# --- 房天下二手房（SSR HTML）---
+def match_fang(url: str) -> bool:
+    # R80 修复（P1）：裸子串 "fang.com" 曾连 xiachufang.com（下厨房）都命中，
+    # 厨艺任务被派去抓二手房。改按主机名精确匹配
+    from urllib.parse import urlparse as _up
+    u = (url or "").lower()
+    if "fang_tianxia" in u:
+        return True
+    h = _up(u).netloc
+    return h == "fang.com" or h.endswith(".fang.com")
+
+def _fang_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    city = re.search(r"(https?://(\w+)\.fang\.com)", url or "https://esf.fang.com")
+    base = city.group(1) if city else "https://esf.fang.com"
+    list_url = f"{base}/house-a015/"
+    r = fetch_html(list_url, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("房天下请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(r'<a[^>]*class="[^"]*title[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>.*?<p[^>]*class="[^"]*price[^"]*"[^>]*>([^<]+)</p>', text, re.S):
+        rows.append({"标题": m.group(2).strip(), "价格": m.group(3).strip(), "链接": m.group(1).strip()})
+    return rows[:limit or 20]
+
+register("fang_tianxia", match_fang, lambda h, u: [], run=_fang_run,
+         desc="房天下二手房列表（SSR HTML）")
+
+
+# --- 下厨房菜谱（SSR HTML，零反爬）---
+def match_xiachufang(url: str) -> bool:
+    return "xiachufang.com" in (url or "").lower()
+
+def _xiachufang_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://www.xiachufang.com/explore/", timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("下厨房请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(r'<a[^>]*href="(/recipe/\d+/)"[^>]*>.*?<p[^>]*class="name"[^>]*>([^<]+)</p>.*?<p[^>]*class="ing"[^>]*>([^<]+)</p>', text, re.S):
+        rows.append({"菜名": m.group(2).strip(), "食材": m.group(3).strip()[:100],
+                     "URL": f"https://www.xiachufang.com{m.group(1)}"})
+    return rows[:limit or 20]
+
+register("xiachufang", match_xiachufang, lambda h, u: [], run=_xiachufang_run,
+         desc="下厨房热门菜谱（SSR HTML，零反爬）")
+
+
+# --- 马蜂窝旅游攻略（SSR HTML）---
+def match_mafengwo(url: str) -> bool:
+    return "mafengwo.cn" in (url or "").lower()
+
+def _mafengwo_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://www.mafengwo.cn/gonglve/", timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("马蜂窝请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(r'<a[^>]*href="(/gonglve/[^"]+)"[^>]*title="([^"]+)"', text):
+        rows.append({"标题": m.group(2).strip()[:60], "URL": f"https://www.mafengwo.cn{m.group(1)}"})
+    return rows[:limit or 20]
+
+register("mafengwo", match_mafengwo, lambda h, u: [], run=_mafengwo_run,
+         desc="马蜂窝旅游攻略（SSR HTML）")
+
+
+# --- InfoQ 中文（技术文章）---
+def match_infoq_cn(url: str) -> bool:
+    return "infoq.cn" in (url or "").lower()
+
+def _infoq_cn_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from .core import make_http_client
+    client = make_http_client({"min_interval": 0.5, "timeout": 20, "max_retries": 1})
+    payload = json.dumps({"size": min(limit or 20, 50)}).encode()
+    r = client.post("https://www.infoq.cn/public/v1/article/getList",
+                    data=payload, headers={"Content-Type": "application/json"})
+    if not r.get("ok"):
+        raise RuntimeError(f"InfoQ 请求失败: {r.get('error','')}")
+    data = json.loads(r.get("body", r.get("text", "{}")))
+    rows = []
+    for it in data.get("data", []):
+        rows.append({"标题": it.get("article_title", ""),
+                     "作者": it.get("author", ""),
+                     "摘要": (it.get("article_summary", "") or "")[:150],
+                     "URL": f"https://www.infoq.cn/article/{it.get('uuid', '')}"})
+    return rows
+
+register("infoq_cn", match_infoq_cn, lambda h, u: [], run=_infoq_cn_run,
+         desc="InfoQ 中文技术文章（JSON API）")
+
+
+
+# --- 智联招聘（SSR HTML，搜索页可匿名）---
+def match_zhaopin(url: str) -> bool:
+    return "zhaopin.com" in (url or "").lower() or "zhaopin_search" in (url or "").lower()
+
+def _zhaopin_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    kw = "大模型"
+    m = re.search(r"[?&]kw=([^&]+)", url or "")
+    if m:
+        kw = m.group(1)
+    search_url = f"https://sou.zhaopin.com/?jl={kw}&p=1"
+    r = fetch_html(search_url, timeout=20, cookie=cookie)
+    if not r.get("ok"):
+        raise RuntimeError("智联招聘请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(
+        r'<a[^>]*href="(/job_preview/[^"]+)"[^>]*>.*?class="[^"]*jobinfo__name[^"]*"[^>]*>([^<]+)</span>.*?class="[^"]*jobinfo__salary[^"]*"[^>]*>([^<]+)</span>', text, re.S):
+        rows.append({"职位": m.group(2).strip(), "薪资": m.group(3).strip(),
+                     "URL": f"https://www.zhaopin.com{m.group(1)}"})
+    return rows[:limit or 20]
+
+register("zhaopin_search", match_zhaopin, lambda h, u: [], run=_zhaopin_run,
+         desc="智联招聘职位搜索（SSR HTML，搜索页可匿名）")
+
+
+# --- 猎聘（SSR HTML，搜索页可匿名）---
+def match_liepin(url: str) -> bool:
+    return "liepin.com" in (url or "").lower() or "liepin_search" in (url or "").lower()
+
+def _liepin_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import quote as _q
+    kw = "大模型"
+    m = re.search(r"[?&]kw=([^&]+)", url or "")
+    if m:
+        kw = m.group(1)
+    search_url = f"https://www.liepin.com/zhaopin/?key={_q(kw)}"
+    r = fetch_html(search_url, timeout=20, cookie=cookie)
+    if not r.get("ok"):
+        raise RuntimeError("猎聘请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(
+        r'<a[^>]*href="(/job/[^"]+)"[^>]*>.*?class="[^"]*job-title[^"]*"[^>]*>([^<]+)</a>.*?class="[^"]*job-salary[^"]*"[^>]*>([^<]+)<', text, re.S):
+        rows.append({"职位": m.group(2).strip(), "薪资": m.group(3).strip(),
+                     "URL": f"https://www.liepin.com{m.group(1)}"})
+    return rows[:limit or 20]
+
+register("liepin_search", match_liepin, lambda h, u: [], run=_liepin_run,
+         desc="猎聘职位搜索（SSR HTML，搜索页可匿名）")
+
+
+# --- Product Hunt（公开 GraphQL/SSE，简化为 RSS/HTML）---
+def match_producthunt(url: str) -> bool:
+    return "producthunt.com" in (url or "").lower() or "producthunt" in (url or "").lower()
+
+def _producthunt_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://www.producthunt.com/", timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("Product Hunt 请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(r'<a[^>]*href="(/posts/[^"]+)"[^>]*>.*?<div[^>]*class="[^"]*tagline[^"]*"[^>]*>([^<]+)</div>', text, re.S):
+        rows.append({"产品": m.group(1).strip().split("/")[-1],
+                     "描述": m.group(2).strip()[:100],
+                     "URL": f"https://www.producthunt.com{m.group(1)}"})
+    return rows[:limit or 20]
+
+register("producthunt", match_producthunt, lambda h, u: [], run=_producthunt_run,
+         desc="Product Hunt 今日产品（SSR HTML）")
+
+
+# --- 汇率查询（公开 API，exchangerate-api 免费层）---
+def match_exchange_rate(url: str) -> bool:
+    return "exchange_rate" in (url or "").lower() or "er-api" in (url or "").lower()
+
+def _exchange_rate_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import urlparse as _up
+    base = _up(url).path.split("/")[-1] if "/" in (url or "") else "CNY"
+    if not base or base == "" or "/" in base:
+        base = "CNY"
+    api = f"https://open.er-api.com/v6/latest/{base}"
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError(f"汇率查询失败: {r.get('error','')}")
+    data = json.loads(r.get("html", "{}"))
+    rates = data.get("rates", {})
+    common = ["USD", "EUR", "JPY", "GBP", "HKD", "KRW", "SGD", "AUD", "CAD", "CHF"]
+    rows = []
+    for c in common:
+        if c in rates and c != base:
+            rows.append({"货币": c, f"1{base}兑换": rates[c]})
+    return rows
+
+register("exchange_rate", match_exchange_rate, lambda h, u: [], run=_exchange_rate_run,
+         desc="汇率查询（URL: exchange_rate/CNY 或 exchange_rate/USD）")
+
+
+# --- 豆瓣电影（SSR HTML，同豆瓣基座）---
+def match_douban_movie(url: str) -> bool:
+    u = (url or "").lower()
+    return "movie.douban.com" in u
+
+def _douban_movie_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://movie.douban.com/cinema/nowplaying/", timeout=20, cookie=cookie)
+    if not r.get("ok"):
+        raise RuntimeError("豆瓣电影请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(
+        r'<li[^>]*class="[^"]*list-item[^"]*"[^>]*>.*?data-title="([^"]+)".*?data-rating="([^"]*)".*?data-releaseyear="([^"]*)".*?data-region="([^"]*)"', text, re.S):
+        rows.append({"标题": m.group(1), "评分": m.group(2),
+                     "年份": m.group(3), "地区": m.group(4)})
+    return rows
+
+register("douban_movie", match_douban_movie, lambda h, u: [], run=_douban_movie_run,
+         desc="豆瓣正在热映电影（SSR HTML）")
+
+
+# --- 网易云音乐热歌榜（公开 API）---
+def match_netease_music(url: str) -> bool:
+    return "music.163.com" in (url or "").lower() or "netease_music" in (url or "").lower()
+
+def _netease_music_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    api = "https://music.163.com/api/playlist/detail?id=3778678"
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError("网易云音乐请求失败")
+    data = json.loads(r.get("html", "{}"))
+    tracks = data.get("result", {}).get("tracks", [])
+    rows = []
+    for t in tracks[:limit or 20]:
+        album = t.get("album", {})
+        artists = ", ".join(a.get("name", "") for a in t.get("artists", [])[:3])
+        rows.append({"歌曲": t.get("name", ""),
+                     "歌手": artists,
+                     "专辑": album.get("name", "") if isinstance(album, dict) else ""})
+    return rows
+
+register("netease_music", match_netease_music, lambda h, u: [], run=_netease_music_run,
+         desc="网易云音乐热歌榜（公开 API）")
+
+
+# ===========================================================================
+# R50 批量新增（第三批）：雪球/网易云音乐/豆瓣电影/汇率/.Book
+# ===========================================================================
+
+# --- 雪球股票（公开行情接口，匿名可查基本行情）---
+_XQ_QUOTE = "https://stock.xueqiu.com/v5/stock/quote.json"
+
+def match_xueqiu(url: str) -> bool:
+    return "xueqiu.com" in (url or "").lower() or "xueqiu_quote" in (url or "").lower()
+
+def _xueqiu_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from urllib.parse import urlparse as _up, parse_qs as _pq
+    symbols = _pq(_up(url).query).get("symbol", ["SH000001,SZ399001"])
+    if isinstance(symbols, list):
+        symbols = ",".join(symbols)
+    # 先拿匿名 token
+    fetch_html("https://xueqiu.com/", timeout=15)
+    api = (f"{_XQ_QUOTE}?symbol={symbols}&extend=detail"
+           f"&ut=fa5fd1943c7b386f172d6893dbfba10b")
+    r = fetch_html(api, timeout=20)
+    if not r.get("ok"):
+        raise RuntimeError(f"雪球行情请求失败: {r.get('error','')}")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("data", {}).get("items", []):
+        quote = it.get("quote", {})
+        rows.append({
+            "代码": quote.get("symbol", ""), "名称": quote.get("name", ""),
+            "最新价": quote.get("current", ""), "涨跌幅": f"{quote.get('percent', 0)}%",
+            "成交量": quote.get("volume", 0), "成交额": quote.get("amount", 0),
+        })
+    return rows
+
+register("xueqiu_quote", match_xueqiu, lambda h, u: [], run=_xueqiu_run,
+         desc="雪球股票行情（匿名可查基本报价）")
+
+
+# --- 网易云音乐（公开 API，歌单/评论）---
+def match_netease_music(url: str) -> bool:
+    return "music.163.com" in (url or "").lower() or "netease_music" in (url or "").lower()
+
+# --- 豆瓣电影（SSR HTML，同豆瓣基座）---
+def match_douban_movie(url: str) -> bool:
+    u = (url or "").lower()
+    return "movie.douban.com" in u
+
+# --- 汇率查询（公开 API，exchangerate-api）---
+_EXRATE_BASE = "https://open.er-api.com/v6/latest"
+
+def match_exchange_rate(url: str) -> bool:
+    return "exchange_rate" in (url or "").lower() or "er-api" in (url or "").lower()
+
+# ===========================================================================
+# R50 批量新增（第四批）：热搜/热榜/生活聚合
+# ===========================================================================
+
+# --- 微博热搜（公开接口，无需登录）---
+def match_weibo_hot(url: str) -> bool:
+    u = (url or "").lower()
+    # R80：s.weibo.com/top/summary 是热搜榜自然 URL（无 "hot" 字样）——兜底
+    # 已让位，这里显式接住
+    return ("weibo_hot" in u or ("weibo.com" in u and "hot" in u)
+            or "s.weibo.com/top" in u)
+
+def _weibo_hot_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://weibo.com/ajax/side/hotSearch", timeout=15)
+    if not r.get("ok"):
+        raise RuntimeError("微博热搜请求失败")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("data", {}).get("realtime", []):
+        rows.append({
+            "排名": it.get("rank", ""),
+            "热搜词": it.get("word", ""),
+            "热度": it.get("num", 0),
+            "标签": it.get("label_name", "") or "",
+        })
+    return rows[:limit or 50]
+
+register("weibo_hot", match_weibo_hot, lambda h, u: [], run=_weibo_hot_run,
+         desc="微博热搜榜（公开 API，无需登录）")
+
+
+# --- 知乎热榜（公开接口）---
+def match_zhihu_hot(url: str) -> bool:
+    u = (url or "").lower()
+    return "zhihu_hot" in u or ("zhihu.com" in u and "hot" in u)
+
+def _zhihu_hot_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=50",
+                   timeout=15)
+    if not r.get("ok"):
+        raise RuntimeError("知乎热榜请求失败")
+    data = json.loads(r.get("html", "{}"))
+    rows = []
+    for it in data.get("data", []):
+        target = it.get("target", {})
+        rows.append({
+            "排名": it.get("detail_text", "") or "",
+            "标题": target.get("title", ""),
+            "热度": it.get("detail_text", ""),
+            "摘录": (target.get("excerpt", "") or "")[:100],
+            "URL": f"https://www.zhihu.com/question/{target.get('id','')}",
+        })
+    return rows[:limit or 50]
+
+register("zhihu_hot", match_zhihu_hot, lambda h, u: [], run=_zhihu_hot_run,
+         desc="知乎热榜（公开 API）")
+
+
+# --- 百度热搜（公开接口）---
+def match_baidu_hot(url: str) -> bool:
+    u = (url or "").lower()
+    return "baidu_hot" in u or ("baidu.com" in u and "hot" in u)
+
+def _baidu_hot_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://top.baidu.com/board?tab=realtime", timeout=15)
+    if not r.get("ok"):
+        raise RuntimeError("百度热搜请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(r'<div[^>]*class="[^"]*c-single-text-ellipsis[^"]*"[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', text):
+        rows.append({"热搜词": m.group(2).strip(), "链接": m.group(1).strip()})
+    return rows[:limit or 50]
+
+register("baidu_hot", match_baidu_hot, lambda h, u: [], run=_baidu_hot_run,
+         desc="百度热搜榜（公开接口）")
+
+
+# --- 豆瓣音乐（SSR HTML，同豆瓣基座）---
+def match_douban_music(url: str) -> bool:
+    return "music.douban.com" in (url or "").lower()
+
+def _douban_music_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    r = fetch_html("https://music.douban.com/chart", timeout=20, cookie=cookie)
+    if not r.get("ok"):
+        raise RuntimeError("豆瓣音乐请求失败")
+    text = r.get("html", "")
+    rows = []
+    for m in re.finditer(
+        r'<a[^>]*href="(/subject/\d+/)"[^>]*title="([^"]+)"', text):
+        rows.append({"标题": m.group(2).strip(),
+                     "URL": f"https://music.douban.com{m.group(1)}"})
+    return rows
+
+register("douban_music", match_douban_music, lambda h, u: [], run=_douban_music_run,
+         desc="豆瓣音乐新碟榜（SSR HTML）")
+
+
+# --- 空气质量 AQI（公开 API，零反爬）---
+def match_aqi(url: str) -> bool:
+    # R80 修复（P2）：裸子串 "aqi" 曾连 reuters 的 iraqi 新闻都命中——
+    # 改为独立 token 匹配，或显式 air_quality 参数 / waqi.info 域名
+    from urllib.parse import urlparse as _up
+    u = (url or "").lower()
+    if "waqi.info" in u or "air_quality" in u or "aqi=" in u:
+        return True
+    return "aqi" in re.split(r"[^a-z0-9]+", _up(u).netloc + "/" + _up(u).path)
+
+def _aqi_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
+    from datetime import datetime as _dt
+    from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
+    city = _pq(_up(url).query).get("city", ["北京"])[0] or "北京"
+    api = f"https://api.waqi.info/feed/{_q(city)}/?token=demo"
+    r = fetch_html(api, timeout=15)
+    if not r.get("ok"):
+        raise RuntimeError("AQI 查询请求失败")
+    data = json.loads(r.get("html", "{}"))
+    d = data.get("data", {})
+    if data.get("status") != "ok":
+        return [{"城市": city, "AQI": "无数据", "提示": "该城市可能不在监测范围"}]
+    rows = [{"城市": city, "AQI": d.get("aqi", ""),
+             "主要污染物": d.get("dominentpol", ""),
+             "更新时间": _dt.fromtimestamp(d.get("time", {}).get("v", 0)).strftime("%Y-%m-%d %H:%M") if d.get("time", {}).get("v") else ""}]
+    for item in d.get("iaqi", {}).get("pm25", {}).get("v", "") and [{"指标": "PM2.5", "值": d["iaqi"]["pm25"]["v"]}] or []:
+        rows[0]["PM2.5"] = item["值"]
+    return rows
+
+register("aqi", match_aqi, lambda h, u: [], run=_aqi_run,
+         desc="空气质量 AQI 查询（URL: ?city=北京）")

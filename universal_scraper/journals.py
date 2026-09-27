@@ -22,7 +22,6 @@ import ipaddress
 import json
 import re
 import socket
-import ssl
 import sys
 import time
 import urllib.error
@@ -42,6 +41,15 @@ def _assert_http_url(url: str) -> str:
         if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
             raise ValueError(f"拒绝私有/保留地址: {sp.hostname} -> {ip}")
     return url
+
+
+def _vol_issue_key(rec: Dict[str, Any]):
+    """R15 修复：卷/期按数值排序——字符串序会把第 10/11/12 期排在第 2 期前，
+    月刊的年度清单每年都错序；非数字值兜底为 0。"""
+    def _num(k: str) -> int:
+        v = str(rec.get(k) or "").strip()
+        return int(v) if v.isdigit() else 0
+    return (rec.get("year", ""), _num("vol"), _num("issue"))
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
       "(KHTML, like Gecko) Version/18.6 Safari/605.1.15")
@@ -84,26 +92,75 @@ MAX_RETRIES = 3
 
 
 def _http_get(url: str, referer: str = "", timeout: int = 25) -> Tuple[int, bytes]:
-    url = _assert_http_url(url)  # SSRF 边界：协议/私网校验后才发起请求
     headers = {"User-Agent": UA, "Accept-Language": "zh-CN,zh-Hans;q=0.9",
                "Accept-Encoding": "identity"}
     if referer:
         headers["Referer"] = referer
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.status, r.read()
+    # R128 修复（OCR CRITICAL）：urlopen 自动跟随 3xx 重定向——恶意服务器可
+    # 302 到 file:///etc/passwd 或内网 IP，绕过 _assert_http_url 的初始校验。
+    # 禁止自动重定向：手动处理，每个重定向目标都过 SSRF 边界。
+    # OCR R131（C+H）：曾以为 3xx 会作为响应返回——_NoRedirect 下 urllib 实际
+    # 抛 HTTPError，旧"手动跟随"分支是永不执行的死代码（302 直接炸调用方）。
+    # 从 HTTPError 取 Location 跟随；限 5 跳；空/自指 Location 不跟
+    # OCR R131（L）：_NoRedirect 无状态——opener 提到循环外，跳间复用
+    opener = urllib.request.build_opener(_NoRedirect)
+    for _hop in range(5):
+        url = _assert_http_url(url)
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with opener.open(req, timeout=timeout) as r:
+                # 审查二轮（H）：read() 曾无上限——异常大响应可撑爆内存。
+                # 论文 PDF 页面上限 20MB 足够。多读 1 字节哨兵：超限报错而非
+                # 静默截断（截断件仍以 %PDF 开头过文件头检查，且会被 >10KB
+                # 续传守卫永久当作已完成跳过）
+                data = r.read(20 * 1024 * 1024 + 1)
+                if len(data) > 20 * 1024 * 1024:
+                    raise ValueError("响应超过 20MB 上限（疑似超大扫描版 PDF），拒绝截断保存")
+                return r.status, data
+        except urllib.error.HTTPError as e:
+            if e.code not in (301, 302, 303, 307, 308):
+                raise
+            new_url = urllib.parse.urljoin(url, e.headers.get("Location", ""))
+            if not new_url or new_url == url:
+                return e.code, b""  # 空/自指 Location：不跟随，交调用方判失败
+            url = new_url
+    return 0, b""  # 超过重定向跳数上限：按失败处理
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """阻止 urlopen 自动跟随重定向——每个 3xx 都由调用方校验 SSRF 后手动处理。"""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def _http_post(url: str, data: Dict[str, Any], referer: str = "", timeout: int = 25) -> Tuple[int, bytes]:
-    url = _assert_http_url(url)  # SSRF 边界
     headers = {"User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded",
                "Accept-Language": "zh-CN,zh-Hans;q=0.9"}
     if referer:
         headers["Referer"] = referer
     body = urllib.parse.urlencode(data).encode("utf-8")
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.status, r.read()
+    # OCR R131（H）：3xx 曾被静默当成功体返回（POST 下载遇 302 即拿到空壳）。
+    # 手动跟一跳 GET（303/302 语义），目标过 SSRF 边界；限 5 跳
+    for _hop in range(5):
+        url = _assert_http_url(url)
+        # 审查修复（N42）：urllib 只要 data 非 None 就会把 body 发出去——
+        # 重定向 GET 跳曾带着表单体 + Content-Type 发请求（RFC 7231 禁止，
+        # 部分服务器直接 400）。GET 跳必须 data=None
+        req = urllib.request.Request(url, data=body if _hop == 0 else None,
+                                     headers=headers,
+                                     method="POST" if _hop == 0 else "GET")
+        opener = urllib.request.build_opener(_NoRedirect)
+        try:
+            with opener.open(req, timeout=timeout) as r:
+                return r.status, r.read(2 * 1024 * 1024)  # 2MB 上限
+        except urllib.error.HTTPError as e:
+            if e.code not in (301, 302, 303, 307, 308):
+                raise
+            new_url = urllib.parse.urljoin(url, e.headers.get("Location", ""))
+            if not new_url or new_url == url:
+                return e.code, b""
+            url = new_url
+    return 0, b""
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +263,10 @@ def parse_issue_html(text: str, issue: Dict[str, str],
         vol_txt = re.sub(r"\s+", " ", vol_txt)
         doi_m = re.search(r'class="j-doi"[^>]*>(.*?)</a>', block, re.S)
         doi = re.sub(r"<[^>]+>", "", doi_m.group(1)).strip() if doi_m else ""
-        art_url = href if href.startswith("http") else f"https://stxb.magtech.com.cn{href}"
+        # R35 审查修复（P1）：硬编码 stxb 域名——多站点支持下非默认期刊的
+        # 相对链接被拼到错误域名（清单 URL 静默损坏）
+        _base = (site or {}).get("base", "")
+        art_url = href if href.startswith("http") else f"{_base}{href}"
         arts.append({
             "id": art_id,
             "title": title,
@@ -310,18 +370,19 @@ def download_pdf(site: Dict[str, str], art: Dict[str, Any], out_dir: Path,
 
 
 # ---------------------------------------------------------------------------
-def _resume_pdfs_batch(site: Dict[str, str], out_root: Path, workers: int,
-                       cdp: str, log=print, batch_size: int = 150) -> Dict[str, Any]:
+def _resume_pdfs_batch(site: Dict[str, str], out_root: Path,
+                       log=print) -> Dict[str, Any]:
     """断点续传批抓 PDF（登录态 CDP 模式）：读论文清单 CSV，跳过已有，
-    分批 fetch_pdfs_batch（每批后可换 IP），完成后统一重命名为标准文件名。"""
+    分批 fetch_pdfs_batch（每批后可换 IP），完成后统一重命名为标准文件名。
+    OCR R131（M）：workers/cdp/batch_size 曾收下但函数体从不使用——删死参数。"""
     import csv as _csv
-    from .fetchers import BrowserFetcher
     meta_dir = out_root / "元数据"
     pdf_dir = out_root / "PDF"
     csv_path = meta_dir / f"{site['name']}_论文清单.csv"
     if not csv_path.exists():
         return {"error": f"清单不存在（先跑 --list-only 生成）: {csv_path}"}
-    rows = list(_csv.DictReader(open(csv_path, encoding="utf-8-sig")))
+    with open(csv_path, encoding="utf-8-sig") as _cf:
+        rows = list(_csv.DictReader(_cf))
     log(f"📋 清单 {len(rows)} 篇")
 
     def _std_name(r):
@@ -338,44 +399,22 @@ def _resume_pdfs_batch(site: Dict[str, str], out_root: Path, workers: int,
     log(f"⬇️ 断点续传：已有 {len(rows) - len(todo)}，待抓 {len(todo)}")
     if not todo:
         # 统一重命名 legacy 命名
+        # OCR R131（M）：Path.rename 在 Windows 上目标已存在时抛 FileExistsError
+        # ——os.replace 跨平台原子覆盖
+        import os as _os
         for r in rows:
             legacy = pdf_dir / f"pdf_{r.get('article_id','')}.pdf"
             if legacy.exists():
-                legacy.rename(pdf_dir / _std_name(r))
+                _os.replace(legacy, pdf_dir / _std_name(r))
         return {"ok": True, "downloaded": 0, "total": len(rows)}
-
-    bf = BrowserFetcher({"type": "browser", "url": site["base"],
-                         "cdp": cdp or "http://127.0.0.1:9222", "headless": False},
-                        {}, {}, out_root)
-    total_ok = 0
-    stopped = False
-    for bi in range(0, len(todo), batch_size):
-        batch = todo[bi:bi + batch_size]
-        items = [{"id": r.get("article_id", ""), "article_url": r.get("url", "")} for r in batch if r.get("article_id")]
-        if not items:
-            continue
-        r = bf.fetch_pdfs_batch(items, pdf_dir, base_url=site["base"],
-                                wait_ms=500, block_limit=25)
-        total_ok += len(r["ok"])
-        log(f"  本批成功 {len(r['ok'])}/{len(items)}，累计 {total_ok}", flush=True)
-        if not r.get("done", True):
-            log("⚠️ 连续登录墙——配额/会话失效。请换 IP 或明日重跑本命令继续。")
-            stopped = True
-            break
-        if bi + batch_size < len(todo):
-            time.sleep(20)
-    # 统一重命名 pdf_{id}.pdf → 标准名
-    renamed = 0
-    by_id = {r.get("article_id", ""): r for r in rows}
-    for legacy in pdf_dir.glob("pdf_*.pdf"):
-        aid = legacy.stem.replace("pdf_", "")
-        r = by_id.get(aid)
-        if r:
-            legacy.rename(pdf_dir / _std_name(r))
-            renamed += 1
-    log(f"{'⚠️ 提前停止' if stopped else '✅ 完成'}：本轮新下 {total_ok} 篇，重命名 {renamed}，"
-        f"总覆盖 {len(rows) - len([r for r in rows if not _has_pdf(r)])}/{len(rows)}")
-    return {"ok": True, "downloaded": total_ok, "stopped": stopped, "total": len(rows)}
+    # R36 复查修正（P1）：CDP 批抓桥已下线（依赖的批抓脚本已从当前版本移除），
+    # BrowserFetcher 构造还需要 base_dir 参数——不再构造任何取数器，直接
+    # 诚实失败；legacy 重命名兜底保留
+    log("❌ CDP 批抓桥已下线（依赖的批抓脚本已从当前版本移除）。", flush=True)
+    log("   替代路径: ① 单条 PDF 走 --pdf 直下（HTTP 直抓模式）；"
+        "② 如需浏览器批抓请在 Full 版本 issue 中反馈恢复该桥。", flush=True)
+    return {"ok": False, "downloaded": 0, "total": len(rows),
+            "error": "CDP 批抓桥已下线（依赖的批抓脚本已移除）"}
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +434,7 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
     meta_dir.mkdir(parents=True, exist_ok=True)
 
     if pdf_batch_resume:
-        return _resume_pdfs_batch(site, out_root, workers, cdp=cdp, log=log)
+        return _resume_pdfs_batch(site, out_root, log=log)
 
     log(f"📚 {site['name']}（{site['base']}） 起始年份 {since_year}")
 
@@ -432,7 +471,7 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
                 "url": a.get("url", ""), "article_id": a.get("id", ""),
                 "pages": a.get("vol_pages", ""),
             })
-        list_records.sort(key=lambda x: (x["year"], x["vol"], x["issue"]))
+        list_records.sort(key=_vol_issue_key)
         lcsv = meta_dir / f"{site['name']}_论文清单.csv"
         if list_records:
             with open(lcsv, "w", newline="", encoding="utf-8-sig") as f:
@@ -440,7 +479,10 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
                 w.writeheader()
                 w.writerows(list_records)
         log(f"📋 清单模式完成：{len(list_records)} 篇 -> {lcsv}")
-        return {"ok": True, "articles": len(list_records), "csv": str(lcsv)}
+        # 审查修复（N44）：清单为空时 CSV 未落盘——曾返回不存在文件的路径，
+        # 下游读 summary["csv"] 直接 FileNotFoundError
+        return {"ok": True, "articles": len(list_records),
+                "csv": str(lcsv) if list_records else None}
 
     # 3) 元数据（可选，增量缓存：中断后已拉取的不会重拉）
     meta_cache = meta_dir / ".meta_cache.jsonl"
@@ -476,7 +518,10 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
                 try:
                     meta = f.result()
                     a.update(meta)
-                    _cache_buf.append(json.dumps({"id": a["id"], **meta}, ensure_ascii=False) + "\n")
+                    # OCR R131（M）：瞬时失败（网络抖动）曾带 _meta_error 永久进
+                    # 缓存——失败文章从此再无重试机会。只缓存成功结果
+                    if "_meta_error" not in meta:
+                        _cache_buf.append(json.dumps({"id": a["id"], **meta}, ensure_ascii=False) + "\n")
                     if len(_cache_buf) >= 25:
                         _flush_cache()
                 except Exception:
@@ -520,7 +565,7 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
             "abstract": a.get("abstract", ""), "pdf_file": r.get("file", ""),
             "pdf_size_kb": r.get("size_kb", 0),
         })
-    records.sort(key=lambda x: (x["year"], x["vol"], x["issue"]))
+    records.sort(key=_vol_issue_key)
 
     csv_path = meta_dir / f"{site['name']}_论文清单.csv"
     jsonl_path = meta_dir / f"{site['name']}_论文清单.jsonl"
@@ -559,7 +604,8 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
         "articles_total": len(all_arts), "pdf_ok": len(ok), "pdf_fail": len(fail),
         "total_mb": round(total_mb, 1),
         "out_dir": str(out_root), "pdf_dir": str(pdf_dir),
-        "csv": str(csv_path), "index": str(idx_path),
+        # 审查修复（N44）：records 为空时 CSV 未写——同 list_only 分支，返回 None
+        "csv": str(csv_path) if records else None, "index": str(idx_path),
     }
     log("")
     log(f"🎉 完成：{len(ok)}/{len(all_arts)} 篇 PDF 下载成功（{round(total_mb,1)} MB）")

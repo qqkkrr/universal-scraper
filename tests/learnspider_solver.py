@@ -34,9 +34,10 @@ if (ROOT / "vendor").exists():
 LS = Path("/tmp/learnspider")
 DB = LS / "db.sqlite3"
 BASE = "http://127.0.0.1:8001"
-NODE = "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
-NODE_PATH = "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"
-PY = "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3"
+import shutil
+NODE = shutil.which("node") or "node"
+NODE_PATH = ""
+PY = "python3"
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")

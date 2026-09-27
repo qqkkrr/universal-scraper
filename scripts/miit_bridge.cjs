@@ -15,8 +15,8 @@
  */
 let chromium = null;
 const _path = require("node:path");
-const _nps = (process.env.NODE_PATH || "").split(":").filter(Boolean);
-const _cands = _nps.map((p) => _path.join(p, "playwright")).concat(["patchright", "playwright"]);
+const _cands = (process.env.NODE_PATH || "").split(":").filter(Boolean)
+  .map((p) => _path.join(p, "playwright")).concat(["patchright", "playwright"]);
 for (const _c of _cands) {
   try { chromium = require(_c).chromium; break; } catch (e) { /* 下一个 */ }
 }
@@ -48,14 +48,27 @@ const DEADLINE = parseInt(ARGS.deadlineMs || "360000", 10);
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const started = Date.now();
+// R98 修复（P2）：硬退出兜底（tactic/zszc 同款）——unref 允许正常完成时自然
+// 退出；仅当 await 卡死且有活跃 handle（浏览器连接）时定时器才触发强制退出
+const _hardExit = setTimeout(() => {
+  log("deadline+5s 强制退出（有 await 卡死）");
+  process.exit(2);
+}, DEADLINE + 5000);
+_hardExit.unref();
 
 function emit(obj) { process.stdout.write(JSON.stringify(obj) + "\n"); }
 function log(msg) { process.stderr.write("[miit_bridge] " + msg + "\n"); }
 
 async function scrollToBottom(page) {
-  for (let i = 0; i < 12; i++) {
+  // 审查修复（M）：固定 12 轮曾无收敛检测——短页白滚，长页 12 轮不够。
+  // 改为"高度不再变化即停"，上限 20 轮兜底
+  let lastH = 0;
+  for (let i = 0; i < 20; i++) {
     await page.mouse.wheel(0, 1600).catch(() => {});
     await sleep(300);
+    const h = await page.evaluate(() => document.documentElement ? document.documentElement.scrollHeight : 0).catch(() => 0);
+    if (h > 0 && h === lastH) break;
+    lastH = h;
   }
 }
 

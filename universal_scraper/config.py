@@ -17,9 +17,37 @@ CAPTCHA_STRATEGIES = {"auto", "ddddocr", "opencv_slider", "2captcha", "nopecha",
 # 词表唯一来源：contract.PIPELINE_STEPS（validate/执行器/文档测试全部从它派生，禁止手抄）
 from .contract import PIPELINE_STEPS, V3_ONLY_STEPS  # noqa: E402
 ALL_PIPELINE_TYPES = set(PIPELINE_STEPS)
-ALL_ACTION_TYPES = {"click", "type", "write", "fill", "press", "select", "wait",
-                    "wait_time", "wait_for_selector", "waitfor", "scroll",
+ALL_ACTION_TYPES = {"click", "type", "write", "fill", "type_real", "fill_real",
+                    "press", "select", "wait",
+                    "wait_time", "wait_for_selector", "waitfor", "wait_for_url",
+                    "wait_for_navigation", "scroll",
                     "exec", "js", "execute_javascript", "screenshot", "noop"}
+# 商标网战训（2026-09）：各动作的合法键名——validate 时校验，配置错误在跑之前
+# 就拦住（曾发生：fill 写 value 键静默填空、screenshot 漏 path 落到 /tmp 默认值）。
+# R1 复查修复：wait_ms/timeout_ms 是 spec-schema 文档与 browser_generic 桥实际
+# 支持的键——曾漏收，照文档抄的配置被 validate 拒绝。
+ACTION_KEY_SPEC = {
+    "click":             {"selector", "index", "timeout", "timeout_ms", "ms", "wait_ms", "optional"},
+    "type":              {"selector", "text", "value", "index", "timeout", "timeout_ms", "wait_ms", "optional"},
+    "write":             {"selector", "text", "value", "index", "timeout", "timeout_ms", "wait_ms", "optional"},
+    "fill":              {"selector", "text", "value", "index", "timeout", "timeout_ms", "wait_ms", "optional"},
+    "type_real":         {"selector", "text", "value", "index", "timeout", "timeout_ms", "delay_ms", "ms", "wait_ms", "optional"},
+    "fill_real":         {"selector", "text", "value", "index", "timeout", "timeout_ms", "delay_ms", "ms", "wait_ms", "optional"},
+    "press":             {"key", "ms", "wait_ms", "optional"},
+    "select":            {"selector", "value", "label", "index", "timeout", "timeout_ms", "wait_ms", "optional"},
+    "wait":              {"ms", "milliseconds", "wait_ms", "selector", "timeout", "timeout_ms", "optional"},
+    "wait_time":         {"ms", "milliseconds", "wait_ms", "selector", "timeout", "timeout_ms", "optional"},
+    "wait_for_selector": {"selector", "timeout", "timeout_ms", "wait_ms", "optional"},
+    "waitfor":           {"selector", "timeout", "timeout_ms", "wait_ms", "optional"},
+    "wait_for_url":      {"url_pattern", "urlPattern", "url", "timeout", "timeout_ms", "wait_ms", "optional"},
+    "wait_for_navigation": {"url_pattern", "urlPattern", "url", "timeout", "timeout_ms", "wait_ms", "optional"},
+    "scroll":            {"direction", "amount", "ms", "wait_ms", "optional"},
+    "exec":              {"js", "code", "ms", "wait_ms", "optional"},
+    "js":                {"js", "code", "ms", "wait_ms", "optional"},
+    "execute_javascript": {"js", "code", "ms", "wait_ms", "optional"},
+    "screenshot":        {"path", "fullPage", "wait_ms", "optional"},
+    "noop":              set(),
+}
 ALL_PARSER_TYPES = {"html", "json", "llm", "article", "table", "json_paged"}
 ALL_STORAGE_TYPES = {"jsonl", "csv", "sqlite", "multi"}
 # 兼容别名（旧代码引用）
@@ -54,7 +82,10 @@ def _require(cfg: Dict[str, Any], key: str, path: str, types, hint: str = "") ->
                           (hint + "；可先跑 `scaffold --type http_html` 生成模板再改").strip())
     v = cfg[key]
     if types and not isinstance(v, types):
-        raise ConfigError(f"{path}.{key}", f"类型应为 {types.__name__}，实际 {type(v).__name__}",
+        # OCR R131（M）：types 为元组时 types.__name__ 必炸 AttributeError——
+        # 用类型名拼接兼容单类型与元组
+        _want = "/".join(t.__name__ for t in (types if isinstance(types, tuple) else (types,)))
+        raise ConfigError(f"{path}.{key}", f"类型应为 {_want}，实际 {type(v).__name__}",
                           hint or f"示例: {_example(key)}")
     return v
 
@@ -100,7 +131,7 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
                               "http_json 翻页抓取需要 records_path 指向记录数组"
                               "（单对象响应请加 source.single_record=true）",
                               '例如: {"strategy": "template", "records_path": "data.list"} 或 '
-                              '{"strategy": "none", "single_record": true}')
+                              '在 source 内加 "single_record": true（单对象响应，strategy 用 none）')
 
     # batch2400 美团战训：template 翻页仅支持 http_json（json_body/url 的 {{page}} 替换）。
     # http_html 的翻页走 next_selector / page_param，与 template 互斥；
@@ -109,13 +140,27 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if _pag_strat == "template" and stype == "http_html":
         raise ConfigError(
             "pagination.strategy",
-            f"翻页策略 'template' 仅支持 http_json，不支持 http_html",
-            "http_html 翻页请用 browser + pagination.type=click，或 page_param + page_param_name")
+            "翻页策略 'template' 仅支持 http_json，不支持 http_html",  # pyflakes：无占位符
+            "http_html 翻页请用 browser + pagination.type=click，或 page_param（查询参数翻页）/ next_selector")
 
     pag = cfg.get("pagination", {})
     if pag is not None and not isinstance(pag, dict):
         raise ConfigError("pagination", f"pagination 应为 dict，实际 {type(pag).__name__}",
                           '例如: "pagination": {"strategy": "none"}')
+    # R43 修复：middleware 配置校验——v2 中间件仅支持 log / module:function；
+    # 配 v3 专属的 webhook 曾通过 validate 但运行时裸抛 ValueError（裸栈 exit 1）
+    for _i, _mw in enumerate(cfg.get("middleware") or []):
+        if not isinstance(_mw, dict):
+            raise ConfigError(f"middleware[{_i}]", "middleware 项应为 dict",
+                              '例如: {"on": "data", "action": "log"}')
+        if _mw.get("on") not in ("request", "response", "data", "error"):
+            raise ConfigError(f"middleware[{_i}].on", f"未知中间件时机: {_mw.get('on')}",
+                              "可选: request / response / data / error")
+        _act = _mw.get("action")
+        if _act != "log" and not (isinstance(_act, str) and ":" in _act):
+            raise ConfigError(f"middleware[{_i}].action",
+                              f"v2 中间件仅支持 log 或 module:function 路径，实际: {_act}",
+                              "webhook 通知为 v3 引擎能力，请改用 v3 任务包（task 包）或去掉该中间件")
     if pag:
         strat = pag.get("strategy", "none")
         if strat not in PAGINATION_STRATEGIES:
@@ -124,19 +169,43 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
         if strat == "page_param" and not pag.get("page_param"):
             raise ConfigError("pagination.page_param", "page_param 策略需要 page_param 字段",
                               '例如: {"strategy": "page_param", "page_param": "page"}')
+        # R81 修复（P2）：browser/browser_script 的翻页策略（click/js）不读顶层
+        # pagination——只认 source 内的 pagination。误配时曾"只抓第 1 页就静默
+        # 结束"（与 template+http_html 同类）。注意 settle_ms/extra_params/
+        # max_pages/start 是顶层确会被转发的合法键，不得误伤
+        if stype in ("browser", "browser_script") and (
+                strat != "none" or any(k not in ("strategy", "max_pages", "start",
+                                                 "settle_ms", "extra_params") for k in pag)):
+            raise ConfigError(
+                "pagination.strategy",
+                "browser/browser_script 的翻页策略（click/js）不读顶层 pagination——请把翻页写进 source 内",
+                '例如: {"source": {"type": "browser", ..., "pagination": {"type": "click", '
+                '"selector": "a.next", "max_pages": 5}}}')
         # records_path 只对 http_json 强制（html 行来自 row_css，与策略无关）——见下方按类型校验
 
     pipeline = cfg.get("pipeline", [])
-    if isinstance(pipeline, str):
+    if not isinstance(pipeline, list):
+        # R21 审查修复（P2）：dict 形态曾静默通过验证（漏了 list 包装），流水线
+        # 完全不生效、输出含重复——缺失列表类型的提示给出正确写法
         raise ConfigError("pipeline", "pipeline 应为步骤数组",
                           '例如: "pipeline": [{"type": "dedup", "key": "url"}]')
-    for i, step in enumerate(pipeline if isinstance(pipeline, list) else []):
+    # OCR R131（L）：上方守卫已确保 list——`if isinstance(...) else []` 是死分支
+    for i, step in enumerate(pipeline):
         if not isinstance(step, dict):
             raise ConfigError(f"pipeline[{i}]", f"流水线步骤应为 dict，实际 {type(step).__name__}")
         pt = step.get("type")
         if pt not in PIPELINE_TYPES:
             raise ConfigError(f"pipeline[{i}].type", f"未知流水线类型 '{pt}'",
                               f"可选: {', '.join(sorted(PIPELINE_TYPES))}")
+        # R94 修复（P1）：必填键曾只在运行时 KeyError——抓完整单才炸、数据全丢。
+        # 按类型前置校验必填参数
+        _need = {"filter": ("field",), "cast": ("field",), "add": ("field",),
+                 "transform": ("field",), "regex_extract": ("field", "pattern"),
+                 "template": ("field", "tmpl"), "rename": ("mapping",)}
+        for _k in _need.get(pt, ()):
+            if not step.get(_k):
+                raise ConfigError(f"pipeline[{i}].{_k}", f"流水线 {pt} 步骤需要 {_k}",
+                                  f'例如: {{"type": "{pt}", "{_k}": "..."}}')
 
     detail = cfg.get("detail", {})
     if detail is not None and not isinstance(detail, dict):
@@ -162,6 +231,15 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
         raise ConfigError("anti_bot", "anti_bot 应为 dict",
                           '例如: "anti_bot": {"min_interval": 1.0}')
     ab = ab if isinstance(ab, dict) else {}
+    # 审查修复 P1：负数 max_requests 曾被静默钳成 0（=不限）——硬闸形同虚设
+    _mr = ab.get("max_requests")
+    if _mr is not None:
+        try:
+            _mr_i = int(_mr)
+        except (TypeError, ValueError):
+            raise ConfigError("anti_bot.max_requests", f"应为整数（0=不限），当前 {_mr!r}")
+        if _mr_i < 0:
+            raise ConfigError("anti_bot.max_requests", f"不能为负数（0=不限），当前 {_mr!r}")
     cap = ab.get("captcha", {})
     if cap is not None and not isinstance(cap, dict):
         raise ConfigError("anti_bot.captcha", f"captcha 应为 dict，实际 {type(cap).__name__}")
@@ -176,6 +254,19 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
 def collect_warnings(cfg: Dict[str, Any]) -> "List[str]":
     """跨字段语义检查：不阻断运行，但必须在 validate 时可见（战例驱动，勿删）。"""
     warns: List[str] = []
+    # R21 审查修复（P2）：未知顶层键（如把 pagination 拼成 pagiantion）曾静默
+    # 被忽略——配置拼写错误产生"只抓第一页"式假成功
+    _KNOWN_KEYS = {"name", "vars", "source", "pagination", "pipeline", "detail",
+                   "record", "storage", "anti_bot", "output", "queue", "rules",
+                   "parsers", "middleware", "incremental", "download", "start_urls",
+                   "sitemap", "iterate", "capture", "base_dir", "description",
+                   "_hint"}  # R40：capture2config 产物的操作提示键，非拼写错误
+    for k in cfg:
+        if k not in _KNOWN_KEYS:
+            # OCR R131（M）：空字符串键 "" 曾在 k[0] 越界崩掉整个配置校验
+            head = k[0] if k else ""
+            warns.append(f"未知顶层键 '{k}'（拼写错误？相似键: "
+                         f"{[x for x in _KNOWN_KEYS if x and x[0] == head][:3]}）——该键将被忽略")
     src = cfg.get("source", {}) or {}
     stype = src.get("type", "")
     rec = cfg.get("record", {}) or {}
@@ -188,7 +279,12 @@ def collect_warnings(cfg: Dict[str, Any]) -> "List[str]":
     if stype == "browser" and not src.get("cdp") and src.get("headless") is not False:
         warns.append("browser 为 headless 且未配 cdp——遇 Cloudflare/Turnstile 会被拦，"
                      "见配方 R16（调试 Chrome 过一次校验后附加）。")
-    for i, step in enumerate(cfg.get("pipeline", [])):
+    # 审查三轮（M）："pipeline": null 曾 TypeError（.get 默认值不覆盖显式 null）
+    for i, step in enumerate(cfg.get("pipeline") or []):
+        if not isinstance(step, dict):
+            # 显式 null 元素（[null, {...}]）曾 AttributeError——collect_warnings
+            # 会被 validate 之外独立调用（tests/ci_check.py），需自防御跳过
+            continue
         pt = step.get("type")
         if pt in V3_ONLY_STEPS:
             warns.append(f"pipeline[{i}] 类型 '{pt}' 仅 v3 任务包执行器实现，"
@@ -228,20 +324,42 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
                               f"可选: {', '.join(sorted(V3_ACTION_TYPES))}")
         if a["type"] in ("click", "type", "write", "fill", "wait_for_selector", "waitfor", "select") and not a.get("selector"):
             raise ConfigError(f"source.actions[{i}]", f"动作 {a['type']} 需要 selector")
+        # epub 战训（2026-09）：键名校验——错误键曾静默忽略（fill 只写 value 时
+        # 桥按空串填入，失败沉在日志里无汇总提示）。跑之前就拦住。
+        _allowed = ACTION_KEY_SPEC.get(a["type"])
+        if _allowed is not None:
+            _unknown = set(k for k in a.keys() if k not in _allowed and k != "type")
+            if _unknown:
+                raise ConfigError(f"source.actions[{i}]",
+                                  f"动作 {a['type']} 含未知键: {sorted(_unknown)}",
+                                  f"合法键: {sorted(_allowed)}")
     inc = cfg.get("incremental", {}) or {}
     if inc.get("enabled") and not inc.get("key"):
         raise ConfigError("incremental.key", "增量去重需要 key（去重主键字段）", '例如: {"enabled": true, "key": "id"}')
+    # R21 审查修复（P2）：容器类型守卫——错误类型曾以裸 AttributeError 崩溃
+    # 而非给出 ConfigError 提示
+    for key, want in (("parsers", dict), ("rules", list), ("storage", dict),
+                      ("start_urls", list), ("pipelines", list)):
+        val = cfg.get(key)
+        if val is not None and not isinstance(val, want):
+            raise ConfigError(key, f"{key} 应为 {want.__name__}，实际 {type(val).__name__}")
     is_bridge = stype == "bridge"
     needs_seeds = stype in ("http", "browser")
     if needs_seeds and not cfg.get("start_urls") and not src.get("sitemap"):
         raise ConfigError("start_urls", "任务包需要 start_urls（入口 URL 列表）",
                           '例如: ["https://site.com/list"]（桥/自定义 fetch_all 或 source.sitemap 可省略）')
-    rules = cfg.get("rules", [])
+    # OCR R131 二轮（H）：显式 null（"rules": null）曾穿透 .get 默认值——
+    # rules=None 进 for 循环 TypeError、storage=None 直接 AttributeError
+    rules = cfg.get("rules") or []
     if not is_bridge and not has_custom_fetcher and not rules:
         raise ConfigError("rules", "任务包需要 rules（URL→解析器路由）",
                           '例如: [{"match": "regex", "pattern": "/detail", "parser": "detail"}]'
                           '（自定义 fetcher 可省略）')
     for i, r in enumerate(rules):
+        # OCR R131（H）：非 dict 项（如手写配置的字符串）曾裸 .get 崩 AttributeError
+        if not isinstance(r, dict):
+            raise ConfigError(f"rules[{i}]", f"规则应为 dict，实际 {type(r).__name__}",
+                              '例如: {"match": "startswith", "pattern": "/detail", "parser": "detail"}')
         if r.get("match") not in ("regex", "contains", "startswith"):
             raise ConfigError(f"rules[{i}].match", f"未知匹配方式 '{r.get('match')}'",
                               "可选: regex / contains / startswith")
@@ -253,7 +371,11 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
                               "在 parsers 里声明，或写 modules/parser.py 提供同名 Parser")
     # pipelines 校验（与 modules/pipelines.py 实现对齐）
     for i, step in enumerate(cfg.get("pipelines", []) or []):
-        pt = (step or {}).get("type")
+        # OCR R131（H）：`(step or {})` 不防非 dict 真值（如字符串 "dedup"）
+        if not isinstance(step, dict):
+            raise ConfigError(f"pipelines[{i}]", f"流水线步骤应为 dict，实际 {type(step).__name__}",
+                              '例如: {"type": "dedup", "key": "url"}')
+        pt = step.get("type")
         if pt not in ALL_PIPELINE_TYPES:
             raise ConfigError(f"pipelines[{i}].type", f"未知流水线类型 '{pt}'",
                               f"可选: {', '.join(sorted(ALL_PIPELINE_TYPES))}")
@@ -269,7 +391,7 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
             if pt == "llm" and not (pcfg or {}).get("schema"):
                 raise ConfigError(f"parsers.{pname}.schema", "llm 解析器需要 schema（字段定义）",
                                   '例如: {"type": "llm", "schema": {"标题": "...", "价格": "..."}}')
-    st = cfg.get("storage", {})
+    st = cfg.get("storage") or {}  # OCR R131 二轮（H）："storage": null 曾 AttributeError
     if st.get("type", "jsonl") not in ALL_STORAGE_TYPES and not has_custom_storage:
         raise ConfigError("storage.type", f"未知存储类型 '{st.get('type')}'",
                           "可选: " + " / ".join(sorted(ALL_STORAGE_TYPES)) + " 或提供 modules/storage.py 自定义")

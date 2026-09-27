@@ -11,6 +11,7 @@
 """
 import json
 import re
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -26,15 +27,30 @@ LABELS = {"http": "HTTP 直抓", "curl_cffi": "TLS 指纹伪装",
 def _load_strategies() -> dict:
     if STRATEGY_FILE.exists():
         try:
-            return json.loads(STRATEGY_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+            data = json.loads(STRATEGY_FILE.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            # OCR R131（M）：缓存损坏曾静默当空——每次都全链路重试且无任何线索
+            print(f"⚠️ 策略缓存损坏（{type(e).__name__}），本轮视为空缓存", file=sys.stderr)
     return {}
 
 
 def _save_strategies(data: dict):
+    # OCR R131（H）：并发/中断下的非原子写曾留下半截 JSON（下轮全链路重试）。
+    # 临时文件 + 原子替换
     STRATEGY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STRATEGY_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    import tempfile as _tf, os as _os
+    _fd, _tmp = _tf.mkstemp(dir=str(STRATEGY_FILE.parent), suffix=".tmp")
+    try:
+        with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
+            _f.write(json.dumps(data, ensure_ascii=False, indent=1))
+        _os.replace(_tmp, STRATEGY_FILE)
+    except Exception:
+        try:
+            _os.unlink(_tmp)
+        except OSError:
+            pass
+        raise
 
 
 def get_cached_strategy(url: str):
@@ -46,9 +62,18 @@ def save_strategy(url: str, strategy: str):
     domain = urlsplit(url).hostname or ""
     if not domain:
         return
+    # OCR R131（M）：瞬时失败（网络抖动/出口切换）曾把此前验证过的好策略覆盖成
+    # failed——下次明明可用的策略被跳过。failed 只在新站点（尚无有效策略）时记录
+    # OCR R131 终审（M）：prev 曾是独立 _load_strategies() 调用——与下方 data 的
+    # 二次读取构成 TOCTOU 双读（并发 save 时 prev 可能过时）。合并为一次读
     data = _load_strategies()
+    prev = data.get(domain, {}).get("best_strategy")
+    if strategy == "failed" and prev not in (None, "", "failed"):
+        return
     data.setdefault(domain, {})["best_strategy"] = strategy
     data.setdefault(domain, {})["updated"] = time.strftime("%Y-%m-%d %H:%M")
+    # OCR R131（M）：TOCTOU 修复——prev 和 data 曾是两次独立 _load_strategies()，
+    # 并发 save 时后写覆盖先写。合并为一次读（prev 直接取自 data）
     _save_strategies(data)
 
 
@@ -65,6 +90,9 @@ def _detect_block(text: str, status: int) -> str:
     # JS challenge 壳页特征：短页面 + 含跳转/挑战代码（不能仅凭短就判定——短页面可能合法）
     if len(t) < 300 and re.search(r"document\.(?:location|write)|setTimeout.*location|__js_challenge|stoken", t):
         return "js_challenge"
+    # OCR R7：其余 4xx/5xx 无特征也按拦截处理——否则错误页（404/500）会被当成功返回
+    if status >= 400:
+        return "waf"
     return "none"
 
 
@@ -72,15 +100,48 @@ def _detect_block(text: str, status: int) -> str:
 
 def _fetch_http(url: str, timeout: int = 20):
     import urllib.request
+    import urllib.error
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    resp = opener.open(req, timeout=timeout)
-    return resp.status, resp.read().decode("utf-8", "ignore")
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            raw = resp.read()
+            status = resp.status
+    except urllib.error.HTTPError as e:
+        # OCR R7（H）：4xx/5xx 曾直接抛 HTTPError——状态码和拦截页到不了
+        # _detect_block，验证码/WAF/限流分类对 HTTP 策略形同虚设。如实返回让上层分类
+        try:
+            raw = e.read()
+        except Exception:
+            raw = b""
+        status = e.code
+    # OCR R131（M）：非 UTF-8 站点（gb2312/gbk）曾按 ignore 解码成乱码，
+    # 登录探测关键词全部失配——先试 utf-8 再回退 gb18030
+    try:
+        return status, raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return status, raw.decode("gb18030", "ignore")
 
 
 def _fetch_curl_cffi(url: str, timeout: int = 25):
     r = cffi_requests.get(url, timeout=timeout, impersonate="chrome")
     return r.status_code, r.text
+
+
+def _adaptive_session_dir() -> str:
+    """OCR R131（H）：固定 /tmp/us_adaptive 可被本地其他用户预置符号链接劫持
+    （浏览器会话写往攻击者指定目录）。改按用户名分目录 + 0700 + 符号链接拒绝。"""
+    import getpass, tempfile as _tf  # pyflakes：os 未用（mkdir 用 Path 方法）
+    base = Path(_tf.gettempdir()) / f"us_adaptive_{getpass.getuser()}"
+    try:
+        if base.is_symlink():
+            raise RuntimeError("session dir 是符号链接，拒绝使用")
+        base.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return str(base)
+    except RuntimeError:
+        raise  # 硬化检查（符号链接劫持拒绝）不许被下面的兜底吞掉
+    except Exception:
+        return _tf.mkdtemp(prefix="us_adaptive_")
 
 
 def _fetch_browser(url: str, headless: bool):
@@ -91,9 +152,11 @@ def _fetch_browser(url: str, headless: bool):
     source = {"type": "browser", "url": url, "pool": False,
               "headless": headless, "scroll_count": 2,
               "scroll_wait_ms": 2000, "pagination": {"type": "none"}}
-    fetcher = fm.BrowserFetcher(source, {}, {"session_dir": "/tmp/us_adaptive"})
+    fetcher = fm.BrowserFetcher(source, {}, {"session_dir": _adaptive_session_dir()})
     resp = fetcher.fetch(Req(url=url))
-    return resp.status or 200, resp.text or ""
+    # OCR R131（H）：`or 200` 曾把失败的 status=0 伪装成成功 200——_detect_block
+    # 拿到伪造状态误判放行。失败就如实返回 0
+    return resp.status if resp.status else 0, resp.text or ""
 
 
 # ── 核心入口 ──
@@ -135,8 +198,9 @@ def adaptive_fetch(url: str, keyword: str = "", log=None) -> dict:
         last_err = f"拦截类型 {block}"
 
         if block == "login":
+            # OCR R131（M）：登录提示时立即存 browser_visible 曾把未验证的策略
+            # 固化成"最优"——只提示，不落缓存
             _log("  💡 请在浏览器中登录该网站，然后点「🍪 导入会话」→「重跑」")
-            save_strategy(url, "browser_visible")
 
     save_strategy(url, "failed")
     _log(f"❌ 所有策略均失败: {last_err}")
@@ -147,7 +211,7 @@ def adaptive_fetch(url: str, keyword: str = "", log=None) -> dict:
 # ── 独立运行 ──
 
 if __name__ == "__main__":
-    import sys
+    # sys 已在模块级导入（pyflakes：局部重导入曾遮蔽警告）
     url = sys.argv[1] if len(sys.argv) > 1 else "https://example.com"
     result = adaptive_fetch(url, log=print)
     print(json.dumps({"strategy": result["strategy"], "status": result["status"],

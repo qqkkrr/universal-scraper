@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""🛡️ 合规中间件 + 交付报告生成器——把已有的 Dormant 模块（robots/middleware/antibot）
-串进主执行链，让"合规"从文档变成自动行为。
+"""🛡️ 合规工具箱（R22 审查纠偏：本模块当前未被主执行链接入——真实生效的合规
+在各执行器内：engine_v3 的 anti.respect_robots、fetchers 的 robots 检查、
+core 的域名封锁台账。此处的 AdaptiveThrottle 以 core.py 内的同名实现为准。
+保留本模块作为独立可复用的工具集；接线前请勿把本文档当作"已自动生效"的依据）。
 
 三个能力：
-1. AdaptiveThrottle —— 动态限速（Scrapy AutoThrottle 思路：根据服务器响应速度自适应调节）
-2. ComplianceGate —— 每次请求前的合规检查（robots.txt + 域名封锁台账 + 证据留存）
-3. DeliveryReport —— 任务完成后自动生成交付审计报告（数据量/字段完整率/来源/证据）
+1. AdaptiveThrottle —— 动态限速（Scrapy AutoThrottle 思路；生效版本在 core.py）
+2. ComplianceGate —— 独立可调用的合规检查（robots.txt + 域名封锁台账 + 证据留存）
+3. DeliveryReport —— 交付审计报告生成（数据量/字段完整率/来源/证据）
 """
 from __future__ import annotations
 
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -46,14 +49,14 @@ class AdaptiveThrottle:
 
     @property
     def current_interval(self) -> float:
-        return self._current
+        with self._lock:  # OCR R131（L）：与 wait/record 统一持锁读
+            return self._current
 
     def wait(self):
         with self._lock:
             w = self._current
         if w > 0:
-            import time as _t
-            _t.sleep(w)
+            time.sleep(w)
 
     def record(self, latency_sec: float, status: int = 200):
         """记录一次响应的延迟和状态码，自适应调整下次间隔。"""
@@ -81,7 +84,11 @@ class ComplianceGate:
         self.evidence_dir = Path(evidence_dir) if evidence_dir else None
         self.respect_robots = respect_robots
         self._robots = None
-        self._checked_domains: set = set()
+        self._budget_warned: set = set()  # 台账检查失败的域只告警一次（防每请求刷屏）
+        # OCR R131（M）：多 worker 并发 check 时 _robots/_budget_warned 的
+        # check-then-act 无锁——加轻量锁串行化（检查本身是纯内存操作）
+        import threading as _th
+        self._gate_lock = _th.Lock()
         if self.evidence_dir:
             self.evidence_dir.mkdir(parents=True, exist_ok=True)
 
@@ -90,8 +97,12 @@ class ComplianceGate:
             try:
                 from .robots import RobotsTxt
                 self._robots = RobotsTxt()
-            except Exception:
+            except Exception as e:
                 self._robots = False  # 标记为"不可用"
+                # 审查修复：初始化失败曾无声——robots 合规检查被永久禁用而调用方
+                # 毫不知情。失败后 _robots=False 不再重试，此告警天然只打一次
+                print(f"⚠️ compliance: robots.txt 初始化失败（{type(e).__name__}: {e}）"
+                      f"——robots 检查已禁用", file=sys.stderr, flush=True)
         return self._robots or None
 
     def check(self, url: str) -> Dict[str, Any]:
@@ -101,11 +112,21 @@ class ComplianceGate:
         domain = parsed.hostname or ""
 
         # 1) robots.txt
-        robots = self._get_robots()
+        # OCR R131（M）：_get_robots 的 check-then-act 同样入锁（仅首次构造走慢路径）
+        with self._gate_lock:
+            robots = self._get_robots()
         if robots:
             allowed = robots.allowed(url)
             if not allowed:
                 return {"allowed": False, "reason": "robots.txt Disallow"}
+            # 审查对标（Crawlee robots representation）：Crawl-delay 透传给调用方——
+            # 采集器可据此把该域 min_interval 提到服务端要求（原解析了却无人消费）
+            try:
+                _cd = robots.crawl_delay(url)
+            except Exception:
+                _cd = 0.0
+            if _cd > 0:
+                return {"allowed": True, "reason": "", "crawl_delay": _cd}
 
         # 2) 域名封锁台账
         try:
@@ -114,8 +135,16 @@ class ComplianceGate:
             if bc.get("in_cooldown"):
                 return {"allowed": False,
                         "reason": f"域名冷却中（剩 {bc['remaining_sec']//3600}h，{bc.get('note','')}）"}
-        except Exception:
-            pass
+        except Exception as e:
+            # 审查修复（HIGH）：台账检查炸了不再无声放行——冷却封锁被静默禁用，
+            # 用户却以为还在生效。降级为放行但大声告警（每域一次，防刷屏）；
+            # 不 fail-closed：台账文件损坏不应打死整个采集
+            with self._gate_lock:  # OCR R131（M）：check-then-add 串行化防双份告警
+                _first = domain not in self._budget_warned
+                self._budget_warned.add(domain)
+            if _first:
+                print(f"⚠️ compliance: 域名封锁台账检查失败（{type(e).__name__}: {e}）"
+                      f"——冷却封锁临时失效，请检查台账文件", file=sys.stderr, flush=True)
 
         return {"allowed": True, "reason": ""}
 
@@ -123,13 +152,21 @@ class ComplianceGate:
         """留证据文件（kind: http_block / captcha / waf / network_fail）。"""
         if not self.evidence_dir:
             return
+        # OCR R131（M）：截断到 60 字符曾让同前缀 URL 互覆证据——拼短哈希保唯一。
+        # 审查三轮（H）：kind 同样清洗——防拼接路径成分越出证据目录
+        import hashlib as _hl
         safe = re.sub(r"[^0-9A-Za-z._\-]+", "_", url)[:60]
-        fp = self.evidence_dir / f"evidence_{kind}_{safe}.txt"
+        _ksafe = re.sub(r"[^0-9A-Za-z._\-]+", "_", kind or "ev")[:24]
+        _tag = _hl.md5(url.encode(), usedforsecurity=False).hexdigest()[:8]
+        fp = self.evidence_dir / f"evidence_{_ksafe}_{safe}.{_tag}.txt"
         try:
             fp.write_text(f"URL: {url}\n时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                           f"类型: {kind}\n---\n{content[:5000]}", encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as e:
+            # 审查修复（MEDIUM）：证据写失败必须可见——磁盘满/权限错时合规证据
+            # 已丢，调用方却以为存上了
+            print(f"⚠️ compliance: 证据写入失败 {fp.name}（{type(e).__name__}: {e}）",
+                  file=sys.stderr, flush=True)
 
 
 # ============================================================
@@ -163,6 +200,10 @@ def generate_delivery_report(task_dir: str | Path, task_name: str = "",
         lines.append(f"  · {f.get('file', '?')}: {status}")
     lines.append("")
     lines.append("---")
+    # OCR R131（M）：source_summary 形参曾声明却从不进报告——审计报告缺"来源声明"段
+    if source_summary:
+        lines.append(f"## 来源声明\n{source_summary}")
+        lines.append("")
     lines.append("本报告由 universal-scraper 自动生成（verify_dir + delivery_report）。")
 
     report_path = root / "report.md"

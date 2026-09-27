@@ -30,13 +30,7 @@ SERVER_NAME = "universal-scraper"
 # --------------------------------------------------------------------------
 # 工具定义（MCP tools/list 返回）
 # --------------------------------------------------------------------------
-
-def _param(name: str, desc: str, required: bool = True, default: Any = None,
-           ptype: str = "string") -> Dict[str, Any]:
-    d = {"name": name, "description": desc, "required": required, "type": ptype}
-    if default is not None or not required:
-        d["default"] = default
-    return d
+# OCR R131（L）：_param 构造器与 _notify 均无调用方（schema 手写字面量）——已删
 
 
 TOOLS: List[Dict[str, Any]] = [
@@ -138,7 +132,8 @@ def _cap(obj: Dict[str, Any], limit: int) -> Dict[str, Any]:
         if isinstance(v, str) and len(v) > limit:
             out[k] = v[:limit] + f"...(截断，共 {len(v)} 字符)"
         elif isinstance(v, list) and len(v) > 50:
-            out[k] = v[:50]
+            # 审查二轮（M）：列表截断曾无提示——调用方误以为拿全了
+            out[k] = v[:50] + [f"...(截断，共 {len(v)} 项)"]
     return out
 
 
@@ -157,12 +152,22 @@ def tool_scrape(args: Dict[str, Any]) -> Dict[str, Any]:
         links=bool(args.get("links", False)),
     )
     if result.get("error"):
-        return {"error": result["error"]}
+        # 审查修复 P1：降级信号在错误路径同样要带出去——残血后端恰恰常以失败示形
+        out = {"error": result["error"]}
+        if result.get("degraded_backend"):
+            out["backend"] = result.get("backend")
+            out["degraded_backend"] = True
+        return out
     # 只返回有用的字段，避免把整页 text 也带回来（省 token）
-    keys = ["url", "status", "markdown", "article", "selector", "tables", "links"]
+    # NBS 夜测战训：backend/degraded_backend 必须随结果走——静默降级 urllib 曾废掉一整晚
+    keys = ["url", "status", "markdown", "article", "selector", "tables", "links",
+            "backend", "degraded_backend"]
     out = {k: result[k] for k in keys if k in result}
     if "markdown" in out:
-        out["markdown"] = out["markdown"][:50000]
+        # R27 审查修复（P2）：截断曾无任何标记——长页被当作完整内容消费
+        _md = out["markdown"]
+        if len(_md) > 50000:
+            out["markdown"] = _md[:50000] + f"\n\n...(已截断，原始 {len(_md)} 字符)"
     return out
 
 
@@ -173,7 +178,7 @@ def tool_auto(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "description 不能为空"}
     out = auto_task(desc,
                     limit=args.get("limit") or None,
-                    rounds=int(args.get("rounds") or 2))
+                    rounds=int(args.get("rounds") if args.get("rounds") is not None else 2))
     return {
         "name": out.get("name"),
         "result": out.get("result"),
@@ -190,8 +195,8 @@ def tool_crawl(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "url 必须是 http/https 开头的完整网址"}
     result = crawl_url(
         url,
-        depth=int(args.get("depth") or 2),
-        max_pages=int(args.get("max_pages") or 100),
+        depth=int(args.get("depth") if args.get("depth") is not None else 2),
+        max_pages=int(args.get("max_pages") if args.get("max_pages") is not None else 100),
         allow=args.get("allow") or None,
         deny=args.get("deny") or None,
         browser=bool(args.get("browser", False)),
@@ -207,12 +212,21 @@ def tool_extract(args: Dict[str, Any]) -> Dict[str, Any]:
     html = str(args.get("html", ""))
     mode = str(args.get("mode") or "markdown").lower()
     base_url = args.get("base_url") or None
-    max_chars = int(args.get("max_chars") or 50000)
+    max_chars = int(args.get("max_chars") if args.get("max_chars") is not None else 50000)
     try:
         if mode == "article":
             txt = extract_article(html)
         elif mode == "table":
-            return {"tables": extract_tables(html)[:20]}
+            # 审查二轮（H）：曾提前 return 绕过 max_chars——大表格打爆 MCP 响应
+            _all_tables = extract_tables(html)
+            tbls = _all_tables[:20]
+            payload = json.dumps(tbls, ensure_ascii=False, default=str)
+            if len(payload) > max_chars:
+                tbls = tbls[:5]
+                payload = json.dumps(tbls, ensure_ascii=False, default=str)
+            if len(payload) > max_chars:
+                return {"tables": [], "text": f"(共 {len(_all_tables)} 张表，响应超限已省略——请缩小页面范围)", "mode": "table"}
+            return {"tables": tbls, "mode": "table"}
         else:
             txt = html_to_markdown(html, base_url=base_url)
     except Exception as e:
@@ -233,10 +247,22 @@ def _load_books_spec(args: Dict[str, Any]):
         return None, ('请提供 spec（内联 {"books":[…]} 对象）或 spec_path（.json 文件路径）')
     from pathlib import Path
     p = Path(sp).expanduser()
-    if not p.exists():
-        cand = Path(__file__).resolve().parent.parent / sp
-        if cand.exists():
-            p = cand
+    # OCR R131（H）：spec_path 曾可读任意绝对路径/../../ 逃逸——MCP 客户端可
+    # 传 /etc/passwd 类路径探测文件系统。限定在插件根内（绝对路径仅放行插件
+    # 根内部；相对路径解析后同样收归插件根）
+    _ROOT = Path(__file__).resolve().parent.parent
+    if p.is_absolute():
+        try:
+            p.relative_to(_ROOT)
+        except ValueError:
+            return None, f"spec_path 仅允许插件目录内路径（收到绝对路径越界）: {sp}"
+    else:
+        p = _ROOT / sp
+    try:
+        p = p.resolve()
+        p.relative_to(_ROOT)
+    except ValueError:
+        return None, f"spec_path 解析后越出插件目录: {sp}"
     if not p.exists():
         return None, f"spec 文件不存在: {sp}（也可改用内联 spec 对象）"
     try:
@@ -269,7 +295,16 @@ def tool_books(args: Dict[str, Any]) -> Dict[str, Any]:
     if err:
         return {"error": err,
                 "hint": 'spec 结构：{"name":"书单名","books":[{"title":"书名","isbn":"合法 ISBN-10/13"}]}'}
-    result = build_catalog(spec, str(args.get("out") or "outputs/book_catalog"),
+    # 输出目录限制在 outputs/ 内（审查 P2，R8：与 webui 同一 containment 口径，
+    # 防提示注入把文件写到项目外任意路径）
+    from pathlib import Path as _P
+    _out = _P(str(args.get("out") or "outputs/book_catalog")).expanduser().resolve()
+    _out_root = (_P(".") / "outputs").resolve()
+    try:
+        _out.relative_to(_out_root)
+    except ValueError:
+        return {"error": f"out 仅允许 outputs/ 内（当前解析为 {_out}）"}
+    result = build_catalog(spec, str(_out),
                            download_covers=bool(args.get("download_covers", True)),
                            min_interval=_clamp_interval(args.get("interval"), 1.0))
     status = str(result.get("status") or "")
@@ -345,8 +380,11 @@ def tool_check(_args: Dict[str, Any]) -> Dict[str, Any]:
                                  if isinstance(v, dict) and v.get("status") in (None, "pass"))
                     total = len(vals)
                     stats[key_name] = f"{passed}/{total}"
-            except Exception:
-                pass
+            except Exception as e:
+                # OCR R131（M）：挑战得分统计失败曾静默——得分缺失时无从排查
+                import sys as _sys
+                print(f"⚠️ 挑战得分统计失败（{key_name}: {type(e).__name__}: {str(e)[:60]}）",
+                      file=_sys.stderr)
     return {
         "server": SERVER_NAME,
         "version": VERSION,
@@ -388,13 +426,6 @@ def _error(id_: Any, code: int, message: str, data: Any = None) -> Dict[str, Any
     if data is not None:
         e["data"] = data
     return {"jsonrpc": "2.0", "id": id_, "error": e}
-
-
-def _notify(method: str, params: Any = None) -> Dict[str, Any]:
-    m = {"jsonrpc": "2.0", "method": method}
-    if params is not None:
-        m["params"] = params
-    return m
 
 
 def handle_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -457,7 +488,15 @@ def serve_stdio(once: bool = False) -> int:
                 msg = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            resp = handle_message(msg)
+            # R27 审查修复（P2）：非对象输入（batch 数组/标量）曾 AttributeError
+            if not isinstance(msg, dict):
+                continue
+            # OCR R131（M）：once 模式 handle_message 曾裸调——一条消息内部异常
+            # 直接炸掉自测进程；对齐常驻模式的 JSON-RPC 错误响应
+            try:
+                resp = handle_message(msg)
+            except Exception as e:
+                resp = _error(msg.get("id"), -32603, f"内部错误: {type(e).__name__}: {e}")
             if resp is not None:
                 print(json.dumps(resp, ensure_ascii=False), flush=True)
         return 0
@@ -472,11 +511,18 @@ def serve_stdio(once: bool = False) -> int:
         except json.JSONDecodeError:
             continue
         try:
+            # R16 审查修复（P0）：print 括号错位（flush 传给了 json.dumps）——
+            # 持久模式首个响应即 TypeError，MCP 集成完全不可用（自测路径掩盖）
+            # R16 审查修复（P2）：JSON-RPC batch 数组曾 AttributeError
+            if not isinstance(msg, dict):
+                continue
             resp = handle_message(msg)
         except Exception as e:
-            resp = _error(msg.get("id"), -32603, f"内部错误: {type(e).__name__}: {e}")
+            _id = msg.get("id") if isinstance(msg, dict) else None
+            resp = _error(_id, -32603, f"内部错误: {type(e).__name__}: {e}")
         if resp is not None:
-            print(json.dumps(resp, ensure_ascii=False, flush=True))
+            print(json.dumps(resp, ensure_ascii=False), flush=True)
+    return 0  # 审查修复：曾隐式返回 None 违反 -> int 契约（与 --once 分支对齐）
 
 
 def main() -> int:

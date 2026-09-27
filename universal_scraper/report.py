@@ -10,12 +10,24 @@ def _num(v: object) -> float | None:
     """解析数值；支持中文单位（万/亿）、区间值（'4-5万'→45000）、后缀说明。"""
     if v is None: return None
     s = str(v).strip().replace(",", "")
-    m = re.search(r'([+-]?\d+(?:\.\d+)?)\s*-\s*([+-]?\d+(?:\.\d+)?)\s*(万|亿)?', s)
+    # R96 修复（P2）：日期形值（2026-09-15）曾被区间正则误读成 (2026-9)/2≈1017.5
+    # OCR R131（M）：年月形（2026-09）同样被误读成区间——补口径
+    if re.search(r'\d{4}[-/年]\d{1,2}([-/月]\d{1,2})?日?号?', s):
+        return None
+    # OCR R131（M）：区间两端均可带单位（"1万-2万"曾只认后置单位 → 误读成 1万）
+    # 审查二轮（H）：混合单位（"1万-2亿"）曾把高位单位套到低端。规则：
+    # 无单位端继承有单位端（"4-5万"的 4 = 4万）；两端单位不同才各自换算
+    m = re.search(r'([+-]?\d+(?:\.\d+)?)\s*(万|亿)?\s*-\s*([+-]?\d+(?:\.\d+)?)\s*(万|亿)?', s)
     if m:
-        lo, hi = float(m.group(1)), float(m.group(2))
-        unit = m.group(3) or ""
-        scale = 10000 if unit == "万" else (100000000 if unit == "亿" else 1)
-        return (lo + hi) / 2 * scale
+        def _scaled(num_s: str, unit: str) -> float:
+            n = float(num_s)
+            if unit == "万": n *= 10000
+            elif unit == "亿": n *= 100000000
+            return n
+        u1, u2 = m.group(2) or "", m.group(4) or ""
+        lo = _scaled(m.group(1), u1 or u2)
+        hi = _scaled(m.group(3), u2 or u1)
+        return (lo + hi) / 2
     m = re.search(r'([+-]?\d+(?:\.\d+)?)\s*(万|亿)?', s)
     if not m: return None
     n = float(m.group(1))
@@ -53,6 +65,10 @@ def _numeric_cols(rows: list[dict]) -> list[str]:
     out = []
     SKIP_WORDS = ("年份", "year", "date", "时间", "日期")
     for col in rows[0]:
+        # 审查修复（P2，R7）：DictReader 把超长行的多余列塞进 None restkey——
+        # col.lower() 曾对 None 崩溃（ragged CSV 报告全挂）
+        if col is None:
+            continue
         if any(k in col.lower() for k in SKIP_WORDS):
             continue
         vals = [_num(r.get(col)) for r in rows if r.get(col) not in (None, "")]
@@ -62,8 +78,8 @@ def _numeric_cols(rows: list[dict]) -> list[str]:
     return out
 
 def _missing(rows, col):
-    """缺失值计数"""
-    return sum(1 for r in rows if not str(r.get(col, "")).strip())
+    """缺失值计数（DictReader 短行以 None 补位——None 与空串同样计缺）"""
+    return sum(1 for r in rows if r.get(col) is None or not str(r.get(col, "")).strip())
 
 def generate(path: str, group_col: str | None = None, out: str = "report.html") -> dict:
     """读取 CSV 生成可视化 HTML 报告，返回统计摘要"""
@@ -71,7 +87,7 @@ def generate(path: str, group_col: str | None = None, out: str = "report.html") 
     if not rows:
         raise ValueError("CSV 无数据")
     n = len(rows)
-    cols = list(rows[0].keys())
+    cols = [c for c in rows[0].keys() if c is not None]  # 过滤 ragged 行的 None restkey
     num_cols = _numeric_cols(rows)
     stats = []
     for c in num_cols:
@@ -132,7 +148,13 @@ svg text{{font-size:11px}}
 
     if group_stats:
         parts.append(f"<h2>3. 按「{_h.escape(group_col)}」分组</h2>")
-        keys = [k for k in group_stats[0] if k not in ("group", "n")]
+        # 审查修复：表头曾只取 group_stats[0]（最大组）——该组某列恰无有效值时
+        # {col}_mean/_sum 键缺席，其他组的有效数据被整列静默丢弃。改为全组并集
+        keys: list = []
+        for g in group_stats:
+            for k in g:
+                if k not in ("group", "n") and k not in keys:
+                    keys.append(k)
         parts.append("<table><tr><th>分组</th><th>样本</th>" + "".join(f"<th>{_h.escape(k)}</th>" for k in keys) + "</tr>")
         for g in group_stats:
             parts.append(f"<tr><td>{_h.escape(str(g['group']))}</td><td>{g['n']}</td>" + "".join(f"<td>{g.get(k,'')}</td>" for k in keys) + "</tr>")
@@ -155,10 +177,11 @@ svg text{{font-size:11px}}
         maxc = max(counts) or 1
         parts.append(f"<h3>{_h.escape(s['col'])}</h3><svg width='900' height='{40+len(counts)*22}'>")
         for i, c in enumerate(counts):
-            bar_h = max(3, int(c/maxc*160))
-            parts.append(f"<rect x='50' y='{i*22+20+160-bar_h}' width='40' height='{bar_h}' fill='#4361ee'/>")
-            parts.append(f"<text x='95' y='{i*22+34+160-bar_h}'>{c}</text>")
-            parts.append(f"<text x='5' y='{i*22+34}'>{lo+i*width:.0f}</text>")
+            # OCR R131（C）：x/width 曾为常量——所有柱完全重叠且越界。横条长度应∝计数
+            bar_w = max(2, int(c / maxc * 300))
+            parts.append(f"<rect x='60' y='{i*22+20}' width='{bar_w}' height='16' fill='#4361ee'/>")
+            parts.append(f"<text x='{60+bar_w+5}' y='{i*22+32}'>{c}</text>")
+            parts.append(f"<text x='5' y='{i*22+32}'>{lo+i*width:.0f}</text>")
         parts.append("</svg>")
     parts.append("</body></html>")
     Path(out).parent.mkdir(parents=True, exist_ok=True)

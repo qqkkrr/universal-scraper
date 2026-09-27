@@ -47,6 +47,16 @@ for (let i = 0; i < _argv.length; i++) {
 const LIST_URL = ARGS.list_url || "https://gaokao.chsi.com.cn/zsgs/zhangcheng/listVerifedZszc--method-index,lb-1.dhtml";
 const MAX = parseInt(ARGS.max || "0", 10) || 200;
 const SETTLE = parseInt(ARGS.settle || "800", 10);
+// R27 修复：自加 deadline（Python 侧 run_bridge 现以 deadlineMs 传入；缺省 6 分钟）
+// ——硬退出定时器兜底卡死的 await；点击链循环内检查提前收尾
+const DEADLINE_MS = parseInt(ARGS.deadlineMs || "360000", 10) || 360000;
+const _DEADLINE_AT = Date.now() + DEADLINE_MS;
+const _hardExit = setTimeout(() => {
+  log("deadline 到，强制退出（有 await 卡死）");
+  process.exit(2);
+}, DEADLINE_MS + 5000);
+_hardExit.unref();
+function pastDeadline() { return Date.now() > _DEADLINE_AT; }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function emit(obj) { process.stdout.write(JSON.stringify(obj) + "\n"); }
@@ -92,13 +102,18 @@ function log(msg) { process.stderr.write("[zszc_bridge] " + msg + "\n"); }
     const seen = new Set();
     let seq = 0;
     for (let i = 0; i < items.length && results.length < MAX; i++) {
+      if (pastDeadline()) { log("deadline 到，提前结束点击链"); break; }
       let popupUrl = null;
       const pHandler = (p) => { popupUrl = p.url(); p.close().catch(() => {}); };
       ctx.on("page", pHandler);
       try {
         await items[i].dispatchEvent("click", { bubbles: true }).catch(() => {});
       } catch (e) { /* 忽略 */ }
-      await sleep(260);
+      // 审查修复（H）：260ms 固定窗口对慢弹窗太窄（漏采）——改轮询等待弹窗
+      // 出现或超时（600ms 上限），命中即提前结束等待
+      for (let _w = 0; _w < 6 && !popupUrl; _w++) {
+        await sleep(100);
+      }
       ctx.off("page", pHandler);
       const m = (popupUrl || "").match(/schId-(\d+)\.dhtml/);
       const schId = m ? m[1] : "";

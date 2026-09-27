@@ -109,16 +109,18 @@ async function main() {
     const wsFrames = [];
     if (network) {
       page.on("response", async (res) => {
-        const entry = {
-          url: res.url(), status: res.status(),
-          headers: res.headers(), // 含 set-cookie 数组
-        };
+        // 审查修复（P1）：响应销毁时 res.url()/headers() 抛错曾成 unhandledRejection
+        // 直接杀进程、result 丢失（browser_generic.cjs:509 同款修复对齐——全监听器体包 try）
+        const entry = {};
         try {
+          entry.url = res.url();
+          entry.status = res.status();
+          entry.headers = res.headers(); // 含 set-cookie 数组
           const ct = (res.headers()["content-type"] || "").toLowerCase();
           if (ct.includes("json") || ct.includes("text")) {
             entry.body = (await res.text()).slice(0, 20000);
           }
-        } catch (e) {}
+        } catch (e) { return; }
         if (netEvents.length < 200) netEvents.push(entry);  // 网络收集上限，防结果爆炸
       });
       page.on("websocket", (ws) => {
@@ -159,27 +161,35 @@ async function main() {
           else await page.mouse.wheel(0, parseInt(a.y || a.px || 800, 10));
         } else if (t === "mouse_move") {
           // 带轨迹的鼠标移动（挑战 7/35/50）
-          const steps = parseInt(a.steps || 8, 10);
-          const x0 = a.from.x, y0 = a.from.y, x1 = a.to.x, y1 = a.to.y;
-          await page.mouse.move(x0, y0);
-          for (let i = 1; i <= steps; i++) {
-            const t = i / steps;
-            const ease = t * t * (3 - 2 * t);
-            await page.mouse.move(x0 + (x1 - x0) * ease, y0 + (y1 - y0) * ease + Math.sin(i * 1.7) * 1.5);
-            await sleep(parseInt(a.step_ms || 20, 10));
+          // OCR R131（M）：a.from/a.to 缺失时裸 .x 裸 TypeError——加守卫
+          if (!a.from || !a.to) { console.error(`[browser_agent] mouse_move 缺 from/to: ${JSON.stringify(a).slice(0, 100)}`); }
+          else {
+            const steps = parseInt(a.steps || 8, 10);
+            const x0 = a.from.x, y0 = a.from.y, x1 = a.to.x, y1 = a.to.y;
+            await page.mouse.move(x0, y0);
+            for (let i = 1; i <= steps; i++) {
+              const _t = i / steps;  // OCR R131（L）：曾遮蔽外层动作类型变量 t
+              const ease = _t * _t * (3 - 2 * _t);
+              await page.mouse.move(x0 + (x1 - x0) * ease, y0 + (y1 - y0) * ease + Math.sin(i * 1.7) * 1.5);
+              await sleep(parseInt(a.step_ms || 20, 10));
+            }
           }
         } else if (t === "drag") {
           // 拖拽：先移动到起点，按下，轨迹移动到终点，松开
-          await page.mouse.move(a.from.x, a.from.y);
-          await page.mouse.down();
-          const steps = parseInt(a.steps || 12, 10);
-          for (let i = 1; i <= steps; i++) {
-            const t = i / steps;
-            await page.mouse.move(a.from.x + (a.to.x - a.from.x) * t,
-              a.from.y + (a.to.y - a.from.y) * t + Math.sin(i * 1.3) * 1.2);
-            await sleep(parseInt(a.step_ms || 15, 10));
+          // OCR R131（M）：同 mouse_move——from/to 缺失时守卫
+          if (!a.from || !a.to) { console.error(`[browser_agent] drag 缺 from/to: ${JSON.stringify(a).slice(0, 100)}`); }
+          else {
+            await page.mouse.move(a.from.x, a.from.y);
+            await page.mouse.down();
+            const steps = parseInt(a.steps || 12, 10);
+            for (let i = 1; i <= steps; i++) {
+              const t = i / steps;
+              await page.mouse.move(a.from.x + (a.to.x - a.from.x) * t,
+                a.from.y + (a.to.y - a.from.y) * t + Math.sin(i * 1.3) * 1.2);
+              await sleep(parseInt(a.step_ms || 15, 10));
+            }
+            await page.mouse.up();
           }
-          await page.mouse.up();
         } else if (t === "click_point") {
           await page.mouse.click(a.x, a.y);
         } else if (t === "evaluate") {
@@ -233,4 +243,5 @@ async function main() {
   }
 }
 
-main();
+// 审查修复（H）：main() 拒绝曾成 unhandledRejection（Node 直接杀进程、result 丢失）
+main().catch((e) => { try { console.error(String((e && e.message) || e)); } catch (_) {} process.exit(1); });

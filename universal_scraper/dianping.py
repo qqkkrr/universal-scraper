@@ -56,10 +56,10 @@ def fetch_search_page(keyword: str, city: int = 2, cookie: str = "",
     req = urllib.request.Request(url, headers=headers)
     try:
         from .core import smart_decode
-        r = opener.open(req, timeout=timeout)
-        html = smart_decode(r.read(500000), {k.lower(): v for k, v in r.headers.items()})
-        final = r.geturl()
-        return {"ok": True, "status": r.status, "final_url": final, "html": html}
+        with opener.open(req, timeout=timeout) as resp:
+            html = smart_decode(resp.read(500000), {k.lower(): v for k, v in resp.headers.items()})
+        final = resp.geturl()
+        return {"ok": True, "status": resp.status, "final_url": final, "html": html}
     except urllib.error.HTTPError as e:
         return {"ok": False, "status": e.code, "final_url": url, "html": "", "error": f"HTTP {e.code}"}
     except Exception as e:
@@ -120,13 +120,22 @@ def run(keyword: str, city: int = 2, cookie: str = "", limit: int = 10,
         elif res.get("status") in (403, 302):
             hint = "（HTTP 403/302：Cookie 失效或 IP 被风控，请换网络/重新复制 Cookie）"
         return {"total": 0, "rows": [], "files": {}, "error": f"抓取失败 {res.get('status')}{hint}"}
-    rows = parse_search_html(res.get("html", ""), limit)
+    try:
+        rows = parse_search_html(res.get("html", ""), limit)
+    except Exception as e:
+        # 审查二轮（M）：解析异常曾逃出 run() 的 error-dict 契约（调用方按
+        # rows 键取数崩 AttributeError）。归一为错误字典
+        return {"total": 0, "rows": [], "files": {},
+                "error": f"页面解析失败（结构可能变化）: {type(e).__name__}: {str(e)[:120]}"}
     if not rows:
         if "shop-list" not in res.get("html", ""):
             return {"total": 0, "rows": [], "files": {},
                     "error": "页面未包含商家列表（可能被重定向到验证/登录页），请检查 Cookie 与网络"}
         return {"total": 0, "rows": [], "files": {}, "error": "解析到 0 家（页面结构可能变化）"}
-    name = out_name or f"dianping_{keyword}_{city}"
+    # R15 修复：关键词可含 / 等路径字符（如"奶茶/咖啡"）——未净化时写文件直接
+    # FileNotFoundError 穿透 run() 的错误字典契约
+    raw_name = out_name or f"dianping_{keyword}_{city}"
+    name = re.sub(r'[\\/:*?"<>|\r\n]+', "_", raw_name).strip() or "dianping_result"
     out_dir = Path("outputs")
     out_dir.mkdir(exist_ok=True)
     fp = out_dir / f"{name}.json"
@@ -137,19 +146,27 @@ def run(keyword: str, city: int = 2, cookie: str = "", limit: int = 10,
         ws = wb.active
         ws.append(list(rows[0].keys()))
         for r in rows:
-            ws.append([r[k] for k in rows[0]])
+            ws.append([r.get(k, "") for k in rows[0]])  # OCR R131：缺键行不再 KeyError
         wb.save(out_dir / f"{name}.xlsx")
-    except Exception:
-        pass
+    except Exception as e:
+        # OCR R131（M）：xlsx 导出失败曾静默——用户以为有 Excel 文件实际没有
+        import sys as _sys
+        print(f"⚠️ xlsx 导出失败（{type(e).__name__}: {str(e)[:80]}）", file=_sys.stderr)
     try:
         import csv
         with open(out_dir / f"{name}.csv", "w", newline="", encoding="utf-8-sig") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
             w.writeheader()
             w.writerows(rows)
-    except Exception:
-        pass
-    files = {"json": f"outputs/{name}.json", "csv": f"outputs/{name}.csv", "xlsx": f"outputs/{name}.xlsx"}
+    except Exception as _e:
+        # OCR R131（M）：与 xlsx 对齐——CSV 导出失败同样出声（此前裸 pass）
+        import sys as _sys
+        print(f"⚠️ csv 导出失败（{type(_e).__name__}: {str(_e)[:80]}）", file=_sys.stderr)
+    # 审查修复（P2，R33）：files 曾无条件列出全部导出——xlsx/csv 写失败时
+    # 调用方拿到不存在的文件路径。只报真实存在的文件
+    files = {ext: f"outputs/{name}.{ext}"
+             for ext in ("json", "csv", "xlsx")
+             if (out_dir / f"{name}.{ext}").exists()}
     return {"total": len(rows), "rows": rows, "files": files, "error": ""}
 
 

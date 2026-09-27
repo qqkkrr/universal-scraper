@@ -72,25 +72,46 @@ class AgentSession:
         else:
             cmd += ["--headless", "1" if headless else "0"]
         env = {**os.environ, "NODE_PATH": npath}
+        # OCR R131（M）：stderr 曾 DEVNULL 全丢——桥崩溃时零线索。收集最近 20 行
+        self._stderr_tail: List[str] = []
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL, text=True, env=env,
+                                     stderr=subprocess.PIPE, text=True, env=env,
                                      bufsize=1)
         self._buf: List[str] = []
+        self._buf_lock = threading.Lock()  # OCR R131（M）：reader/主线程共享缓冲显式互斥
+        if self.proc.stderr:
+            def _drain_err():
+                try:
+                    for ln in self.proc.stderr:
+                        self._stderr_tail.append(ln)
+                        del self._stderr_tail[:-20]
+                except Exception:
+                    pass
+            threading.Thread(target=_drain_err, daemon=True).start()
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
-        # 等 ready（浏览器冷启动可能 1-5 秒，别只看一次）
+        # 等 ready（浏览器冷启动可能 1-5 秒，别只看一次）。
+        # 审查修复（P1，R25）：启动失败曾泄漏 node+Chrome 进程对——包一层
+        # kill 兜底，超时/桥报错都先杀进程再抛
         import time as _t
         _deadline = _t.time() + 60
-        while _t.time() < _deadline:
-            m = self._next(timeout=0.5)
-            if m is None:
-                continue
-            if m.get("type") == "ready":
-                self.log(f"🖥️ 代理浏览器就绪（{m.get('mode','')}）")
-                return
-            if m.get("type") == "error":
-                raise AgentError(m.get("message", "代理浏览器启动失败"))
-        raise AgentError("代理浏览器启动超时（60s）")
+        try:
+            while _t.time() < _deadline:
+                m = self._next(timeout=0.5)
+                if m is None:
+                    continue
+                if m.get("type") == "ready":
+                    self.log(f"🖥️ 代理浏览器就绪（{m.get('mode','')}）")
+                    return
+                if m.get("type") == "error":
+                    raise AgentError(m.get("message", "代理浏览器启动失败"))
+            raise AgentError("代理浏览器启动超时（60s）")
+        except BaseException:
+            try:
+                self.proc.kill()
+            except Exception:
+                pass
+            raise
 
     def _read_loop(self):
         assert self.proc.stdout is not None
@@ -98,17 +119,30 @@ class AgentSession:
             line = line.strip()
             if line:
                 try:
-                    self._buf.append(json.loads(line))
+                    with self._buf_lock:
+                        self._buf.append(json.loads(line))
                 except Exception:
                     pass
 
     def _next(self, timeout: float = 20.0) -> Optional[Dict[str, Any]]:
         import time
         t0 = time.time()
+        _drained = False
         while time.time() - t0 < timeout:
-            if self._buf:
-                return self._buf.pop(0)
-            if self.proc.poll() is not None and not self._buf:
+            with self._buf_lock:
+                _msg = self._buf.pop(0) if self._buf else None
+            if _msg is not None:
+                return _msg
+            if self.proc.poll() is not None:
+                # OCR R131（H）：进程退出瞬间 reader 线程可能还没排干管道——
+                # 此刻 buf 空 ≠ 真没消息。等 reader 结束（有界 2s）再判死刑
+                if not _drained:
+                    self._reader.join(timeout=2.0)
+                    _drained = True
+                    with self._buf_lock:
+                        _msg = self._buf.pop(0) if self._buf else None
+                    if _msg is not None:
+                        return _msg
                 raise AgentError("代理浏览器进程已退出")
             time.sleep(0.1)
         return None
@@ -154,10 +188,20 @@ def _llm(messages: List[Dict[str, str]], timeout: int = 150) -> str:
 
 def _parse_action(raw: str) -> Dict[str, Any]:
     import re
-    mm = re.search(r"\{.*\}", raw or "", re.S)
-    if not mm:
-        raise AgentError("LLM 未返回动作 JSON: " + (raw or "")[:120])
-    d = json.loads(mm.group(0))
+    # OCR R131 二轮（M）：贪婪 \{.*\} 曾吞多个 JSON 块/噪声——与 llm.py 同口径：
+    # 先试最短片段，失败再回退贪婪（嵌套 JSON 保持可提取性）
+    mm = re.search(r"\{.*?\}", raw or "", re.S)
+    d = None
+    if mm:
+        try:
+            d = json.loads(mm.group(0))
+        except Exception:
+            d = None
+    if d is None:
+        mm = re.search(r"\{.*\}", raw or "", re.S)
+        if not mm:
+            raise AgentError("LLM 未返回动作 JSON: " + (raw or "")[:120])
+        d = json.loads(mm.group(0))
     if not isinstance(d, dict) or "action" not in d:
         raise AgentError("动作缺少 action 字段")
     return d
@@ -178,8 +222,20 @@ def _extract_items(description: str, page_text: str, schema: Dict[str, Any],
         {"role": "user", "content": prompt},
     ], timeout=150)
     import re as _re
-    m = _re.search(r"\[.*\]", raw or "", _re.S)
-    arr = json.loads(m.group(0)) if m else []
+    # OCR R131 二轮（M）：同 _parse_action——最短优先、贪婪回退
+    arr = None
+    m = _re.search(r"\[.*?\]", raw or "", _re.S)
+    if m:
+        try:
+            arr = json.loads(m.group(0))
+        except Exception:
+            arr = None
+    if not isinstance(arr, list):
+        m = _re.search(r"\[.*\]", raw or "", _re.S)
+        try:
+            arr = json.loads(m.group(0)) if m else []
+        except Exception:
+            arr = []
     if not isinstance(arr, list):
         return []
     items = [it for it in arr if isinstance(it, dict) and any(str(v or "").strip() for v in it.values())]
@@ -284,7 +340,17 @@ def agent_task(description: str, start_url: str = "", max_steps: int = 12,
                 if not schema:
                     schema = {"标题": "标题", "链接": "链接"}
                 pt = sess.html_text(8000)
-                got = _extract_items(description, pt, schema, history, log)
+                # 审查修复（P1，R25）：LLM 返回坏 JSON/后端超时曾裸抛——已收集
+                # 的 items 全部丢弃。降级为计数失败，攒够 3 次再终止（与决策路径同口径）
+                try:
+                    got = _extract_items(description, pt, schema, history, log)
+                except Exception as e:
+                    failed += 1
+                    log(f"⚠️ LLM 抽取失败（第 {failed} 次）: {e}")
+                    if failed >= 3:
+                        break
+                    history.append(f"抽取失败: {e}")
+                    continue
                 for it in got:
                     it.setdefault("_url", str(snap.get("url") or ""))
                     it.setdefault("_parser", "agent")
@@ -293,7 +359,8 @@ def agent_task(description: str, start_url: str = "", max_steps: int = 12,
                 history.append(f"extract -> {len(got)} 条")
                 continue
             if a == "goto":
-                u = act.get("url", "")
+                # R25 同类修复：LLM 可能返回非字符串 url——先 str 化再判
+                u = str(act.get("url", "") or "")
                 if not u.startswith(("http://", "https://")):
                     history.append("goto: URL 非法，忽略")
                     continue
@@ -366,9 +433,26 @@ def agent_task(description: str, start_url: str = "", max_steps: int = 12,
                 pass
 
 
+_NEED_LOGIN_RE = None  # OCR R131（L）：正则曾每次调用重编译
+
+
+_NEED_LOGIN_RE = None  # OCR R131（L）：正则曾每次调用重编译
+_NEED_LOGIN_RE_LOCK = None
+
+
 def re_need_login(text: str) -> bool:
-    import re
-    return bool(re.search(r"请登录|免费注册|拖动.*滑块|滑块.*验证|安全验证|访问过于频繁|验证码", text or ""))
+    global _NEED_LOGIN_RE, _NEED_LOGIN_RE_LOCK
+    if _NEED_LOGIN_RE is None:
+        # OCR R131 终审（M）：check-then-act 无锁——并发首调用可能重复编译（无害）
+        # 但赋值非原子，理论上可读到半初始化对象。加锁串行化
+        if _NEED_LOGIN_RE_LOCK is None:
+            import threading as _th
+            _NEED_LOGIN_RE_LOCK = _th.Lock()
+        with _NEED_LOGIN_RE_LOCK:
+            if _NEED_LOGIN_RE is None:
+                import re
+                _NEED_LOGIN_RE = re.compile(r"请登录|免费注册|拖动.*滑块|滑块.*验证|安全验证|访问过于频繁|验证码")
+    return bool(_NEED_LOGIN_RE.search(text or ""))
 
 
 def run_agent_cli(description: str, url: str = "", max_steps: int = 12,

@@ -1,0 +1,23 @@
+{
+  "name": "bilibili_video_chain",
+  "_说明": "R34 范例：B站单视频『签名→元数据→弹幕→评论』多步 API 链最小计划。① warm 预热拿 buvid；② view 取元数据与 cid/aid（无需 wbi）；③ list.so 弹幕（deflate XML，无需 wbi）；④ reply 评论（匿名约 3 页后登录墙——如实记录缺口）。断点续跑：同目录重跑，已完成步骤按 save 文件存在跳过语义由调用方判断；每步证据落 --out 目录。",
+  "max_requests": 12,
+  "min_gap": 1.2,
+  "steps": [
+    {"name": "预热拿buvid", "method": "GET", "url": "https://www.bilibili.com/", "save": "warm.html"},
+    {"name": "视频元数据", "method": "GET",
+     "url": "https://api.bilibili.com/x/web-interface/view?bvid=BV1GJ411x7h7",
+     "headers": {"Referer": "https://www.bilibili.com/", "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"},
+     "save": "meta.json", "expect_json": true},
+    {"name": "弹幕XML", "method": "GET",
+     "url": "https://api.bilibili.com/x/v1/dm/list.so?oid=0",
+     "headers": {"Referer": "https://www.bilibili.com/"},
+     "save": "danmaku.xml",
+     "_注": "oid 换成 meta.json 里的 cid；返回 deflate XML"},
+    {"name": "评论第一页", "method": "GET",
+     "url": "https://api.bilibili.com/x/v2/reply?pn=1&type=1&oid=0&ps=20",
+     "headers": {"Referer": "https://www.bilibili.com/"},
+     "save": "comments_p1.json", "expect_json": true,
+     "_注": "匿名约 3 页后登录墙；翻深请登录一次复用 cookie，或改走 us bili（wbi/main 通道）"}
+  ]
+}

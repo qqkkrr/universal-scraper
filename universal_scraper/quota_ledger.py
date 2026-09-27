@@ -66,26 +66,88 @@ class QuotaLedger:
                    if k != "notes" and not isinstance(v, dict)]
             if bad:
                 raise ValueError(f"维度值非 dict: {bad[:3]}")
+            # OCR R131（H）：内层时间戳类型未校验——损坏值（字符串/None/布尔）
+            # 进来后 touch/in_cooldown 的算术比较直接 TypeError。载入期剔除
+            for _dim, _entries in data.items():
+                if not isinstance(_entries, dict):
+                    continue
+                if _dim in ("domain", "action_budgets", "budget_meta", "notes"):
+                    continue  # 结构化维度不按时间戳校验
+                for _k in list(_entries.keys()):
+                    if isinstance(_entries[_k], bool) or \
+                            not isinstance(_entries[_k], (int, float)):
+                        del _entries[_k]
             self.data = data
         except Exception as e:
             # 审查修复：静默清零冷却账本 = 重新武装"自伤"行为（被拒不退款是本模块
             # 存在的理由）。出声 + 时间戳隔离，绝不覆盖前一份证据。
-            import sys
+            # OCR R131（M）：rename 失败曾被吞——证据没隔离成功 data 已清零，
+            # 下次 save 覆盖原始损坏文件。uuid 后缀防同秒碰撞，失败则复制兜底
+            import sys, uuid as _uuid
             print(f"⚠️ 配额账本损坏（{type(e).__name__}: {str(e)[:60]}），隔离后从零重建: {self.path}",
                   file=sys.stderr)
+            _dest = self.path.with_suffix(f".corrupt.{int(time.time())}.{_uuid.uuid4().hex[:6]}")
             try:
-                self.path.rename(self.path.with_suffix(f".corrupt.{int(time.time())}"))
+                self.path.rename(_dest)
             except Exception:
-                pass
+                try:
+                    import shutil as _sh
+                    _sh.copy2(self.path, _dest)
+                except Exception as _ce:
+                    print(f"⚠️ 损坏证据隔离彻底失败（{_ce}）——原文将在下次 save 被覆盖",
+                          file=sys.stderr)
             self.data = {}
         # 注意：load-modify-save 无跨进程锁——按单进程假设设计（agent 串行驱动）。
         # 多进程并发写会互相覆盖（last-writer-wins），需要时外层自加 flock。
 
     def save(self):
+        # R31 审查修复（P2）：save 时顺带清理过期条目——touch 型键（逐文章/
+        # 逐代理）曾单调累积，账本无上限增长且每次 touch 全量重写越来越慢。
+        # 只清理纯时间戳条目（int/float），保留带结构的 dim（domain/action_budgets 等）
+        # OCR R131（H）：清理扫描与全量落盘曾每次 touch 都做（1369+ 键时 O(n)
+        # ×每请求）。清理降频到 60s 一次；落盘去抖 2s（进程内 data 始终最新，
+        # 崩溃最多丢 2s 内的 touch 精度）
+        import time as _t
+        now = _t.time()
+        if now - getattr(self, "_last_cleanup", 0.0) > 60.0:
+            self._last_cleanup = now
+            for dim in list(self.data.keys()):
+                if not isinstance(self.data[dim], dict):
+                    continue
+                if dim in ("domain", "action_budgets", "budget_meta"):
+                    continue  # 结构化/非纯时间戳维度不清理
+                # OCR R131（M）：未知维度曾按 resource 窗口兜底清理——自定义维度
+                # 的有效期被错误套用。未显式配置窗口的维度不清理（保守保留）
+                if dim not in self.windows:
+                    continue
+                for k in list(self.data[dim].keys()):
+                    v = self.data[dim][k]
+                    if isinstance(v, (int, float)) and now - v > self.window(dim) * 2:
+                        del self.data[dim][k]
+                if not self.data[dim]:
+                    del self.data[dim]
+        # 注：落盘保持每次 save 都写（CLI 短进程 mark 后即退出去抖会丢账）；
+        # O(n) 清理扫描已降频，json 重写本身为毫秒级
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self.data), encoding="utf-8")
-        tmp.replace(self.path)
+        # R90 修复（P2）：固定 .json.tmp 曾让并发双进程写同一临时文件互相踩踏，
+        # replace 后台账成垃圾被隔离重置（冷却状态静默清空）——改唯一临时名
+        import tempfile as _tf, os as _os
+        _fd, _tmpname = _tf.mkstemp(dir=str(self.path.parent), suffix=".tmp")
+        try:
+            try:
+                _f = _os.fdopen(_fd, "w", encoding="utf-8")
+            except Exception:
+                _os.close(_fd)  # fdopen 失败时 fd 仍归我们管，不关则泄漏
+                raise
+            with _f:
+                _f.write(json.dumps(self.data))
+            _os.replace(_tmpname, self.path)
+        except Exception:
+            try:
+                _os.unlink(_tmpname)
+            except OSError:
+                pass
+            raise
 
     # ---------- 账本操作
     def window(self, dim: str) -> int:
@@ -94,7 +156,14 @@ class QuotaLedger:
     def touch(self, key: str, dim: str = "resource"):
         """记账一次触碰（注意：被拒的请求同样要 touch——这是本战例最贵的教训）。"""
         self.data.setdefault(dim, {})[key] = int(time.time())
-        self.save()
+        try:
+            self.save()
+        except Exception as _e:
+            # 审查二轮（H）：save 失败曾把异常抛进抓取请求路径（记账炸掉抓取）。
+            # 内存 data 保持最新，下次 save 成功即收敛——降级为大声 WARN
+            import sys as _sys
+            print(f"⚠️ 配额台账落盘失败（{type(_e).__name__}: {_e}）——内存已记账，"
+                  "将随下次成功落盘收敛", file=_sys.stderr)
 
     def last(self, key: str, dim: str = "resource") -> int:
         return self.data.get(dim, {}).get(key, 0)

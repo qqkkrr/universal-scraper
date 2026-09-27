@@ -20,7 +20,6 @@ for (const _c of _cands) {
 }
 if (!chromium) throw new Error("找不到 playwright/patchright");
 const fs = require("node:fs");
-// (fs unused)
 
 const os = require("node:os");
 const HOME = process.env.HOME || os.homedir() || "/tmp";
@@ -186,11 +185,21 @@ async function main() {
   const settleMs = parseInt(args.settle || "1200", 10);
   const deadlineMs = parseInt(args.deadlineMs || "360000", 10);
   const deadline = Date.now() + deadlineMs;
+  // R98 修复（P2）：硬退出兜底（tactic/zszc 同款）——await 卡死时循环内检查
+  // 永远走不到，进程会无限挂起
+  const _hardExit = setTimeout(() => {
+    process.stderr.write("[ggzy_bridge] deadline+5s 强制退出（有 await 卡死）\n");
+    process.exit(2);
+  }, deadlineMs + 5000);
+  _hardExit.unref();
   const captchaOut = args.captchaOut || null;
   const captchaDir = args.captchaDir || null;
   const captchaTimeout = parseInt(args.captchaTimeout || "300000", 10);
 
   let browser = null;
+  // 审查修复（P1）：try 内 10 处 process.exit 曾全部绕过 finally 的
+  // browser.close() → 高频路径（验证码/超时）泄漏无头 Chrome。改 flag+return
+  let exitCode = null;
   try {
     if (captchaDir) fs.mkdirSync(captchaDir, { recursive: true });
     browser = await chromium.launch({ headless: true, executablePath: EXE, args: ["--no-sandbox", "--ignore-certificate-errors"] });
@@ -219,11 +228,13 @@ async function main() {
       await sleep(5000);
       vm = await getVue(page);
     }
-    if (!vm) { out({ type: "error", message: "无法获取页面 Vue 实例（WAF 拦截页，重试3次后仍失败）" }); process.exit(1); }
+    if (!vm) { out({ type: "error", message: "无法获取页面 Vue 实例（WAF 拦截页，重试3次后仍失败）" }); exitCode = 1; return; }
 
     // 设置查询条件
     await page.evaluate(({ keyword, begin, end, stage }) => {
-      const vm = document.querySelector("#app").__vue__;
+      const _app = document.querySelector("#app");
+      if (!_app || !_app.__vue__) return;  // OCR R131（M）：#app 未挂载时曾裸炸
+      const vm = _app.__vue__;
       if (keyword) vm.myFindTxt = keyword;
       if (begin) vm.timeBegin = begin;
       if (end) vm.timeEnd = end;
@@ -233,13 +244,13 @@ async function main() {
     // 请求第 1 页，拿到总数/总页数
     let first = await getListWithRetry(page, 1, () => lastApi, 6, deadline);
     if (first.captcha) {
-      if (!captchaDir) { out({ type: "captcha", message: "第 1 页触发验证码（未配置 captchaDir，无法自动解）" }); process.exit(0); }
+      if (!captchaDir) { out({ type: "captcha", message: "第 1 页触发验证码（未配置 captchaDir，无法自动解）" }); exitCode = 0; return; }
       const solved = await solveCaptchaAndRetry(page, 1, captchaDir, captchaTimeout);
-      if (!solved) { out({ type: "error", message: "验证码未能解出，已放弃" }); process.exit(1); }
+      if (!solved) { out({ type: "error", message: "验证码未能解出，已放弃" }); exitCode = 1; return; }
       first = await getListWithRetry(page, 1, () => lastApi, 6, deadline);
-      if (first.captcha) { out({ type: "captcha", message: "第 1 页仍触发验证码" }); process.exit(0); }
+      if (first.captcha) { out({ type: "captcha", message: "第 1 页仍触发验证码" }); exitCode = 0; return; }
     }
-    if (!first.ok) { out({ type: "error", message: "第 1 页等待超时" }); process.exit(1); }
+    if (!first.ok) { out({ type: "error", message: "第 1 页等待超时" }); exitCode = 1; return; }
 
     const meta = await page.evaluate(() => { const v = document.querySelector("#app").__vue__; return { total: v.ttlrow, pages: v.ttlpage, current: v.currentPage }; });
     out({ type: "meta", total: meta.total, pages: meta.pages });
@@ -248,29 +259,34 @@ async function main() {
     for (let p = 1; p <= pages; p++) {
       if (deadline > 0 && Date.now() > deadline) {
         out({ type: "error", message: `整体时限到期（${deadlineMs / 1000}s），已抓 ${p - 1} 页` });
-        process.exit(0);
+        exitCode = 0; return;
       }
       if (p > 1) {
         await sleep(settleMs);
         let st = await getListWithRetry(page, p, () => lastApi, 6, deadline);
         if (st.captcha) {
-          if (!captchaDir) { out({ type: "captcha", message: `第 ${p} 页触发验证码` }); process.exit(0); }
+          if (!captchaDir) { out({ type: "captcha", message: `第 ${p} 页触发验证码` }); exitCode = 0; return; }
           const solved = await solveCaptchaAndRetry(page, p, captchaDir, captchaTimeout);
-          if (!solved) { out({ type: "error", message: `第 ${p} 页验证码未解出` }); process.exit(1); }
+          if (!solved) { out({ type: "error", message: `第 ${p} 页验证码未解出` }); exitCode = 1; return; }
           st = await getListWithRetry(page, p, () => lastApi, 6, deadline);
         }
-        if (!st.ok) { out({ type: "error", message: `第 ${p} 页等待超时` }); process.exit(1); }
+        if (!st.ok) { out({ type: "error", message: `第 ${p} 页等待超时` }); exitCode = 1; return; }
       }
-      const records = await page.evaluate(() => document.querySelector("#app").__vue__.records || []);
+      const records = await page.evaluate(() => { const _a = document.querySelector("#app"); return (_a && _a.__vue__ && _a.__vue__.records) || []; });
       out({ type: "page", page: p, count: records.length, records });
     }
     out({ type: "done", total: meta.total, fetchedPages: pages });
   } catch (e) {
     out({ type: "error", message: String(e && e.message || e) });
-    process.exit(1);
+    exitCode = 1;
+    return;
   } finally {
-    if (browser) await browser.close();
+    // R27 修复：close 曾无 .catch——浏览器崩溃后 close 拒绝会让已抓完的记录
+    // 因 rc≠0 被 Python 侧 BridgeFetcher 整批丢弃
+    if (browser) await browser.close().catch(() => {});
+    if (exitCode !== null) process.exit(exitCode);
   }
 }
 
-main();
+// 审查修复（P1）：main() 拒绝曾成 unhandledRejection（rc≠0 且无输出）
+main().catch((e) => { try { console.error(String((e && e.message) || e)); } catch (_) {} process.exit(1); });

@@ -13,7 +13,7 @@ def test_tilde_output_dir_expands(tmp_path, monkeypatch):
     """版权中心战例：~/Desktop 写法曾建出名为 '~' 的字面目录。"""
     monkeypatch.chdir(tmp_path)
     from universal_scraper.engine import run_config as _  # noqa
-    src = Path("/Users/kairanqin/.agents/skills/universal-scraper/universal_scraper/engine.py").read_text(encoding="utf-8")
+    src = Path(__file__).resolve().parents[1] / "universal_scraper" / "engine.py".read_text(encoding="utf-8")
     assert "expanduser" in src, "output.dir 必须过 expanduser"
     # 行为验证：构造小配置跑 export 路径太重，直接断言解析函数行为
     import os
@@ -33,7 +33,7 @@ def test_jsrecon_rejects_unresolvable():
 
 
 def test_recon_mode_flag_in_doc():
-    p = Path("/Users/kairanqin/.agents/skills/universal-scraper/references/spec-schema.md")
+    p = Path(__file__).resolve().parents[1] / "references" / "spec-schema.md"
     assert "recon" in p.read_text(encoding="utf-8")
 
 
@@ -44,6 +44,6 @@ def test_validate_missing_name_suggests_scaffold():
 
 
 def test_capture_schema_documented():
-    p = Path("/Users/kairanqin/.agents/skills/universal-scraper/references/spec-schema.md")
+    p = Path(__file__).resolve().parents[1] / "references" / "spec-schema.md"
     t = p.read_text(encoding="utf-8")
     assert "post_data" in t and "request_content_type" in t, "capture_all.json 结构必须文档化"

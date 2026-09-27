@@ -327,7 +327,10 @@ def parse_dangdang_search(html: str, url: str = "") -> List[Dict[str, Any]]:
     # 优先含 ISBN 的卡片；搜索页不显示 ISBN 时回退首个商品
     q = parse_qs(urlparse(url or "").query)
     isbn = norm_isbn((q.get("key") or [""])[0])
-    exact = [c for c in cards if isbn and isbn in clean_text(c.text_content())]
+    # ISBN 须为独立数字串（两侧非数字）——裸子串会命中更长数字串（价格/数量拼接）误选卡片
+    exact = [c for c in cards
+             if isbn and re.search(r"(?<!\d)" + re.escape(isbn) + r"(?!\d)",
+                                   clean_text(c.text_content()))]
     for card in (exact or cards):
         links = card.cssselect("a[href*='product.dangdang.com'], a[href*='product.dangdang.com.cn']")
         if not links:
@@ -377,8 +380,7 @@ _IMAGE_MAGIC = (
     (b"\x89PNG\r\n\x1a\n", "png"),
     (b"GIF87a", "gif"),
     (b"GIF89a", "gif"),
-    (b"RIFF", "webp"),
-)
+)  # webp 走下方 RIFF????WEBP 双重校验（OCR R131：裸 RIFF 误纳 wav/avi）
 
 
 def _looks_like_image(path: Path) -> bool:
@@ -386,19 +388,44 @@ def _looks_like_image(path: Path) -> bool:
         head = path.read_bytes()[:16]
     except Exception:
         return False
-    return any(head.startswith(magic) for magic, _name in _IMAGE_MAGIC)
+    return any(head.startswith(magic) for magic, _name in _IMAGE_MAGIC) or (
+        # OCR R131（M）：裸 RIFF 前缀匹配一切 RIFF 容器（wav/avi 也命中）——
+        # webp 必须 RIFF????WEBP 双重校验
+        head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    )
 
 
 def _default_download_cover(url: str, path: Path) -> bool:
     if path.exists() and path.stat().st_size > 100 and _looks_like_image(path):
         return True
+    # OCR R131（H）：封面 URL 来自抓取页面——file:// 等协议经 curl 可读本地文件
+    # 并落进封面目录。仅放行 http/https（与全局 SSRF 口径一致）
+    from urllib.parse import urlsplit as _us
+    if _us(url or "").scheme not in ("http", "https"):
+        return False
+    # OCR R7（M）：curl 超时/--max-filesize 中断曾把半截文件直接写在 path 上——
+    # 魔数在前 16 字节，截断 JPEG 照样通过下轮缓存检查且永不重下。改写临时文件，
+    # 完整下载才原子替换，失败即清理
+    import os as _os
+    tmp = path.with_name(f"{path.name}.{_os.getpid()}.tmp")
     p = subprocess.run(
         ["curl", "-sS", "-L", "-A", "Mozilla/5.0", "-e", "https://book.douban.com/",
-         "--max-time", "30", "-o", str(path), url],
+         # 审查二轮（H）：-L 跟随曾不限协议（http→file/ftp 可读写本地）；
+         # --max-filesize 防异常大响应撑爆磁盘
+         "--proto", "=http,https", "--max-filesize", "52428800",
+         "--max-time", "30", "-o", str(tmp), url],
         capture_output=True, text=True,
     )
-    return (p.returncode == 0 and path.exists() and path.stat().st_size > 100
-            and _looks_like_image(path))
+    ok = (p.returncode == 0 and tmp.exists() and tmp.stat().st_size > 100
+          and _looks_like_image(tmp))
+    if ok:
+        _os.replace(tmp, path)
+        return True
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+    return False
 
 
 def _search_candidate(items: List[Dict[str, Any]], isbn: str, title: str) -> Optional[Dict[str, Any]]:
@@ -817,11 +844,16 @@ def _write_outputs(
         "| 序号 | 书名 | 出版社 | 出版年 | 评分 | 评价人数 | 京东价 | 当当价 | 状态 |",
         "| ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
+
+    def _cell(v) -> str:
+        # OCR R131（M）：书名/出版社含 "|" 或换行时曾撕裂 Markdown 表格结构
+        return str(v).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
     for r in rows:
         md_lines.append(
-            f"| {r['no']} | {r['book_title']} | {r['publisher']} | {r['publish_year']} | "
-            f"{r['douban_rating']} | {r['douban_rating_count']} | {r['jd_price']} | "
-            f"{r['dangdang_price']} | {r['status']} |"
+            f"| {_cell(r['no'])} | {_cell(r['book_title'])} | {_cell(r['publisher'])} | {_cell(r['publish_year'])} | "
+            f"{_cell(r['douban_rating'])} | {_cell(r['douban_rating_count'])} | {_cell(r['jd_price'])} | "
+            f"{_cell(r['dangdang_price'])} | {_cell(r['status'])} |"
         )
     md_lines += [
         "",
@@ -847,7 +879,9 @@ def _write_outputs(
         "| --- | --- | --- |",
     ]
     for r in rows:
-        log_lines.append(f"| {r['isbn']} | {r['status']} | {r['diagnostics']} |")
+        # OCR R131（M）：诊断文本里的 | 破坏 Markdown 表格列对齐——转义
+        _diag = str(r.get("diagnostics", "")).replace("|", "\\|")
+        log_lines.append(f"| {r['isbn']} | {r['status']} | {_diag} |")
     log_lines += [
         "",
         "## 字段级诊断",

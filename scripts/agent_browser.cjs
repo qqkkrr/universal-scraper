@@ -27,20 +27,49 @@ const nps = (process.env.NODE_PATH || "").split(":").filter(Boolean);
 const cands = nps.map(p => path.join(p, "playwright")).concat(["patchright", "playwright"]);
 let chromium = null;
 for (const c of cands) { try { chromium = require(c).chromium; break; } catch(e){} }
+if (!chromium) throw new Error("找不到 playwright/patchright");
+
 const out = (obj) => console.log(JSON.stringify(obj));
-if (!chromium) {
-  // 夜间强化：加载期失败走 JSON 错误协议（裸栈会让 Python 侧拿不到可诊断信息）
-  out({ type: "error", message: "找不到 playwright/patchright——浏览器方案不可用。修复: bash scripts/setup.sh（HTTP 直抓路线不受影响）" });
-  process.exit(1);
-}
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const EXE = process.env.PW_EXECUTABLE || "/Users/kairanqin/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell";
+// 审查修复（H）：硬编码单机用户路径换机器即坏。优先环境变量 → 标准缓存布局
+// （按平台）→ 兜底旧路径仅在存在时使用
+const _nodePathMod = require("path");
+const _fsMod = require("fs");
+function _resolve_exe() {
+  const env = process.env.PW_EXECUTABLE || process.env.CHROMIUM_EXE;
+  if (env) return env;
+  const home = process.env.HOME || "";
+  const cands = [
+    _nodePathMod.join(home, "Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    _nodePathMod.join(home, ".cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell"),
+  ];
+  for (const c of cands) { try { if (_fsMod.existsSync(c)) return c; } catch (e) {} }
+  // 兜底：探测本机 playwright 缓存（macOS 默认位置，仅在存在时使用）
+  try {
+    const _pathMod = require("path");
+    const cacheRoot = _nodePathMod.join(home, "Library", "Caches", "ms-playwright");
+    if (_fsMod.existsSync(cacheRoot)) {
+      for (const dir of _fsMod.readdirSync(cacheRoot)) {
+        if (!dir.startsWith("chromium_headless_shell")) continue;
+        const cand = _pathMod.join(cacheRoot, dir, "chrome-headless-shell-mac-arm64", "chrome-headless-shell");
+        if (_fsMod.existsSync(cand)) return cand;
+      }
+    }
+  } catch (e) {}
+  return "";  // 未命中：调用方 launch 会报可诊断错误
+}
+const EXE = _resolve_exe();
 
 function parseArgs(argv) {
   const a = {};
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
-    if (k.startsWith("--")) a[k.slice(2)] = argv[i + 1];
+    if (k.startsWith("--")) {
+      // 审查修复（M）：旗标无值/下一项也是旗标时曾吞掉后续键。布尔旗标置 "1"
+      const v = argv[i + 1];
+      if (i + 1 < argv.length && v !== undefined && !v.startsWith("--")) { a[k.slice(2)] = v; i++; }
+      else a[k.slice(2)] = "1";
+    }
   }
   return a;
 }
@@ -226,15 +255,28 @@ async function main() {
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   // 串行队列：指令必须一个一个执行（并发会导致 close 抢先关闭浏览器）
   let chain = Promise.resolve();
+  let queued = 0;  // OCR R131（H）：chain 无上界——Python 侧停止发指令但桥还在
+                   // 慢慢执行时队列无限堆积。超 64 条即拒绝新指令（提示忙）
   rl.on("line", (line) => {
     line = line.trim();
     if (!line) return;
+    if (queued >= 64) {
+      out({ type: "error", message: "指令队列已满（64）——请等待既有指令完成或重启桥" });
+      return;
+    }
+    queued++;
     chain = chain.then(async () => {
+      queued--;
       let op = {};
       try { op = JSON.parse(line); } catch (e) { out({ type: "error", message: "指令非 JSON" }); return; }
       try {
         const r = await handle(op);
-        if (op.op === "close") { process.exit(0); }
+        if (op.op === "close") {
+          // R27 修复：先吐结果再退出——此前直接 exit(0)，Python 侧 close()
+          // 等 5 秒超时后只能 SIGKILL（优雅清理路径成死代码）
+          out({ type: "result", op: "close", ...r });
+          process.exit(0);
+        }
         out({ type: "result", op: op.op, ...r });
       } catch (e) {
         out({ type: "error", op: op.op, message: String(e && e.message || e).slice(0, 300) });

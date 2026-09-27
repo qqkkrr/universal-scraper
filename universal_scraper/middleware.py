@@ -27,7 +27,7 @@ class MiddlewareChain:
                 func = getattr(importlib.import_module(mod), fn)
                 self._handlers[on].append(func)
             except Exception as e:
-                raise ValueError(f"中间件导入失败 {action}: {e}")
+                raise ValueError(f"中间件导入失败 {action}: {e}") from e
         elif callable(action):
             self._handlers[on].append(action)
         else:
@@ -44,5 +44,10 @@ class MiddlewareChain:
             try:
                 h(ctx)
             except Exception as e:
+                # OCR R131（M）：logger 未注入时曾完全静默——stderr 兜底保可见
                 if self.logger:
-                    self.logger.warn(f"中间件 {on} 出错: {e}")
+                    self.logger.warning(f"中间件 {on} 出错: {e}")
+                else:
+                    import sys as _sys
+                    print(f"⚠️ 中间件 {on} 出错（{getattr(h, '__name__', h)}）: "
+                          f"{type(e).__name__}: {e}", file=_sys.stderr)

@@ -46,6 +46,17 @@ const ITEM_CSS = ARGS.item_css || ".sch-item";
 const HREF_REGEX = ARGS.href_regex || "";
 const MAX = parseInt(ARGS.max || "0", 10) || 500;
 const SETTLE = parseInt(ARGS.settle || "800", 10);
+// R27 修复：自加 deadline（Python 侧 run_bridge 现以 deadlineMs 传入；缺省 6 分钟）
+// ——此前渲染器卡死/WAF 忙循环会让 page.evaluate 永久挂起，Python 在 stdout 上无
+// 限等待。硬退出定时器兜底一切卡死的 await；循环内检查让长点击链提前收尾。
+const DEADLINE_MS = parseInt(ARGS.deadlineMs || "360000", 10) || 360000;
+const _DEADLINE_AT = Date.now() + DEADLINE_MS;
+const _hardExit = setTimeout(() => {
+  log("deadline 到，强制退出（有 await 卡死）");
+  process.exit(2);
+}, DEADLINE_MS + 5000);
+_hardExit.unref();
+function pastDeadline() { return Date.now() > _DEADLINE_AT; }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function emit(obj) { process.stdout.write(JSON.stringify(obj) + "\n"); }
@@ -54,6 +65,8 @@ function log(msg) { process.stderr.write("[tactic_bridge] " + msg + "\n"); }
 async function goto(page, url) {
   const r = await page.goto(url, { timeout: 60000, waitUntil: "domcontentloaded" })
     .catch(e => { log("goto warn: " + String(e.message).slice(0, 100)); return null; });
+  // OCR R131（L）：goto 失败仍滚动/等待 SETTLE——对空白页白耗 ~4s。失败时跳过
+  if (!r) return null;
   await sleep(SETTLE);
   for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 1500).catch(() => {}); await sleep(250); }
   return r;
@@ -131,15 +144,19 @@ async function detect(page) {
       const seen = new Set();
       let seq = 0;
       for (let i = 0; i < items.length && results.length < MAX; i++) {
+        if (pastDeadline()) { log("deadline 到，提前结束点击链"); break; }
         // 只认“本次点击后新增”的页面，避免跨轮错位
         const before = ctx.pages().map(p => p);
         try { await items[i].dispatchEvent("click", { bubbles: true }).catch(() => {}); } catch (e) { /* 忽略 */ }
-        await sleep(320);
+        // 审查修复（H）：固定 320ms 后单查一次 + 死代码二段 sleep 曾漏采慢弹窗。
+        // 改轮询：最多 800ms，发现新页立即处理
         let popupUrl = null;
-        for (const p of ctx.pages()) {
-          if (!before.includes(p)) { popupUrl = p.url(); p.close().catch(() => {}); break; }
+        for (let _w = 0; _w < 8 && !popupUrl; _w++) {
+          await sleep(100);
+          for (const p of ctx.pages()) {
+            if (!before.includes(p)) { popupUrl = p.url(); p.close().catch(() => {}); break; }
+          }
         }
-        if (!popupUrl) await sleep(320);
         if (popupUrl && !seen.has(popupUrl)) {
           seen.add(popupUrl);
           const txt = await items[i].innerText().catch(() => "");

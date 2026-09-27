@@ -44,10 +44,23 @@ def run_browser(url: str,
            "--cookies", "1" if cookies else "0",
            "--html", "1" if html else "0",
            "--timeout", str(timeout_ms)]
+    # OCR R131（M）：超大 JSON 走 argv 会撞 OS 参数上限（macOS ~256KB）——
+    # 撞上时是晦涩的 E2BIG OSError。提前检查并给出可操作的报错
+    _ARGV_SAFE = 128 * 1024
     if actions:
-        cmd += ["--actions", json.dumps(actions, ensure_ascii=False)]
+        _a = json.dumps(actions, ensure_ascii=False)
+        _an = len(_a.encode("utf-8"))  # 按 UTF-8 字节数计（argv 上限是字节不是字符）
+        if _an > _ARGV_SAFE:
+            raise BrowserAgentError(f"actions 过大（{_an}B > {_ARGV_SAFE}B）——超出命令行"
+                                    "参数安全上限，请精简动作列表")
+        cmd += ["--actions", _a]
     if extract:
-        cmd += ["--extract", json.dumps(extract, ensure_ascii=False)]
+        _x = json.dumps(extract, ensure_ascii=False)
+        _xn = len(_x.encode("utf-8"))
+        if _xn > _ARGV_SAFE:
+            raise BrowserAgentError(f"extract 过大（{_xn}B > {_ARGV_SAFE}B）——超出命令行"
+                                    "参数安全上限，请精简提取规则")
+        cmd += ["--extract", _x]
     if viewport:
         cmd += ["--viewport", json.dumps(viewport)]
     if ua:
@@ -55,7 +68,8 @@ def run_browser(url: str,
     if geo:
         cmd += ["--geo", json.dumps(geo)]
     env = dict(os.environ)
-    env["NODE_PATH"] = NODE_PATH
+    if NODE_PATH:  # 解析失败为空串时不清空用户已有 NODE_PATH（否则桥内模块解析反而被破坏）
+        env["NODE_PATH"] = NODE_PATH
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                               timeout=timeout_ms // 1000 + 30, env=env)
@@ -74,17 +88,22 @@ def run_browser(url: str,
             return obj
         last = obj
     err = (proc.stderr or "").strip().splitlines()
-    raise BrowserAgentError(f"浏览器执行失败: {last or err[-1] if err else '无输出'}")
+    # R44 修复：三元表达式优先级曾把 last 丢掉（err 为空时误报"无输出"）
+    raise BrowserAgentError(f"浏览器执行失败: {last or (err[-1] if err else '无输出')}")
 
 
 def solve_slider(url: str, track_sel: str = "#track", slider_sel: str = "#slider",
                  gap_sel: str = "#gap", wait_ms: int = 600) -> Dict[str, Any]:
     """通用滑块拖拽：读 DOM 上轨道/滑块/缺口几何，计算位移并带轨迹拖拽。"""
+    # OCR R131（H）：选择器曾直接内插进 JS 单引号串——含 '/; 注入字符的选择器
+    # 可执行任意 JS。转义后经 JSON 注入（JSON 字符串语法天然安全）
+    def _jsq(sel: str) -> str:
+        return json.dumps(str(sel))
     info = run_browser(url, actions=[{"type": "wait", "ms": wait_ms}], extract=[
         {"name": "track", "js": f"""(() => {{
-          const t = document.querySelector('{track_sel}');
-          const s = document.querySelector('{slider_sel}');
-          const g = document.querySelector('{gap_sel}');
+          const t = document.querySelector({_jsq(track_sel)});
+          const s = document.querySelector({_jsq(slider_sel)});
+          const g = document.querySelector({_jsq(gap_sel)});
           if (!t || !s || !g) return null;
           const tr = t.getBoundingClientRect(), sr = s.getBoundingClientRect(), gr = g.getBoundingClientRect();
           return {{tx: tr.x, ty: tr.y, sx: sr.x, sy: sr.y, gx: gr.x, gw: gr.width, sw: s.offsetWidth}};
@@ -92,13 +111,19 @@ def solve_slider(url: str, track_sel: str = "#track", slider_sel: str = "#slider
         {"name": "title", "js": "document.title"},
         {"name": "result", "css": "#result"},
     ], wait_ms=wait_ms)
-    geo = info["extracted"].get("track")
+    geo = (info.get("extracted") or {}).get("track")
     if not geo:
         raise BrowserAgentError("未找到滑块元素")
     g = json.loads(geo) if isinstance(geo, str) else geo
-    from_x = g["sx"] + g.get("sw", 40) / 2
-    from_y = g["sy"] + 20
-    to_x = g["gx"] + g["gw"] / 2
+    if not isinstance(g, dict):  # OCR R131（M）：桥返回非 dict 时下方键访问裸 KeyError
+        raise BrowserAgentError(f"滑块几何数据结构异常: {str(g)[:80]}")
+    # OCR R131（M）：键缺失同样裸 KeyError——归一成带字段名的 BrowserAgentError
+    try:
+        from_x = g["sx"] + g.get("sw", 40) / 2
+        from_y = g["sy"] + 20
+        to_x = g["gx"] + g["gw"] / 2
+    except KeyError as _k:
+        raise BrowserAgentError(f"滑块几何数据缺字段: {_k}") from _k
     # 目标位置 = 缺口中心 - 滑块中心 + 微调（保证命中）
     dx = to_x - from_x + 2
     res = run_browser(url, actions=[

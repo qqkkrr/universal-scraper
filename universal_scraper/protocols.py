@@ -19,6 +19,18 @@ from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------- 数据对象
 
+def _key_extra(params: Any) -> str:
+    """params 的键后缀（排序序列化）。独立成函数：queue.mark_seen 与 Request.key
+    必须共用同一实现，否则 resume 注入键与新请求键口径漂移（审查二轮 H）。"""
+    if not params:
+        return ""
+    try:
+        import json as _json
+        return "|" + _json.dumps(params, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return "|" + str(params)
+
+
 @dataclass
 class Request:
     url: str
@@ -31,11 +43,14 @@ class Request:
 
     def key(self) -> str:
         # 分页请求（meta.params）与普通请求区分，避免同 URL 下一页被去重
-        extra = ""
-        if self.meta.get("params"):
-            import json as _json
-            extra = "|" + _json.dumps(self.meta["params"], sort_keys=True, ensure_ascii=False)
-        return f"{self.method}|{self.url}{extra}"
+        extra = _key_extra(self.meta.get("params"))
+        # OCR R131 二轮（H）：body 曾不参与键——POST 同 URL 不同体（翻页体/
+        # 查询体）被误判重复直接丢弃（数据丢失级）。排序保证同体不同序同键
+        if self.body:
+            extra += _key_extra(self.body)
+        # 审查五轮（LOW）：method 统一大写——mark_seen 侧已 .upper()，此处不同
+        # 大写会让小写 method 的 resume 注入键永不命中（两端必须真正同构）
+        return f"{self.method.upper()}|{self.url}{extra}"
 
 
 @dataclass
@@ -169,3 +184,18 @@ class RateLimitedError(RuntimeError):
         if detail:
             _msg += f" | {detail}"
         super().__init__(_msg)
+
+
+class BlockDetectedError(RuntimeError):
+    """判定已被站点封禁/风控拦截（200 状态伪装的封禁页也算）。
+
+    裁判文书网战训（2026-09 DeepSeek 考核）：93 字符封禁页被判成
+    "页面太短→已下架"，继续抓了 1.3 万条全是封禁提示页。此类命中必须
+    硬停机——宁可不写，也不能把封禁页写进数据。与 RateLimitedError
+    （限流可冷却重试）语义不同：本异常 = 立即停止采集并落证据。"""
+
+    def __init__(self, url: str = "", kind: str = "", detail: str = ""):
+        self.url = url
+        self.kind = kind or "blocked"
+        self.detail = detail
+        super().__init__(f"检测到封禁/风控拦截[{self.kind}]: {url} | {detail}")

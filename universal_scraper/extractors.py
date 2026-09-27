@@ -7,7 +7,7 @@ import re
 import threading
 from urllib.parse import urljoin
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 def _doc(html_text: str):
@@ -54,11 +54,16 @@ def extract_tables(html_text: str) -> List[List[Dict[str, str]]]:
     for tbl in doc.xpath("//table"):
         rows = []
         header = []
-        for tr in tbl.xpath(".//tr"):
-            cells = [re.sub(r"\s+", " ", (c.text_content() or "")).strip() for c in tr.xpath(".//th | .//td")]
+        # OCR R131（H）：.//tr/.//th 曾取到嵌套子表（descendant 轴）——外层表的
+        # 行被内层表污染、子表行被误判表头。child 轴只取直接属性行（tbody 两种布局）
+        # OCR R131 二轮（H）：thead 布局（<table><thead><tr>）的表头行曾整组漏掉
+        for tr in tbl.xpath("./thead/tr | ./tbody/tr | ./tr"):
+            cells = [re.sub(r"\s+", " ", (c.text_content() or "")).strip() for c in tr.xpath("./th | ./td")]
             if not cells:
                 continue
-            if tr.xpath(".//th"):
+            # 全 <th> 行才算表头：<th scope="row"> 数据行（每行首列 th）曾把
+            # 表头反复覆盖、整表 0 数据行（审查七轮 N28）
+            if tr.xpath("./th") and not tr.xpath("./td"):
                 header = cells
                 continue
             if header:
@@ -100,7 +105,14 @@ def _inline_md(el) -> str:
     if tag in ("em", "i"):
         return "*" + _inline_md_children(el).strip() + "*"
     if tag == "code":
-        code = (el.text or "").strip()
+        # R118 修复：el.text 只取直接文本节点——含子元素时用 text_content
+        # OCR R131（M）：内容含反引号时曾提前终止 code span。
+        # 审查三轮（H）：反斜杠转义在 CommonMark 无效——改双反引号包裹
+        # （首尾同时是 ` 时按规范补空格分隔）
+        code = (el.text_content() or "").strip()
+        if "`" in code:
+            pad = " " if (code.startswith("`") or code.endswith("`")) else ""
+            return f"``{pad}{code}{pad}``"
         return f"`{code}`" if code else ""
     if tag == "del":
         return "~~" + _inline_md_children(el).strip() + "~~"
@@ -155,7 +167,8 @@ def _table_md(el) -> list:
     header = None
     rows = []
     seen = set()
-    for tr in el.xpath(".//tr"):
+    # OCR R131（H）：.//tr 曾取到嵌套子表——与 extract_tables 同口径改 child 轴
+    for tr in el.xpath("./thead/tr | ./tbody/tr | ./tr"):  # 审查二轮：thead 同修
         cells = [re.sub(r"\s+", " ", (c.text_content() or "").strip()) for c in tr.xpath("./th|./td")]
         if not cells:
             continue
@@ -163,7 +176,7 @@ def _table_md(el) -> list:
         if key in seen:
             continue
         seen.add(key)
-        if tr.xpath("./th") and header is None:
+        if tr.xpath("./th") and not tr.xpath("./td") and header is None:
             header = cells
         else:
             rows.append(cells)
@@ -186,7 +199,7 @@ def _md_blocks(el) -> list:
     """把元素递归渲染成 markdown 块。"""
     lines = []
     tag = el.tag if isinstance(el.tag, str) else ""
-    if tag in ("script", "style", "nav", "aside"):
+    if tag in ("script", "style", "nav", "aside", "head"):
         return []
     if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
         lines.append("#" * int(tag[1]) + " " + _inline_text(el))
@@ -229,6 +242,9 @@ def _md_blocks(el) -> list:
                     lines.append(re.sub(r"\s+", " ", buf).strip())
                     buf = ""
                 lines.extend(_md_blocks(child))
+                # OCR R131（M）：块级子元素之后的尾随文本（child.tail）曾整段丢失，
+                # 作为下一段缓冲的开头续上
+                buf = child.tail or ""
             else:
                 buf += _inline_md(child) + (child.tail or "")
         if buf.strip():
@@ -262,14 +278,19 @@ def html_to_markdown(html_text: str, base_url: Optional[str] = None,
     for tag in ("script", "style", "nav", "aside", "footer", "form"):
         for el in body.xpath(f"//{tag}"):
             el.drop_tree()
+    # OCR R6：先存旧值、finally 恢复——无条件置 None 曾在嵌套/重入调用时
+    # 把外层调用的 base_url 清掉（外层相对链接静默不再转绝对）
+    _prev_base = _get_base()
     _set_base_url(base_url)
     try:
         blocks = _md_blocks(body)
     finally:
-        _set_base_url(None)
+        _set_base_url(_prev_base)
     out = re.sub(r"\n{3,}", "\n\n", "\n".join(blocks)).strip()
     if max_chars > 0 and len(out) > max_chars:
-        out = out[:max_chars] + f"\n...(截断，共 {len(out)} 字符)"
+        # 审查四轮（M）：截断后 f-string 才求值——len(out) 报的是截断后长度
+        _total = len(out)
+        out = out[:max_chars] + f"\n...(截断，共 {_total} 字符)"
     return out
 
 
@@ -287,12 +308,65 @@ def extract_links_markdown(html_text: str, base_url: Optional[str] = None,
             continue
         if base_url and not href.startswith(("http://", "https://")):
             href = urljoin(base_url, href)
-        txt = re.sub(r"\s+", " ", (a.text_content() or "")).strip()[:80]
-        line = f"[{txt}]({href})" if txt else f"[{href}]({href})"
-        if line in seen:
+        _full_txt = re.sub(r"\s+", " ", (a.text_content() or "")).strip()
+        # OCR R131（M）：截断后的文本做去重键曾把"前 80 字相同的不同链接"误并——
+        # 去重按 (全文本, href)，展示才截断
+        if (_full_txt, href) in seen:
             continue
-        seen.add(line)
+        seen.add((_full_txt, href))
+        txt = _full_txt[:80]
+        line = f"[{txt}]({href})" if txt else f"[{href}]({href})"
         out.append(line)
         if len(out) >= max_links:
             break
+    return out
+
+
+# ---------------------------------------------------------------- 表单自动发现
+# R25 对标 MechanicalSoup：自动解析页面表单结构，小白不用"审查元素猜选择器"
+
+def discover_forms(html_text: str, base_url: str = "") -> List[Dict[str, Any]]:
+    """解析 HTML 中所有 <form> 并返回结构化定义（字段名/类型/提交地址/方法）。
+
+    返回 [{"action": "...", "method": "POST", "fields": [
+        {"name": "user", "type": "text", "label": "用户名", "required": True}, ...
+    ]}]"""
+    from lxml import html as _lh
+    out: List[Dict[str, Any]] = []
+    try:
+        doc = _lh.fromstring(html_text)
+    except Exception:
+        return out
+    for form_el in doc.iter("form"):
+        action = form_el.get("action") or ""
+        if action and base_url:
+            action = urljoin(base_url, action)
+        method = (form_el.get("method") or "GET").upper()
+        fields: List[Dict[str, Any]] = []
+        for inp in form_el.iter("input", "select", "textarea"):
+            tag = inp.tag.lower() if isinstance(inp.tag, str) else ""
+            it = inp.get("type", tag)
+            nm = inp.get("name") or inp.get("id") or ""
+            if not nm:
+                continue
+            f: Dict[str, Any] = {
+                "name": nm, "type": it,
+                "required": inp.get("required") is not None,
+            }
+            label = inp.get("placeholder") or inp.get("aria-label") or ""
+            if label:
+                f["label"] = label
+            if tag == "select":
+                opts = [o.get("value") or (o.text_content() or "").strip()
+                        for o in inp.iter("option") if o.get("value") is not None or o.text_content()]
+                f["options"] = opts[:20]
+            elif it in ("hidden",):
+                f["value"] = inp.get("value", "")
+            fields.append(f)
+        out.append({
+            "action": action,
+            "method": method,
+            "id": form_el.get("id", ""),
+            "fields": fields,
+        })
     return out

@@ -113,6 +113,32 @@ class Pipeline(BasePipeline):
         self.steps = config or []
         self.dropped = {}
         self.skipped = {}
+        self._warned = set()   # R24b：跳过类告警只打印一次（防每行刷屏）
+        # OCR R131（H）：dedup 的 check-then-act 与 dropped/skipped 计数曾无锁——
+        # engine_v3 多 worker 并发 process 同一实例，重复条目可双双通过、计数丢失
+        import threading as _th
+        self._state_lock = _th.Lock()
+
+    def _bump(self, store: dict, key: str) -> None:
+        """OCR R6 终审：dropped/skipped 计数的 read-modify-write 曾无锁——
+        engine_v3 多 worker 并发 process 同一实例，`d[k]=d.get(k,0)+1` 非原子，
+        并发下计数丢失（与 dedup 同一把 _state_lock）。"""
+        with self._state_lock:
+            store[key] = store.get(key, 0) + 1
+
+    def _warn_once(self, msg: str) -> None:
+        """R24b 修复：skipped/dropped 计数此前无任何出口——危险正则被跳过对
+        用户完全不可见。首个跳过发生时打一行 WARN。
+        OCR R6 终审：check-then-add 曾无锁——并发下同一告警可重复打印。"""
+        with self._state_lock:
+            if msg in self._warned:
+                return
+            self._warned.add(msg)
+        try:
+            from ..core import log
+            log(f"⚠️ {msg}", "WARN")
+        except Exception:
+            pass
 
     def process(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         for step in self.steps:
@@ -132,53 +158,71 @@ class Pipeline(BasePipeline):
                     # 兼容 AI 生成写法：value 或 pattern 都认（历史上 AI 常写 value）
                     _pat = step.get("pattern", "") or step.get("value", "")
                     if _pat:
+                        # R24 修复：用户正则必须有 ReDoS 防线——与 selectors 同一
+                        # lint + 截断（此前 filter 的正则完全裸奔，一个灾难模式
+                        # 冻结全部 worker 且无诊断）
+                        from ..selectors import regex_is_dangerous, _REGEX_TEXT_CAP
                         try:
-                            if not re.search(_pat, val):
+                            if regex_is_dangerous(_pat):
+                                self._bump(self.skipped, f"filter:{field}:危险正则已跳过")
+                                self._warn_once(f"filter 字段 {field} 的正则被判定为灾难回溯模式，已跳过该步：{_pat[:60]}")
+                                continue
+                            if not re.search(_pat, val[:_REGEX_TEXT_CAP]):
                                 return None
                         except re.error:
                             # 非法正则（AI 常生成）：跳过该过滤并保留行，不崩溃也不误丢数据
-                            self.skipped[f"filter:{field}:非法正则"] = self.skipped.get(f"filter:{field}:非法正则", 0) + 1
+                            self._bump(self.skipped, f"filter:{field}:非法正则")
                             continue
                 if op == "between":
                     raw = item.get(field)
                     if raw in (None, ""):
-                        self.skipped[f"filter:{field}:日期缺失"] = self.skipped.get(f"filter:{field}:日期缺失", 0) + 1
+                        self._bump(self.skipped, f"filter:{field}:日期缺失")
                         continue
                     try:
                         v = float(str(raw).replace(",", ""))
+                        if v != v:
+                            # OCR R6：NaN 文本（"nan"/"NaN" 缺失标记）可过 float()，
+                            # 但 lo<=nan 恒 False——曾被当"区间外"静默丢行。
+                            # 按无法解析跳过保留行（与其余解析失败同口径）
+                            raise ValueError("NaN")
                         lo = float(step.get("min", float("-inf")))
                         hi = float(step.get("max", float("inf")))
                         if not (lo <= v < hi):
-                            self.dropped[f"filter:{field}:区间外"] = self.dropped.get(f"filter:{field}:区间外", 0) + 1
+                            self._bump(self.dropped, f"filter:{field}:区间外")
                             return None
                     except (ValueError, TypeError):
-                        self.skipped[f"filter:{field}:无法解析"] = self.skipped.get(f"filter:{field}:无法解析", 0) + 1
+                        self._bump(self.skipped, f"filter:{field}:无法解析")
                         continue
             elif t == "dedup":
                 key = step.get("key", "id")
                 if key == "content_hash":
                     k = content_hash(item, step.get("fields"))
-                    if k in self.vars.get("_seen_hash", set()):
-                        return None
-                    self.vars.setdefault("_seen_hash", set()).add(k)
+                    with self._state_lock:
+                        if k in self.vars.get("_seen_hash", set()):
+                            return None
+                        self.vars.setdefault("_seen_hash", set()).add(k)
                     continue
                 keys = key if isinstance(key, list) else [key]
                 k = tuple(str(item.get(kk) or "") for kk in keys)
-                if any(x in ("None", "") for x in k):
+                # OCR R131（M）：字面量 "None" 曾被当缺失跳过——业务数据里的
+                # 合法 "None" 字符串全部绕过去重。None→"" 已由 or "" 处理
+                if any(x == "" for x in k):
                     continue
-                if k in self.vars.get("_seen", set()):
-                    return None
-                _prev = self.vars.get("_seen")
-                if not isinstance(_prev, set):
-                    _prev = set()  # vars 同键可能被其他步骤写为 str 等类型，重置为 set
-                    self.vars["_seen"] = _prev
-                _prev.add(k)
+                with self._state_lock:
+                    if k in self.vars.get("_seen", set()):
+                        return None
+                    _prev = self.vars.get("_seen")
+                    if not isinstance(_prev, set):
+                        _prev = set()  # vars 同键可能被其他步骤写为 str 等类型，重置为 set
+                        self.vars["_seen"] = _prev
+                    _prev.add(k)
             elif t == "dedup_content":
                 # 便捷别名：{"type":"dedup_content","fields":["title","body"]}
                 k = content_hash(item, step.get("fields"))
-                if k in self.vars.get("_seen_hash", set()):
-                    return None
-                self.vars.setdefault("_seen_hash", set()).add(k)
+                with self._state_lock:  # OCR R131 终审：曾漏锁——并发下双条通过
+                    if k in self.vars.get("_seen_hash", set()):
+                        return None
+                    self.vars.setdefault("_seen_hash", set()).add(k)
             elif t == "cast":
                 field, ctype = step["field"], step.get("to", "str")
                 v = item.get(field)
@@ -189,7 +233,9 @@ class Pipeline(BasePipeline):
                         item[field] = float(str(v).replace(",", ""))
                     elif ctype == "str":
                         item[field] = str(v) if v is not None else ""
-                except (ValueError, TypeError):
+                except (ValueError, TypeError, OverflowError):
+                    # OCR R131（属性测试抓获）：超大整数（>1.8e308）经 float 转 int
+                    # 抛 OverflowError——曾不在捕获列表，整条管线炸掉
                     pass
             elif t == "add":
                 item[step["field"]] = step.get("value")
@@ -210,8 +256,18 @@ class Pipeline(BasePipeline):
                     except (ValueError, TypeError):
                         return None
                 if step.get("pattern") and val not in (None, ""):
-                    if not re.search(step["pattern"], str(val)):
-                        return None
+                    # R24 修复：validate 的正则同样过 lint + 截断防线；
+                    # R24b 补齐：与 filter 同样的 re.error 容忍（AI 常生成非法
+                    # 正则——跳过该校验保留行，不让整条管道崩掉）
+                    from ..selectors import regex_is_dangerous, _REGEX_TEXT_CAP
+                    try:
+                        if regex_is_dangerous(step["pattern"]):
+                            self._bump(self.skipped, f"validate:{step['field']}:危险正则已跳过")
+                            self._warn_once(f"validate 字段 {step['field']} 的正则被判定为灾难回溯模式，已跳过该步：{step['pattern'][:60]}")
+                        elif not re.search(step["pattern"], str(val)[:_REGEX_TEXT_CAP]):
+                            return None
+                    except re.error:
+                        self._bump(self.skipped, f"validate:{step['field']}:非法正则")
             elif t == "rename":
                 for old, new in step.get("mapping", {}).items():
                     if old in item:
@@ -222,8 +278,21 @@ class Pipeline(BasePipeline):
                 if fld not in item or item.get(fld) in (None, ""):
                     item[fld] = step.get("value")
             elif t == "template":
+                # R109 修复（P2）：v3 曾只认 step["template"] 而文档/contract 写
+                # tmpl——KeyError 落 except 后用 default 静默覆盖目标字段
+                # R114：tmpl 显式 null 曾经 template 兜底变 "" 再 str 化——
+                # 键存在但非字符串（null/数字）一律落 default
+                if "tmpl" in step:
+                    _tmpl = step["tmpl"]
+                elif "template" in step:
+                    _tmpl = step["template"]
+                else:
+                    _tmpl = ""
+                if not isinstance(_tmpl, str):
+                    item[step["field"]] = step.get("default", "")
+                    continue
                 try:
-                    item[step["field"]] = step["template"].format(
+                    item[step["field"]] = str(_tmpl).format(
                         **{k: (v if v is not None else "") for k, v in item.items()})
                 except Exception:
                     item[step["field"]] = step.get("default", "")
@@ -247,7 +316,9 @@ class Pipeline(BasePipeline):
                     item[out_f] = int(d.timestamp())
                 # 解析失败/无日期：不写字段（保持缺失，让 between 跳过而不是全丢）
             elif t == "split":
-                sep = step.get("sep", ",")
+                # 空 sep 会让 str.split("") 抛 ValueError——引擎虽按"跳过该条"降级，
+                # 但 AI 生成配置写 "sep": "" 时等于整批记录全丢；回落逗号（审查七轮 N40）
+                sep = step.get("sep", ",") or ","
                 item[step["field"]] = [x.strip() for x in str(item.get(step["field"]) or "").split(sep) if x.strip()]
             elif t == "download":
                 # 通用文件下载（PDF/图片/附件）：从 item 字段取 URL 下载到 dir，写回本地路径
@@ -256,6 +327,14 @@ class Pipeline(BasePipeline):
                 out_dir = step.get("dir", "downloads")
                 u = str(item.get(field) or "").strip()
                 if not u.startswith(("http://", "https://")):
+                    item[out_field] = ""
+                    continue
+                # OCR R131（H）：dir 配置曾可 ../../ 逃逸任务目录（写任意路径）。
+                # 只允许相对路径且不得包含 .. 段
+                from pathlib import PurePosixPath as _PP
+                if out_dir.startswith(("/", "\\")) or ":" in out_dir[:3] \
+                        or any(seg == ".." for seg in _PP(out_dir.replace("\\", "/")).parts):
+                    self._warn_once(f"download dir 非法（仅允许任务内相对路径）: {out_dir!r}，下载跳过")
                     item[out_field] = ""
                     continue
                 try:
@@ -282,6 +361,8 @@ class Pipeline(BasePipeline):
                         item[out_field] = str(fp)
                     else:
                         item[out_field] = ""
-                except Exception:
+                except Exception as _dl_e:
+                    # OCR R131（M）：下载失败曾静默置空——磁盘满/超时对用户不可见
+                    self._warn_once(f"download 失败（{type(_dl_e).__name__}: {str(_dl_e)[:80]}）: {u[:80]}")
                     item[out_field] = ""
         return item

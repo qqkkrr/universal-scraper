@@ -45,9 +45,8 @@ def main():
     print("== 浏览器桥非法正则不崩溃 ==")
     import os, tempfile
     NODE = os.environ.get("UNIVERSAL_SCRAPER_NODE",
-                          "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
-    NODE_PATH = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH",
-                               "/Users/kairanqin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules")
+                          (shutil.which("node") or "node"))
+    NODE_PATH = os.environ.get("UNIVERSAL_SCRAPER_NODE_PATH", "")
     with tempfile.TemporaryDirectory() as tmp:
         spec = {"url": base + "/", "wait": {"selector": "body", "timeout": 8000}, "scrollCount": 0,
                 "capture": [{"name": "bad", "url_pattern": "(", "save": True}]}
