@@ -40,18 +40,23 @@ def rangedl(url: str, out: str | Path, segments: int = 8, concurrency: int = 3,
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     # 审查五轮（LOW）：与 fetch_url/jsrecon 同口径——CLI/import 直达也可被指向
-    # 云元数据。仅 http/https + 解析地址拒绝私网/环回/保留段
+    # 云元数据。仅 http/https + 解析地址拒绝私网/环回/保留段。
+    # US_ALLOW_PRIVATE=1 白名单开关：内网存档服务器/本地单测场景（默认仍拒绝）
     import ipaddress as _ipa
     from urllib.parse import urlsplit as _usp
+    import os as _os
     _sp = _usp(url or "")
     if _sp.scheme not in ("http", "https"):
         return {"ok": False, "error": f"仅允许 http/https: {url}"}
     import socket as _sock
+    _allow_private = _os.environ.get("US_ALLOW_PRIVATE") == "1"
     try:
         for _info in _sock.getaddrinfo(_sp.hostname, None):
             _ip = _ipa.ip_address(_info[4][0])
-            if _ip.is_private or _ip.is_loopback or _ip.is_reserved or _ip.is_link_local:
-                return {"ok": False, "error": f"拒绝私有/保留地址: {_sp.hostname}"}
+            if not _allow_private and (
+                    _ip.is_private or _ip.is_loopback or _ip.is_reserved or _ip.is_link_local):
+                return {"ok": False, "error": f"拒绝私有/保留地址: {_sp.hostname}"
+                        "（内网/本地测试可设 US_ALLOW_PRIVATE=1）"}
     except Exception as _e:
         return {"ok": False, "error": f"域名解析失败: {_e}"}
     client = _client()

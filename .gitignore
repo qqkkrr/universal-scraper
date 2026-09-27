@@ -18,4 +18,3 @@ configs/auto_precise_*.json*
 *.cookie.txt
 .cookie.txt
 jobs_history.json
-*.log

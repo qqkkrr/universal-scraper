@@ -12,12 +12,13 @@ cd "$SKILL_DIR"
 say() { printf "\n\033[1;36m%s\033[0m\n" "$*"; }
 
 say "📦 [1/4] 安装 Python 依赖…"
-if ! python3 -m pip install -q -r "$SKILL_DIR/requirements.txt" curl_cffi charset_normalizer cssselect 2>/dev/null; then
+if ! python3 -m pip install -q -r "$SKILL_DIR/requirements.txt" 2>/dev/null; then
   echo "  常规安装失败，改用 --user 方式重试…"
-  python3 -m pip install -q --user -r "$SKILL_DIR/requirements.txt" curl_cffi charset_normalizer cssselect
+  python3 -m pip install -q --user -r "$SKILL_DIR/requirements.txt"
 fi
-# 可选增强（失败不打扰）
+# 可选增强（失败不打扰）：ddddocr 验证码识别 / rapidocr 扫描件兜底（cli research OCR 链）
 python3 -m pip install -q ddddocr 2>/dev/null || echo "  （可选）验证码识别库 ddddocr 未装，需要时再补"
+python3 -m pip install -q rapidocr_onnxruntime 2>/dev/null || echo "  （可选）扫描件 OCR 库 rapidocr 未装——research 批量遇扫描件时建议补装"
 
 say "🟢 [2/4] 检查 Node 运行时…"
 if ! command -v node >/dev/null 2>&1; then
