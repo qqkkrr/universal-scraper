@@ -31,9 +31,27 @@ if (!chromium) throw new Error("找不到 playwright/patchright");
 const os = require("node:os");
 const HOME = process.env.HOME || os.homedir() || "/tmp";
 const USER_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// 深测二轮（2026-09-27）：playwright 缓存升级（1208→1243）后硬编码版本号路径失效——
+// headless-shell / 完整版 Chromium 都按"任意版本号目录"扫描取最新存在者
+function _scanPwCache(prefix, suffix) {
+  try {
+    const root = `${HOME}/Library/Caches/ms-playwright`;
+    const names = fs.readdirSync(root)
+      .filter((d) => d.startsWith(prefix))
+      .sort()
+      .reverse();  // 版本号降序，取最新
+    for (const d of names) {
+      const p = `${root}/${d}/${suffix}`;
+      if (fs.existsSync(p)) return p;
+    }
+  } catch (e) {}
+  return null;
+}
 const HEADLESS_SHELL = process.env.PW_EXECUTABLE
+  || _scanPwCache("chromium_headless_shell-", "chrome-headless-shell-mac-arm64/chrome-headless-shell")
   || `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 const FULL_CHROME = process.env.PW_FULL_CHROME
+  || _scanPwCache("chromium-", "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing")
   || `${HOME}/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
 // 有头（headless=0，需弹窗让人工验证/登录）必须用完整版 Chromium，headless-shell 不显示窗口！
 const EXE = arg("headless", "1") !== "0" ? HEADLESS_SHELL : FULL_CHROME;

@@ -23,7 +23,18 @@ const fs = require("node:fs");
 
 const os = require("node:os");
 const HOME = process.env.HOME || os.homedir() || "/tmp";
-const EXE = process.env.PW_EXECUTABLE || `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
+const EXE = process.env.PW_EXECUTABLE || (() => {
+  // 深测二轮：playwright 缓存版本升级后硬编码 1208 失效——扫任意版本号取最新
+  try {
+    const root = `${HOME}/Library/Caches/ms-playwright`;
+    const names = fs.readdirSync(root).filter((d) => d.startsWith("chromium_headless_shell-")).sort().reverse();
+    for (const d of names) {
+      const p = `${root}/${d}/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
+      if (fs.existsSync(p)) return p;
+    }
+  } catch (e) {}
+  return `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
+})();
 const HISTORY_URL = "https://www.ggzy.gov.cn/history/dealList.html";
 const API_PATH = "/his/information/pubTradingInfo/getTradList";
 

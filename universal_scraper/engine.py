@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import signal
+import sys
 import time
 import json  # recon 路径写 recon_records.json 用（曾漏 import，跑到即 NameError）
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -329,6 +330,15 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
         if isinstance(spec, dict) and not spec.get("name"):
             raise ConfigError(f"detail.extract[{i}]", "extract 步骤缺少 name（抽取值要写入的列名）",
                               '例如: {"type": "css", "name": "价格", "selector": ".price"}')
+    # 深测二轮（2026-09-27）易用性防御：enabled 且 extract 为空 = 每行详情页照抓
+    # 但不抽取任何字段（行上只有 detail_status/detail_body）——十有八九是配置写错
+    # （fields/selector 等自造键不是 v1 detail 的 schema，正确键是 extract 数组）。
+    # 白抓会烧请求预算，必须开抓前 WARN。
+    if not detail.get("extract"):
+        print("⚠️ detail.enabled=true 但 extract 为空——详情页将被抓取但不抽取任何字段；"
+              "若非有意（仅取 detail_body 哨兵），请配置 detail.extract 数组"
+              "（如 [{\"name\":\"正文\",\"type\":\"css_text\",\"selector\":\"div.content\"}]）",
+              file=sys.stderr)
     concurrency = int(detail.get("concurrency", 1))
     interval = float(detail.get("interval", 0.5))
     timeout = float(anti.get("timeout", 15))
