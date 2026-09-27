@@ -57,13 +57,16 @@ def extract_tables(html_text: str) -> List[List[Dict[str, str]]]:
         # OCR R131（H）：.//tr/.//th 曾取到嵌套子表（descendant 轴）——外层表的
         # 行被内层表污染、子表行被误判表头。child 轴只取直接属性行（tbody 两种布局）
         # OCR R131 二轮（H）：thead 布局（<table><thead><tr>）的表头行曾整组漏掉
-        for tr in tbl.xpath("./thead/tr | ./tbody/tr | ./tr"):
+        # 收官六轮（审查）：补 ./tfoot/tr——tfoot 合计行曾全丢；header 只认首个
+        # 全 th 行（后续 th 汇总行曾覆盖表头使键名错位）
+        for tr in tbl.xpath("./thead/tr | ./tbody/tr | ./tfoot/tr | ./tr"):
             cells = [re.sub(r"\s+", " ", (c.text_content() or "")).strip() for c in tr.xpath("./th | ./td")]
             if not cells:
                 continue
             # 全 <th> 行才算表头：<th scope="row"> 数据行（每行首列 th）曾把
             # 表头反复覆盖、整表 0 数据行（审查七轮 N28）
-            if tr.xpath("./th") and not tr.xpath("./td"):
+            # 收官六轮：not header 替代 header is None——初始值是 [] 不是 None
+            if tr.xpath("./th") and not tr.xpath("./td") and not header:
                 header = cells
                 continue
             if header:
@@ -166,16 +169,13 @@ def _table_md(el) -> list:
     lines = []
     header = None
     rows = []
-    seen = set()
-    # OCR R131（H）：.//tr 曾取到嵌套子表——与 extract_tables 同口径改 child 轴
-    for tr in el.xpath("./thead/tr | ./tbody/tr | ./tr"):  # 审查二轮：thead 同修
+    # 收官六轮（审查）：seen 全行去重曾静默丢弃合法重复数据行（N/A|N/A 出现两次
+    # 第二行消失）——与 extract_tables 行为不一致，移除去重（markdown 展示层去重
+    # 是信息丢失）；同时补 ./tfoot/tr、去掉 [:n] 截断（超出表头宽度的单元格曾丢失）
+    for tr in el.xpath("./thead/tr | ./tbody/tr | ./tfoot/tr | ./tr"):  # 审查二轮：thead 同修
         cells = [re.sub(r"\s+", " ", (c.text_content() or "").strip()) for c in tr.xpath("./th|./td")]
         if not cells:
             continue
-        key = tuple(cells)
-        if key in seen:
-            continue
-        seen.add(key)
         if tr.xpath("./th") and not tr.xpath("./td") and header is None:
             header = cells
         else:
@@ -185,11 +185,11 @@ def _table_md(el) -> list:
     if header is not None:
         lines.append("| " + " | ".join(_escape_cell(c) for c in header) + " |")
         lines.append("| " + " | ".join(["---"] * len(header)) + " |")
-        n = len(header)
-    else:
-        n = max(len(r) for r in rows)
+    # 列宽取最大（表头/数据行取宽），不做 [:n] 截断——超出表头宽度的数据单元格保留
+    n = max([len(header)] if header is not None else []) + 0 if header is not None else 0
+    n = max([n] + [len(r) for r in rows]) if (rows or header is not None) else 0
     for r in rows:
-        cells = (r + [""] * (n - len(r)))[:n]
+        cells = r + [""] * (n - len(r))
         lines.append("| " + " | ".join(_escape_cell(c) for c in cells) + " |")
     lines.append("")
     return lines
