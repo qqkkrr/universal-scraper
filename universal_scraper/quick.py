@@ -215,11 +215,20 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
         result["tables"] = extract_tables(text)
     if not (selector or article or table):
         from .extractors import html_to_markdown
-        result["markdown"] = html_to_markdown(text) or text[:200_000]
+        # 收官五轮（审查 M）：base_url 未传——相对链接/图片全部保持相对路径，
+        # 违背自身 docstring 承诺；传 result["url"]（跟随重定向后的最终 URL）
+        result["markdown"] = html_to_markdown(text, base_url=result.get("url") or url) or text[:200_000]
         # SPA 壳判型提示（版权中心战例：3.9KB 壳完全靠人眼识别）
-        if 0 < len(text) < 6144 and re.search(r'id="(?:app|root|__next)"', text):
-            result["recon_hint"] = ("页面为 SPA 壳（无实质内容）——数据靠 JS/接口，"
-                                    "先 jsrecon 找接口或 capture 捕获（配方 R8/R13）")
+        # 收官五轮（审查 M）：旧壳判定 6144 上限漏判 Next.js/Nuxt 大壳（内联
+        # bootstrap JSON 常达 8-50KB）——改用"实质内容稀疏"判据：可见文本占比极低
+        _spa_root = re.search(r'id="(?:app|root|__next|nuxt)"', text)
+        if _spa_root:
+            _vis = len(re.sub(r'<(script|style)[^>]*>.*?</\1>', '', text, flags=re.S))
+            _vis = len(re.sub(r'<[^>]+>', '', re.sub(r'<(script|style)[^>]*>.*?</\1>', '', text, flags=re.S)).strip())
+            if len(text) > 0 and _vis < max(len(text) * 0.05, 200):
+                result["recon_hint"] = ("页面为 SPA 壳（可见文本占比 "
+                                        f"{_vis}/{len(text)}={_vis*100//max(len(text),1)}%）——"
+                                        "数据靠 JS/接口，先 jsrecon 找接口或 capture 捕获（配方 R8/R13）")
     if links:
         from .queue import extract_links
         result["links"] = extract_links(text, url, links_allow, links_deny)
