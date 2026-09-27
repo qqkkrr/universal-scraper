@@ -165,13 +165,18 @@ def request_budget() -> Dict[str, int]:
 
 
 def _bump_request_count() -> None:
+    """真实 HTTP 尝试计入任务预算；超限抛 MaxRequestsExceeded。
+
+    收官三轮（审查 M）：被拦截的那次尝试此前也 +1 计数（先加后判）——
+    汇总 budget.used 比 audit 实收行数多 1。改为先判后加：被拦截的
+    尝试不计数（服务端没收到），只作为闸门信号。"""
     with _REQUEST_STATS_LOCK:
-        _HTTP_REQUEST_STATS["count"] += 1
         limit = _HTTP_REQUEST_STATS["limit"]
-    if limit and _HTTP_REQUEST_STATS["count"] > limit:
-        raise MaxRequestsExceeded(
-            f"请求次数已达上限 {limit}（--max-requests / anti_bot.max_requests）——"
-            f"如确需更多请求请调大预算，而不是反复重试")
+        if limit and _HTTP_REQUEST_STATS["count"] >= limit:
+            raise MaxRequestsExceeded(
+                f"请求次数已达上限 {limit}（--max-requests / anti_bot.max_requests）——"
+                f"如确需更多请求请调大预算，而不是反复重试")
+        _HTTP_REQUEST_STATS["count"] += 1
 
 
 # ---- 自适应限速（深度改进②，对标 Scrapy AutoThrottle）----
@@ -1657,6 +1662,23 @@ class CurlCffiClient:
                                "json": parsed,
                                "url": str(resp.url), "headers": {k.lower(): v for k, v in resp.headers.items()},
                                "raw_headers": resp.headers}
+                    # 收官三轮（审查 H）：cffi.request 是模块级无状态调用——服务端
+                    # Set-Cookie 从不回写 self.cookies，"单会话 cookie jar" 在默认
+                    # 后端不成立（登录态多步链拿错数据还报成功）。此处补回写：
+                    # 会话级 cookies 随后续请求复用（与 RequestsClient 的 Session
+                    # 行为对齐）。resp.cookies 是 cffi 的 Cookies 对象。
+                    try:
+                        _sc = getattr(resp, "cookies", None)
+                        if _sc:
+                            import http.cookies as _hcookies
+                            for _ck in (_sc.jar or []):
+                                _nm = getattr(_ck, "name", None)
+                                if _nm and _nm not in self.cookies:
+                                    # 只增不改：显式传入的 cookie 优先于服务端下发
+                                    _vl = getattr(_ck, "value", "") or ""
+                                    self.cookies[_nm] = _vl
+                    except Exception:
+                        pass
                     if use_cache and self.cache_dir and method == "GET":
                         try:
                             # 审查七轮（M）：直写曾让并发读者拿到半截 JSON 缓存——

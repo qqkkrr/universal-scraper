@@ -82,6 +82,13 @@ def run_session(plan: Dict[str, Any], out_dir: Path, max_requests: Optional[int]
     audit_path = out_dir / f"requests_{name}.jsonl"
 
     def audit(rec: Dict[str, Any]) -> None:
+        # 收官三轮（审查 M）：跨运行追加曾把多次运行混在一个文件里无分隔——
+        # 每次运行首条写分隔标记（ts+计划名），audit 与单次运行可对账
+        if not audit_path.exists() or getattr(audit, "_run_marked", False) is False:
+            with audit_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"_run": name, "t": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "steps": len(steps)}, ensure_ascii=False) + "\n")
+            audit._run_marked = True
         with audit_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
 
