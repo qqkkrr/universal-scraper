@@ -63,7 +63,17 @@ async function main() {
     const html = await page.evaluate(() => document.documentElement.outerHTML);
     fs.writeFileSync(outFile, html);
     // OCR R131（L）：html.length 是 UTF-16 码元数——中文页面下虚高。用 Buffer 报字节数
-    out({ type: "html", file: outFile, url: page.url(), bytes: Buffer.byteLength(html, "utf-8") });
+    const bytes = Buffer.byteLength(html, "utf-8");
+    out({ type: "html", file: outFile, url: page.url(), bytes });
+    // 实战反馈七（拼多多）：SPA 壳检测——浏览器渲染后仍无实质内容的站，
+    // 数据靠 JS 接口下发，fetch/markdown 都是垃圾。提示改走 capture 路线。
+    const bodyText = await page.evaluate(() => (document.body && document.body.innerText) || "");
+    if (bodyText.trim().length < 200 && html.length > 3000) {
+      out({ type: "spa_shell",
+            message: "⚠️ 浏览器渲染后可见文本极少（" + bodyText.trim().length + "B），"
+                   + "疑似 SPA 壳——数据靠 JS 接口下发。建议：capture-daemon 在场捕获"
+                   + " 或 jsrecon 找接口（fetch --capture）" });
+    }
   } catch (e) {
     out({ type: "error", message: String((e && e.message) || e) });
     exitAfter = 1;

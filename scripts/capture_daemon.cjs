@@ -81,6 +81,11 @@ function writeStatus(extra, force) {
 let CAPTURED = 0;
 
 async function main() {
+  // 实战反馈七（拼多多）：新增 --attach-cdp 模式——connectOverCDP 附加到已登录
+  // 的调试 Chrome，而非自起浏览器。此前只有自起模式，强登录态站点（拼多多/知乎）
+  // 被迫放弃守护捕获改用一次性 fetch——这是在场捕获动线最大的工具缺口。
+  const ATTACH_CDP = arg('attach-cdp', '');
+
   const launchOpts = {
     headless: HEADLESS,
     locale: 'zh-CN',
@@ -94,8 +99,18 @@ async function main() {
       '--hide-crash-restore-bubble',
     ],
   };
-  if (PROXY) launchOpts.proxy = { server: PROXY };  // 库层代理：Chrome --proxy-server 被无视的站只能这样换出口
-  const ctx = await chromium.launchPersistentContext(PROFILE_DIR, launchOpts);
+  if (PROXY) launchOpts.proxy = { server: PROXY };
+
+  let ctx;
+  if (ATTACH_CDP) {
+    const cdpUrl = ATTACH_CDP.startsWith('http') ? ATTACH_CDP
+      : `http://127.0.0.1:${parseInt(ATTACH_CDP, 10) || 9222}`;
+    const browser = await chromium.connectOverCDP(cdpUrl, { timeout: 20000 });
+    ctx = browser.contexts()[0] || await browser.newContext();
+    console.log('ATTACHED cdp=' + cdpUrl);
+  } else {
+    ctx = await chromium.launchPersistentContext(PROFILE_DIR, launchOpts);
+  }
 
   const wirePage = (page) => {
     page.on('response', async (resp) => {

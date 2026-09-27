@@ -70,7 +70,7 @@ text 内含 JSON 时先找到 JSON 起始位置再解析，不要把信封当数
 ## 知识引用
 
 - 反爬升级阶梯 / 配额四分类 / 三分叉 → `references/anti-block-playbook.md`
-- 配方 R1~R34（R34=B站四通道战法）→ `references/recipes.md`
+- 配方 R1~R42（R34=B站四通道战法；R35-R42：汽车之家/12306/双色球/统计局/存档替代/小红书/知乎/第三方每日存档仓库）→ `references/recipes.md`
 - 配置字段 → `references/spec-schema.md`
 - 交易所索引 → `references/data-sources-exchanges.md`
 - 证据 schema → `references/evidence-schema.md`

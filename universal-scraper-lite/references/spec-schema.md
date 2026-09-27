@@ -264,7 +264,9 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 
 单次桥进程顺序导航全部详情 URL（同一 CDP 连接），不逐页起浏览器。
 
-`extract` 每项支持五种 `type`（配 `limit` 可抓列表字段，多条换行连接）：
+`extract` 每项支持五种 `type`。**`limit` 的语义是「字符数上限」**（结果按 `text[:limit]`
+截断——审查八轮更正：旧文档写成"匹配条数/多条换行连接"，与实现相反，照文档写
+`limit: 10` 会得到被砍断的 10 个字符）：
 
 ```json
 [
@@ -276,7 +278,7 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 ]
 ```
 
-`limit: 0`（默认）表示全部匹配；注意选择器口径——列表选择器太宽会把无关元素
+`limit: 0`（默认）表示**不截断**（返回全部匹配文本）；注意选择器口径——列表选择器太宽会把无关元素
 （如 upvoter/评论者）混进来。
 
 ## anti_bot 常用键
@@ -294,6 +296,44 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 | `respect_robots` | 尊重 robots.txt |
 | `captcha` / `session_dir` / `session_name` | 验证码与登录态存放 |
 | `verify` | TLS 证书校验，默认 `true`（登录 Cookie 也走校验通道）。仅当目标站证书链确有损坏（罕见的政府站/老旧内网站）才显式写 `false` 豁免 |
+
+## middleware（四个时机，v2 `run --config`；2026-09 起已全部接线）
+
+```json
+"middleware": [
+  {"on": "request",  "action": "mypkg:hook_req"},
+  {"on": "response", "action": "mypkg:hook_resp"},
+  {"on": "data",     "action": "log"},
+  {"on": "error",    "action": "mypkg:hook_err"}
+]
+```
+
+`action` 支持 `log`（只打日志）或 `module:function`（自写钩子，需可被 PYTHONPATH 导入）。
+钩子接收一个 ctx dict 并**原地修改**；抛异常由中间件框架捕获，不影响主流程。
+
+| 时机 | 触发点 | ctx 键（可改） |
+|---|---|---|
+| `request` | 每个 HTTP 请求发出**前**（列表/分页、详情、下载三条链都覆盖） | `url` `method` `headers` `body` |
+| `response` | 每个响应返回后 | `url` `status` `ok` `text` `body` `json` `headers` |
+| `data` | 每条记录产出时 | `record` `title` `url` |
+| `error` | 传输异常，或响应 `ok=False`（403/超时/被守卫拒绝等） | `url` `method` `status` `error` |
+
+示例（注入请求头 + 给正文打标 + 记录失败）：
+
+```python
+# mypkg.py
+def hook_req(ctx):
+    h = dict(ctx.get("headers") or {}); h["Authorization"] = "Bearer xxx"
+    ctx["headers"] = h
+def hook_resp(ctx):
+    if ctx.get("status") == 403:
+        ctx["ok"] = False          # 把"假成功"改成明确失败
+def hook_err(ctx):
+    print("失败:", ctx.get("url"), ctx.get("status") or ctx.get("error"))
+```
+
+注意：v3 任务包（`run --task`）用的是另一套 middleware（内置 `log`/`captcha`/`notify`
+action 类 + 任务自带 `modules/middleware.py`），本配置式写法在 v3 不适用。
 
 ## output
 

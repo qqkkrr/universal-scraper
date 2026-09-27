@@ -600,7 +600,8 @@ pageNum=1&pageSize=30&column=szse&tabName=fulltext
 （附件下载 = `http://static.cninfo.com.cn/` + 附件路径；`seDate` 按需改窗口。）
 
 **请求预算纪律**：这类任务请用 `run --max-requests N` 硬闸（列表 1 页 + PDF 2 次 ≈ 4 次真实请求；
-重试也计数）。预算紧张时的验证协议见 SKILL.md「替代验证」小节。
+重试也计数）。预算紧张时的验证协议见 Full 版 `SKILL.md` 的「数据型任务的替代验证」小节
+（Lite 手册对应"铁律 2 的数据型任务三件套"）。
 
 ## 紧预算验证协议（2026-09 双版本考核战训，替代验证的降档规则）
 
@@ -844,7 +845,8 @@ Playwright 渲染截图后 OCR 对照），或直接用口碑 API 的 JSON 数�
 verify 对接——复制后修改 `_ALLOWED_HOSTS` 和 API 端点即可）。
 
 **verify 注意**：配置参数宽表 428 列大量选装项本来就该为空——`verify --dir`
-的完整率读数偏低是正常现象，应区分「核心字段完整率」和「稀疏矩阵」（R120 已支持）。
+的完整率读数偏低是正常现象，应区分「核心字段完整率」和「稀疏矩阵」（R102 汽车之家
+战报落地的双口径输出，见 `universal_scraper/verify.py` 注释）。
 
 ## R36 · 12306 余票+票价一次直抓（2026-09 实战验证：北京→十城国庆 G/D，317 区间/1111 席别行，22 请求/轮）
 
@@ -1049,4 +1051,25 @@ verify 对接——复制后修改 `_ALLOWED_HOSTS` 和 API 端点即可）。
 **边界**：存档只解决"实体定位"，不替代正主数据源——正主数据仍从目标站采
 （保证时效与字段全）；存档社区的 JSON 结构无契约，解析要防御性。
 **同族思路**：统计公报（CNEMC/统计局）、Wayback Machine、官方数据网盘——
-"第三方存档生态"是数据型任务的常规替代源（见 SKILL.md 开局三问②）。
+"第三方存档生态"是数据型任务的常规替代源（Full 版 `SKILL.md` 的"数据型任务开局三问②"；
+Lite 手册对应铁律 2 的三件套表述）。
+
+## R43 · 拼多多百亿补贴商品评论在场采集（2026-09 实战：iPhone 17 Pro Max goods_id=1009522250164，130 评论+101 用户，全程 ~40 请求零新增风控）
+
+**场景**：拼多多 H5（mobile.yangkeduo.com）百亿补贴商品的评论列表 + 评论者公开信息。强账号级风控（搜索面 54001 弹验证码 → 自动化导航风暴升级人脸墙），评论接口 anti_content 页面自算（红线：不逆向不伪造）。
+
+**前置合规**：登录态真 Chrome（用户人工暖号一次：搜索→进商品页→翻评论，全程真人节奏）；CDP 附加（R7/R16 同款）；不新开导航风暴。
+
+**动线**：
+1. **找商品**（无 goods_id 时）：搜索页/首页搜"百亿补贴"→ `brand_activity_subsidy.html`（H5 唯一百亿补贴频道入口）→ 页内"手机数码馆" → Apple 品牌馆 `pincard_ask.html?top_goods_ids=`（有 iPhone/iPad/Mac 页签）→ 点商品卡进 `goods.html?goods_id=X`。注：老机型（如 iPhone 16 PM）可能已无百亿补贴在售。
+2. **评论页**：`goods_comments.html?goods_id=X`。挂 `page.on('response')` 监听 **`/proxy/api/reviews/{goods_id}/list?page=N&size=10`**（body 带 anti_content=页面自算），`window.scrollTo(0,999999)` 匀速追底（4-5s/步+抖动），空 data 页即停。
+3. **数据构成**：首屏 20 条（2 页）SSR 直出，**无 JSON 内嵌**（全部 script 无 review_id）——从 DOM 提取（昵称/规格/内容/图片/点赞回复数），review_id/绝对时间/评分三字段宁空勿错；API 页与展示序**位置映射**：展示序 1-20=SSR、21-130=API page3 起顺序（先验证 frag 命中率 100% 再免模糊匹配）。
+4. **字段**：review_id/name/avatar/comment/time(unix)/pictures/favor_count/reply_count+reply_list/specs(颜色/容量/套餐/网络)/append_num/anonymous/is_default_review；拼多多无星级制（desc/logistics/service 三项分 1-5；stars=0+模板文案=默认好评）；列表深度平台封顶（页签"全部(659)"是同款聚合池，本列表到空页即止，全池需逐同款链接采集后按 review_id 去重）。
+5. **用户主页**：H5 头像/昵称均不可点、无 profile 接口——**平台不暴露买家主页**，主页类字段（注册时长/IP属地/粉丝/会员）留空；评论者关联键用 sha256(头像URL) 截断（平台无数字 ID 可采）。
+6. **脱敏**：回复楼里他人昵称是明文——建全量昵称词典（评论者+回复者+被回复者三类来源）对全部文本字段替换；交付前用已知原始昵称对产物文件做泄漏复查（verify 电池）。
+
+**坑位速查**：
+- 新号+程序化导航 = 风控升级最快路径；搜索 54001 后的每次重试都在加分——**立即停自动化，换人工**。
+- 商品页"查看全部"有两个（商品参数/同款评价），span 在评价区头部；合成 el.click() 可能无效，用 scrollIntoView+真实 mouse.click 坐标。
+- 商品列表页内部无滚动容器时用 window 滚动、有容器时滚容器——先探 `scrollHeight-clientHeight` 再滚。
+- goods_comments 首屏 SSR 部分相对时间仅"刚刚"级可见，绝对时间只有 API 有——按来源分列标注数据来源（api/dom_ssr）。

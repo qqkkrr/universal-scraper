@@ -378,6 +378,15 @@ HS 字体反爬）+ 签名接口需行为指纹——配置 schema 装不下这�
 写配置遇到不确定的字段 → **`references/spec-schema.md`**；
 照抄现成任务模板 → **`references/recipes.md`**。
 
+**强登录态/强签名站点（拼多多/知乎/淘宝）实战要点（2026-09 反馈七）**：
+- 在场捕获用 `capture-daemon --attach-cdp 9222` 附加到已登录 Chrome（用户先开调试 Chrome
+  登录，守护进程只负责捕获——不新起浏览器避免登录态断裂）
+- Tab 观察用 `tab_ctl.cjs`（tabs/goto/eval/shot/cookies，通用 CDP 控制器）
+- `fetch --browser` 的临时标签页会关掉——**验证码/滑块弹在临时 tab 里用户看不到**；
+  需要人工过验证时导航必须落在用户的持久标签页上（capture-daemon attach 模式天然满足）
+- `cli agent`（LLM 浏览器代理）在强签名站上零贡献——**不要用它做主路径**，只用 `fetch --browser`
+  或自写 Mode C 采集器；浏览器渲染后可见文本 <200B 的 SPA 壳页自动提示改走 capture 路线
+
 ## 浏览器直连（登录态/强防护专用）
 
 ```bash
