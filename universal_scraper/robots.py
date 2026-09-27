@@ -54,7 +54,8 @@ class WildcardRobotParser(RobotFileParser):
         for line in lines:
             s = (line or "").strip()
             if not s:
-                agents, state = [], 0
+                # 收官六轮（审查）：空行不断组——RFC 9309 规定组内空行忽略
+                # 此前重置 agents 导致组内规则落入空元组并从仲裁表消失
                 continue
             i = s.find("#")
             if i >= 0:

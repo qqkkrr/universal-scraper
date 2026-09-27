@@ -339,15 +339,23 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
                 raise ConfigError(f"source.actions[{i}]",
                                   f"动作 {a['type']} 含未知键: {sorted(_unknown)}",
                                   f"合法键: {sorted(_allowed)}")
-    inc = cfg.get("incremental", {}) or {}
+    inc = cfg.get("incremental") or {}
+    if not isinstance(inc, dict):
+        raise ConfigError("incremental", f"incremental 应为 dict，实际 {type(inc).__name__}")
     if inc.get("enabled") and not inc.get("key"):
         raise ConfigError("incremental.key", "增量去重需要 key（去重主键字段）", '例如: {"enabled": true, "key": "id"}')
     # R21 审查修复（P2）：容器类型守卫——错误类型曾以裸 AttributeError 崩溃
     # 而非给出 ConfigError 提示
     for key, want in (("parsers", dict), ("rules", list), ("storage", dict),
-                      ("start_urls", list), ("pipelines", list)):
+                      ("start_urls", list), ("pipelines", list),
+                      ("incremental", dict), ("download", dict),
+                      ("middleware", list), ("detail", dict)):
         val = cfg.get(key)
-        if val is not None and not isinstance(val, want):
+        # 审查九轮（H）：None（显式 null）曾穿透 isinstance 检查——parsers=null 时
+        # 后续 `pname not in cfg.get("parsers", {})` 得 None 引发 TypeError
+        if val is None:
+            cfg[key] = want()  # null → 空容器（parsers→{} rules→[] 等同缺省）
+        elif not isinstance(val, want):
             raise ConfigError(key, f"{key} 应为 {want.__name__}，实际 {type(val).__name__}")
     is_bridge = stype == "bridge"
     needs_seeds = stype in ("http", "browser")

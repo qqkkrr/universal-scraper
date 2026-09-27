@@ -118,7 +118,8 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
             n_nodata = n_ok - n_real
             rate = n_ok / len(rows)
             real_rate = n_real / len(rows)
-            is_key = any(k in f for k in _KEY_FIELDS)
+            is_key = any(f.lower() == k.lower() or f.lower().startswith(k.lower())
+                         for k in _KEY_FIELDS)
             dead_col = (rate == 0 and len(rows) >= 3)
             passed = (rate >= 0.9) if is_key else (not dead_col)
             report["checks"].append({
@@ -166,7 +167,8 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
             gap_n = n_nodata + n_true_empty
             if gap_n == 0 or total < 3:
                 continue
-            _is_key = any(k in f for k in _KEY_FIELDS)
+            _is_key = any(f.lower() == k.lower() or f.lower().startswith(k.lower())
+                         for k in _KEY_FIELDS)
             entry = {"field": f, "gap": gap_n, "total": total,
                      "gap_rate": round(gap_n / total, 3), "key": _is_key}
             if n_nodata >= n_true_empty:
