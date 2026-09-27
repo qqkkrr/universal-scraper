@@ -2206,6 +2206,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     _llm_ev_tried = False
     _entry_rescued = False
     _auto_precise_tried = False
+    _auto_precise_rejected = False  # 四轮审查：本轮被否决的精配，末尾不再无门禁覆盖
     # R31 修复：把循环内的质量门判定带出来——循环耗尽时（每轮都 intent 失败/
     # 关键字段缺失），循环后不能只看 total>0 就报"✅ 成功"，也不能把被自己
     # 否决的配置再沉淀进 learned（每轮都否决却每轮都存 = 毒化学习库）
@@ -2322,6 +2323,7 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                                     round_timeout=round_timeout)
             if _ap is not None:
                 return _ap
+            _auto_precise_rejected = True  # 四轮审查：本轮否决的精配不让末尾 run_site 再覆盖
 
         # 🛡️ 反爬/验证拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
         # 覆盖 waf/cloudflare/verify/captcha/anti_bot/rate_limit/session_flagged 等：
@@ -2491,7 +2493,10 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
 
     # 🏆 精配解析器覆盖（高频网站注册表）：检测到命中即用精配解析器，字段干净
     # run 型直达精配已在首轮前跑过（_precise_attempted），末尾只兜底 fetch+parse 型精配
-    if not _precise_done and not _precise_attempted:
+    # 收官四轮（审查 H）：本轮 _try_auto_precise 刚否决过的精配（质量门未过），
+    # 末尾 run_site 无门禁重新采纳会把坏结果覆盖到已导出的好结果之上——
+    # 已有 LLM 兜底/引擎成功结果时不再用精配覆盖
+    if not _precise_done and not _precise_attempted and not _auto_precise_rejected and total <= 0:
         try:
             su = (cfg.get("start_urls") or [""])[0]
             from .sites import match_site, run_site
@@ -2824,7 +2829,9 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     total = (last_result or {}).get("total", 0)
     real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
 
-    if not _precise_done and not _precise_attempted:
+    # 收官四轮（审查 H 同款）：run_with_config 的末尾精配覆盖加同款门禁——
+    # 已有成功结果（total>0）时不用精配覆盖
+    if not _precise_done and not _precise_attempted and total <= 0:
         try:
             su = (config.get("start_urls") or [""])[0]
             from .sites import match_site, run_site

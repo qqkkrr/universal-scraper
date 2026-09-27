@@ -12,79 +12,115 @@ th{background:#f0f4ff}
 svg text{font-size:11px}
 </style></head><body>
 <h1>📊 爬取数据报告</h1>
-<div><span class="badge">30 行</span><span class="badge">2 列</span><span class="badge">2 数值列</span></div>
+<div><span class="badge">8 行</span><span class="badge">5 列</span><span class="badge">3 数值列</span></div>
 <h2>1. 数据概览</h2>
 <table><tr><th>列</th><th>非空</th><th>缺失</th><th>样例</th></tr>
-<tr><td>价格</td><td>30</td><td class='missing'>0</td><td>10</td></tr>
-<tr><td>分类</td><td>30</td><td class='missing'>0</td><td>cat0</td></tr>
+<tr><td>title</td><td>8</td><td class='missing'>0</td><td>国务院关于《加快推进服务业扩大开放综合试点工作方案》的批复</td></tr>
+<tr><td>pcode</td><td>8</td><td class='missing'>0</td><td>国函〔2025〕39号</td></tr>
+<tr><td>puborg</td><td>8</td><td class='missing'>0</td><td>国务院</td></tr>
+<tr><td>pubtime</td><td>8</td><td class='missing'>0</td><td>2025.04.11</td></tr>
+<tr><td>source_name</td><td>8</td><td class='missing'>0</td><td>t1_govcn_bench</td></tr>
 </table>
 <h2>2. 数值列统计</h2><table><tr><th>列</th><th>样本</th><th>最小</th><th>最大</th><th>均值</th><th>中位数</th><th>缺失</th></tr>
-<tr><td>价格</td><td>30</td><td>10</td><td>39</td><td>24.5</td><td>24</td><td>0</td></tr>
-<tr><td>分类</td><td>30</td><td>0</td><td>2</td><td>1.0</td><td>1</td><td>0</td></tr>
+<tr><td>pcode</td><td>8</td><td>2015</td><td>2025</td><td>2020.2</td><td>2020</td><td>0</td></tr>
+<tr><td>pubtime</td><td>8</td><td>2015</td><td>2025</td><td>2020.3</td><td>2021</td><td>0</td></tr>
+<tr><td>source_name</td><td>8</td><td>1</td><td>1</td><td>1.0</td><td>1</td><td>0</td></tr>
 </table>
 <h2>4. 数值分布（HTML 条形图）</h2>
-<h3>价格</h3><svg width='900' height='260'>
+<h3>pcode</h3><svg width='900' height='260'>
 <rect x='60' y='20' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='32'>3</text>
-<text x='5' y='32'>10</text>
-<rect x='60' y='42' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='54'>3</text>
-<text x='5' y='54'>13</text>
-<rect x='60' y='64' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='76'>3</text>
-<text x='5' y='76'>16</text>
-<rect x='60' y='86' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='98'>3</text>
-<text x='5' y='98'>19</text>
-<rect x='60' y='108' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='120'>3</text>
-<text x='5' y='120'>22</text>
-<rect x='60' y='130' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='142'>3</text>
-<text x='5' y='142'>24</text>
-<rect x='60' y='152' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='164'>3</text>
-<text x='5' y='164'>27</text>
-<rect x='60' y='174' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='186'>3</text>
-<text x='5' y='186'>30</text>
-<rect x='60' y='196' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='208'>3</text>
-<text x='5' y='208'>33</text>
-<rect x='60' y='218' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='230'>3</text>
-<text x='5' y='230'>36</text>
-</svg>
-<h3>分类</h3><svg width='900' height='260'>
-<rect x='60' y='20' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='32'>10</text>
-<text x='5' y='32'>0</text>
+<text x='365' y='32'>1</text>
+<text x='5' y='32'>2015</text>
 <rect x='60' y='42' width='2' height='16' fill='#4361ee'/>
 <text x='67' y='54'>0</text>
-<text x='5' y='54'>0</text>
+<text x='5' y='54'>2016</text>
+<rect x='60' y='64' width='300' height='16' fill='#4361ee'/>
+<text x='365' y='76'>1</text>
+<text x='5' y='76'>2017</text>
+<rect x='60' y='86' width='2' height='16' fill='#4361ee'/>
+<text x='67' y='98'>0</text>
+<text x='5' y='98'>2018</text>
+<rect x='60' y='108' width='300' height='16' fill='#4361ee'/>
+<text x='365' y='120'>1</text>
+<text x='5' y='120'>2019</text>
+<rect x='60' y='130' width='300' height='16' fill='#4361ee'/>
+<text x='365' y='142'>1</text>
+<text x='5' y='142'>2020</text>
+<rect x='60' y='152' width='300' height='16' fill='#4361ee'/>
+<text x='365' y='164'>1</text>
+<text x='5' y='164'>2021</text>
+<rect x='60' y='174' width='300' height='16' fill='#4361ee'/>
+<text x='365' y='186'>1</text>
+<text x='5' y='186'>2022</text>
+<rect x='60' y='196' width='300' height='16' fill='#4361ee'/>
+<text x='365' y='208'>1</text>
+<text x='5' y='208'>2023</text>
+<rect x='60' y='218' width='300' height='16' fill='#4361ee'/>
+<text x='365' y='230'>1</text>
+<text x='5' y='230'>2024</text>
+</svg>
+<h3>pubtime</h3><svg width='900' height='260'>
+<rect x='60' y='20' width='150' height='16' fill='#4361ee'/>
+<text x='215' y='32'>1</text>
+<text x='5' y='32'>2015</text>
+<rect x='60' y='42' width='2' height='16' fill='#4361ee'/>
+<text x='67' y='54'>0</text>
+<text x='5' y='54'>2016</text>
+<rect x='60' y='64' width='150' height='16' fill='#4361ee'/>
+<text x='215' y='76'>1</text>
+<text x='5' y='76'>2017</text>
+<rect x='60' y='86' width='150' height='16' fill='#4361ee'/>
+<text x='215' y='98'>1</text>
+<text x='5' y='98'>2018</text>
+<rect x='60' y='108' width='2' height='16' fill='#4361ee'/>
+<text x='67' y='120'>0</text>
+<text x='5' y='120'>2019</text>
+<rect x='60' y='130' width='300' height='16' fill='#4361ee'/>
+<text x='365' y='142'>2</text>
+<text x='5' y='142'>2020</text>
+<rect x='60' y='152' width='2' height='16' fill='#4361ee'/>
+<text x='67' y='164'>0</text>
+<text x='5' y='164'>2021</text>
+<rect x='60' y='174' width='150' height='16' fill='#4361ee'/>
+<text x='215' y='186'>1</text>
+<text x='5' y='186'>2022</text>
+<rect x='60' y='196' width='150' height='16' fill='#4361ee'/>
+<text x='215' y='208'>1</text>
+<text x='5' y='208'>2023</text>
+<rect x='60' y='218' width='150' height='16' fill='#4361ee'/>
+<text x='215' y='230'>1</text>
+<text x='5' y='230'>2024</text>
+</svg>
+<h3>source_name</h3><svg width='900' height='260'>
+<rect x='60' y='20' width='300' height='16' fill='#4361ee'/>
+<text x='365' y='32'>8</text>
+<text x='5' y='32'>1</text>
+<rect x='60' y='42' width='2' height='16' fill='#4361ee'/>
+<text x='67' y='54'>0</text>
+<text x='5' y='54'>1</text>
 <rect x='60' y='64' width='2' height='16' fill='#4361ee'/>
 <text x='67' y='76'>0</text>
-<text x='5' y='76'>0</text>
+<text x='5' y='76'>1</text>
 <rect x='60' y='86' width='2' height='16' fill='#4361ee'/>
 <text x='67' y='98'>0</text>
 <text x='5' y='98'>1</text>
 <rect x='60' y='108' width='2' height='16' fill='#4361ee'/>
 <text x='67' y='120'>0</text>
 <text x='5' y='120'>1</text>
-<rect x='60' y='130' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='142'>10</text>
-<text x='5' y='142'>1</text>
+<rect x='60' y='130' width='2' height='16' fill='#4361ee'/>
+<text x='67' y='142'>0</text>
+<text x='5' y='142'>2</text>
 <rect x='60' y='152' width='2' height='16' fill='#4361ee'/>
 <text x='67' y='164'>0</text>
-<text x='5' y='164'>1</text>
+<text x='5' y='164'>2</text>
 <rect x='60' y='174' width='2' height='16' fill='#4361ee'/>
 <text x='67' y='186'>0</text>
-<text x='5' y='186'>1</text>
+<text x='5' y='186'>2</text>
 <rect x='60' y='196' width='2' height='16' fill='#4361ee'/>
 <text x='67' y='208'>0</text>
 <text x='5' y='208'>2</text>
-<rect x='60' y='218' width='300' height='16' fill='#4361ee'/>
-<text x='365' y='230'>10</text>
+<rect x='60' y='218' width='2' height='16' fill='#4361ee'/>
+<text x='67' y='230'>0</text>
 <text x='5' y='230'>2</text>
 </svg>
 </body></html>

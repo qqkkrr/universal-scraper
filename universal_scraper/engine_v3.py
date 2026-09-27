@@ -1622,6 +1622,12 @@ class EngineV3:
                     self.logger.warn("spool 已开启但找不到 jsonl（storage 非 jsonl 时 spool 不生效，回退内存数据）")
             except Exception as e:
                 self.logger.warn(f"spool 读取失败，退回内存数据: {e}")
+        # 收官四轮（审查 M）：--limit=N 只停取数不断当前页——末页剩余条目照写
+        # 全量导出（N=5 出 10 条、verify"声明 vs 文件"必 fail）。到达 limit 后
+        # 在导出前截到 limit（用户意图=最多 N 条，不是"从第 N 条处开始的页全收"）
+        if self.limit and len(rows) > self.limit:
+            self.logger.info(f"limit={self.limit} 截取导出（捕获 {len(rows)} 条 → {self.limit} 条）")
+            rows = rows[:self.limit]
         base = self.config.get("output", {}).get("base_name", safe_fname(self.task.name))
         # resume：合并之前已导出的记录（按 _url 去重），保证输出完整
         prev_json = self.out_dir / f"{base}.json"
