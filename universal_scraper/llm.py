@@ -106,6 +106,12 @@ class LLMClient:
                         f"LLM 响应格式异常（缺少 choices[0].message.content）: {str(data)[:200]}") from e
             except _LLMFormatError:
                 raise
+            except urllib.error.HTTPError as e:
+                # 收官九轮（审查）：4xx = 请求本身有误（key/参数/格式）——重试
+                # 同样的请求必然同样失败，白白烧掉预算和时间
+                e.close() if hasattr(e, 'close') else None
+                raise RuntimeError(f"LLM HTTP {e.code}（{'认证失败' if e.code in (401,403) else '请求错误'}）"
+                                   f"——非瞬时错误，不重试: {e.read().decode('utf-8','ignore')[:200]}") from e
             except Exception as e:
                 last_err = str(e)
                 if attempt < retries + 1:

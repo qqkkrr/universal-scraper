@@ -109,7 +109,7 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
                 "pass": False,
                 "value": f"所有 {len(rows)} 行均无业务字段（导出损坏/选择器全空）",
             })
-        fields = fields[:12]
+        fields = fields[:30]  # 收官九轮：12 曾静默截断第 13 列起的坏列
         for f in fields:
             n_ok = sum(1 for r in rows if _norm(r.get(f)))
             # OCR R131 反馈 #3：`--`/`N/A` 等"来源确认无此项"占位符不拉低完整率。

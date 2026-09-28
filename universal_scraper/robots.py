@@ -80,7 +80,13 @@ class WildcardRobotParser(RobotFileParser):
         """适用组的全部规则（含纯前缀规则）——最长匹配仲裁必须在同一张桌上做：
         纯前缀 Allow 要能翻案通配 Disallow（反之亦然），只看通配规则会失衡。"""
         ua = (useragent or "*").lower()
-        named = [t for t in self._raw_rules if any(a != "*" and a in ua for a in t[0])]
+        # 收官九轮（审查）：子串匹配改 product-token 精确匹配——"scraper" 曾命中
+        # "universal-scraper/1.0" 并整体顶替 * 组（wrong-allow）。Google 语义：
+        # 具名 UA 组须与请求 UA 的 product token 精确匹配（首个 / 前的部分）
+        ua_token = ua.split("/")[0].strip()
+        named = [t for t in self._raw_rules
+                 if any(a != "*" and (a.lower() == ua_token or ua_token.startswith(a.lower()))
+                        for a in t[0])]
         pool = named or [t for t in self._raw_rules if any(a == "*" for a in t[0])]
         return [(r, p) for _ags, r, p in pool]
 

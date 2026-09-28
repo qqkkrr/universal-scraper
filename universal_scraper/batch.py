@@ -183,6 +183,8 @@ class BatchQueue:
 
         def _mark(items):
             for it in items:
+                if not it.get("id"):
+                    continue  # 收官九轮：缺 id 项 str()→"None" 曾被 mark("None") 误匹配
                 if str(it.get("id")) == str(item_id):
                     was_pending = it.get("status") == "pending"
                     if status == "retry":
