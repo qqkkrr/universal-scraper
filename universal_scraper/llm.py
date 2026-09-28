@@ -31,7 +31,7 @@ def _get_key() -> str:
         # 整体回溯失配（实测 m=None）
         m = (re.search(r'^export\s+QWEN_API_KEY="([^"]*)"', zs.read_text(), re.M)
              or re.search(r"^export\s+QWEN_API_KEY='([^']*)'", zs.read_text(), re.M)
-             or re.search(r'^export\s+QWEN_API_KEY=([^"\'\s#]+)', zs.read_text(), re.M))
+             or re.search(r'^export\s+QWEN_API_KEY=([^"\'\s#;]+)', zs.read_text(), re.M))
         if m:
             return (m.group(1) or "").strip()
     except OSError:
