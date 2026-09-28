@@ -95,7 +95,13 @@ def load_universe(path: str, year_from: int, year_to: int) -> List[Tuple[str, in
         raise SystemExit(f"✗ 清单缺 stkcd 列: 实有 {list(rows[0])[:6]}")
     pending: List[Tuple[str, int]] = []
     for r in rows:
-        code = "".join(ch for ch in str(r.get("stkcd", "")) if ch.isdigit()).zfill(6)
+        # 收官十二轮（审查，实测）：pandas 导出的代码常带浮点尾（"600519.0"/"1.0"），
+        # 旧提取 `"600519.0"→"6005190"`（7 位被静默丢弃=整家公司消失）、
+        # `"1.0"→"10"→zfill"000010"`（**映射到另一家公司**）。先去浮点尾再取数字
+        _raw = str(r.get("stkcd", "")).strip()
+        if _raw.endswith(".0"):
+            _raw = _raw[:-2]
+        code = "".join(ch for ch in _raw if ch.isdigit()).zfill(6)
         if len(code) != 6:
             continue
         fy = _to_int(r.get("first_year") or year_from)
@@ -477,7 +483,11 @@ def build_panel_xlsx(out_dir: Path, universe_csv: str, keywords: Dict[str, List[
     if universe_rows and "stkcd" not in universe_rows[0]:
         raise SystemExit(f"✗ 清单缺 stkcd 列: 实有 {list(universe_rows[0])[:6]}")
     for r in universe_rows:
-        code = "".join(ch for ch in str(r.get("stkcd", "")) if ch.isdigit()).zfill(6)
+        # 收官十二轮（审查）：与 load_universe 同款 pandas 浮点尾修复
+        _raw = str(r.get("stkcd", "")).strip()
+        if _raw.endswith(".0"):
+            _raw = _raw[:-2]
+        code = "".join(ch for ch in _raw if ch.isdigit()).zfill(6)
         win[code] = (_to_int(r.get("first_year") or year_from), _to_int(r.get("last_year") or year_to))
 
     rows = {}

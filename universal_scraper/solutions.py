@@ -25,10 +25,15 @@ def classify_failure(error_text: str = "", messages: Optional[list] = None,
             return "entry_invalid"
     # 1) 入口/连接失效（404、连接拒绝、域名、入口）
     if re.search(r"404|not found|找不到|无法连接|connection refused|connectionerror|"
-                 r"err_connection|无法访问|入口|dns|解析.*失败|getaddrinfo", txt, re.I):
+                 r"err_connection|无法访问|入口|dns\s*解析失败|域名解析失败|getaddrinfo", txt, re.I):
         # 404 也可能是页面本身不存在；若同时提到登录/验证码则优先登录
         if not re.search(r"登录|验证码|滑块|登录墙", txt, re.I):
             return "entry_invalid"
+    # 1b) 收官十二轮（审查）：`解析失败`类文本归选择器失败（check 5 的信号曾被
+    # 上面的 `解析.*失败` 抢走——DNS 语义已收窄，这里把裸"解析失败"也接住）
+    if re.search(r"解析失败|解析到\s*0|解析 0", txt, re.I) and \
+            not re.search(r"登录|验证码|滑块|403|412|429|waf", txt, re.I):
+        return "selector_failed"
     # 2) IP 风控 / WAF（403/412/429、请求被阻断、阿里云）
     if re.search(r"403|412|429|请求被阻断|被阻断|forbidden|waf|antibot|安全防护|"
                  r"访问过于频繁|被拦截|请求被拒绝", txt, re.I):

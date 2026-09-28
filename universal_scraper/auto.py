@@ -291,7 +291,10 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         if not r.get("parser") or r.get("parser") not in cfg.get("parsers", {}):
             r["parser"] = "default"
     # 分页/列表 allow 自动锚定：非锚定的 page 类正则改为 ^/...$（按路径匹配），
-    # 避免 /page/\\d+/ 把 /tag/xxx/page/1/ 这类同构 URL 全部入队导致队列爆炸
+    # 避免 /page/\\d+/ 把 /tag/xxx/page/1/ 这类同构 URL 全部入队导致队列爆炸。
+    # 收官十二轮（审查，实测）：**query 型** allow（如 page=\\d+，触发条件里的 `p=`
+    # 正说明预期它存在）一律不加 ^/ 锚——引擎按"path+query"做 re.search，
+    # `^/page=\d+` 对 /list?page=2 永不命中 → 翻页链接被滤光、任务只抓第 1 页报成功
     for pcfg in cfg.get("parsers", {}).values():
         if not isinstance(pcfg, dict):
             continue
@@ -300,13 +303,15 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         if isinstance(allow, str) and re.search(r"(page|p=)", allow, re.I) \
                 and re.search(r"\\d|\[0-9\]", allow):
             allow = allow.strip()
-            if not allow.startswith("^"):
+            _is_queryish = allow.startswith(("page=", "p=", "[?&]")) or \
+                re.match(r"^[^/\\^]*=", allow)          # 含 = 且不以 / 开头 → query 型
+            if not _is_queryish and not allow.startswith("^"):
                 # 非锚定 → 锚定为路径模式（^/...），防止 /tag/xxx/page/1/ 同构 URL 入队
                 if allow.startswith("/"):
                     lk["allow"] = f"^{allow.rstrip('/')}/?$"
                 else:
                     lk["allow"] = f"^/{allow.lstrip('/')}"
-            elif not allow.startswith(("^/", "^http", "^https", r"^\w+://")):
+            elif not _is_queryish and not allow.startswith(("^/", "^http", "^https", r"^\w+://")):
                 # 已锚定但缺路径开头 /（如 ^catalogue/page-\\d+.html$ → ^/catalogue/...）
                 lk["allow"] = "^/" + allow[1:]
             pcfg["extract_links"] = lk
@@ -333,7 +338,12 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             elif rp.startswith("$."):
                 pcfg["records_path"] = rp[2:]
             elif rp.startswith("$["):
-                pcfg["records_path"] = ""
+                # 收官十二轮（审查）：`$[0].data` 型 JSONPath 曾被规范化为空串
+                # （路径信息丢失，引擎按顶层数组找记录 → 0 条空转）。映射为
+                # 引擎的 `0.data` 点分形态
+                _m = re.match(r"^\$\[(\d+)\](?:\.(.+))?$", rp)
+                pcfg["records_path"] = (f"{_m.group(1)}.{_m.group(2)}" if _m and _m.group(2)
+                                        else (_m.group(1) if _m else ""))
     # start_urls 过滤非 http(s)
     cfg["start_urls"] = [u for u in cfg.get("start_urls", []) if str(u).startswith(("http://", "https://"))]
     if not cfg["start_urls"]:
@@ -408,6 +418,16 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     for _ex in (_det.get("extract") or []):
         if isinstance(_ex, dict) and _ex.get("name"):
             _known.add(_ex["name"])
+    # 收官十二轮（审查，实测）：parse_date 的 out 产物（省略时默认 timestamp）是
+    # 合法的下游过滤字段——引擎 modules/pipelines.py 支持任意 out 名。原白名单不认
+    # 它们，导致 `parse_date(out=pub_ts) → filter(pub_ts, between)` 链条里的日期
+    # 过滤被**静默删除**，"只抓今天"的配置实际导出全部日期数据并报成功
+    for _pl in (cfg.get("pipelines") or []):
+        if isinstance(_pl, dict) and _pl.get("type") == "parse_date":
+            _known.add(str(_pl.get("out") or "timestamp"))
+    for _pl in (_det.get("filters") or []):
+        if isinstance(_pl, dict) and _pl.get("type") == "parse_date":
+            _known.add(str(_pl.get("out") or "timestamp"))
     _kept_pl = []
     for _pl in (cfg.get("pipelines") or []):
         if not isinstance(_pl, dict):
@@ -570,7 +590,13 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     if (any(_host.endswith(d) for d in _http_ok_domains) \
             or ("/api/" in _su0 and not _is_login_host)
             or ("leetcode.cn" in _host and "/api/" in _su0)) and not _is_login_host:
-        cfg["source"] = {"type": "http"}
+        # 收官十二轮（审查，实测）：复用/已学路径会再次走进 _validate_and_fix——
+        # 整包替换曾把 source.headers 里的 Cookie/自定义 UA 静默抹掉，
+        # 带登录态的 API 任务复用时变成未授权请求空转。只规范化 type，保留其余
+        if not isinstance(cfg.get("source"), dict):
+            cfg["source"] = {"type": "http"}
+        else:
+            cfg["source"]["type"] = "http"
     # 强制 JSON 精配站点用 http + 不弹登录
     cfg.setdefault("anti_bot", {})
 
@@ -910,13 +936,25 @@ def _try_precise_first(description: str, cfg: dict, limit, log, out_name: str = 
         box: Dict[str, Any] = {}
 
         # 迟到的精配线程与通用引擎写同名导出会互相覆盖：用"可变 out_name 容器 +
-        # 超时到点改名"让线程在写盘时（run_site 结尾）拿到隔离名
+        # 超时到点改名"让线程在写盘时（run_site 结尾）拿到隔离名。
+        # 收官十二轮（审查，实测）：曾直接传 `_out_box["name"]`——实参在调用瞬间
+        # 求值，超时后再改容器对已在跑的线程无效，日志承诺的隔离名不成立。
+        # run_site 对 name 只做 f-string 插值（无方法调用），传懒对象即可在
+        # **写盘时刻**重新读取容器
+        class _LazyOutName:
+            def __init__(self, b: Dict[str, Any]):
+                self._b = b
+
+            def __str__(self) -> str:
+                return str(self._b.get("name"))
+
         _out_box = {"name": out_name or None}
 
         def _run():
             try:
                 box["r"] = run_site(su, cookie=_ch, proxy=_px or None,
-                                    limit=int(limit or 20), out_name=_out_box["name"])
+                                    limit=int(limit or 20),
+                                    out_name=_LazyOutName(_out_box))
             except Exception as e:
                 box["e"] = e
 
@@ -1057,7 +1095,10 @@ def _missing_key_field(description: str, sample: list) -> str:
             _y, _n = m.group(1), m.group(2)
             hay = " ".join(str(v) for it in sample for k, v in it.items() if not str(k).startswith("_"))
             # 兼容常见期号写法：2026年第1期 / 2026年,第1期 / 2026年1月 / 2026.43(1)（ajcass）
-            if not re.search(rf"{_y}年(?:,)?第{_n}期|{_y}年{_n}月|{_y}\.\d+\s*\(\s*{_n}\s*\)", hay):
+            # 收官十二轮（审查，实测）：真实抓取数据几乎总是 ISO 日期（2026-09-15）——
+            # 旧匹配只认中文形态，正确结果被判"缺字段"触发无意义自修复/否决
+            if not re.search(rf"{_y}年(?:,)?第{_n}期|{_y}年{_n}月|{_y}\.\d+\s*\(\s*{_n}\s*\)"
+                             rf"|{_y}-{int(_n):0>2}(?!\d)|{_y}-{_n}(?!\d)", hay):
                 missing.append(f"{_y}年第{_n}期")
     return "、".join(missing)
 
@@ -1461,9 +1502,12 @@ def _fix_dead_domains(cfg: dict, description: str = "", log=None) -> dict:
 
         scored.sort(key=lambda x: (-x[0], _path_pref(x[1]), len(x[1])))
         candidates = [u for _, u in scored[:1]]
-        with _DNS_FIX_LOCK:
-            _DNS_FIX_CACHE[cache_key] = candidates
-            _dns_cache_save()
+        # 收官十二轮（审查）：搜索空结果曾作为结论缓存（无 TTL 落盘）——
+        # 首次搜索遇网络抖动后，同描述的官方域名救援永久停用。空结果不写缓存
+        if candidates:
+            with _DNS_FIX_LOCK:
+                _DNS_FIX_CACHE[cache_key] = candidates
+                _dns_cache_save()
     if candidates:
         cfg["start_urls"] = candidates
         if log:
@@ -1497,6 +1541,18 @@ def _force_browser_waf(cfg: dict) -> dict:
     for k in ("headers", "cdp", "record_from", "capture_all"):
         if old.get(k):
             src[k] = old[k]
+    # 收官十二轮（审查，实测）：http→browser 升级曾整包替换 source，丢掉
+    # query（筛选/分页参数）与 actions——浏览器打开无参数裸入口，抓的是"另一页"
+    # 数据且无任何提示。query 是 fetchers 的一等参数（http 模式合并进请求），
+    # 升级时拼进各入口 URL 的查询串
+    _q = old.get("query") or {}
+    if _q:
+        from urllib.parse import urlencode as _ue
+        _qs = _ue(_q)
+        cfg["start_urls"] = [u + ("&" if "?" in u else "?") + _qs
+                             for u in (cfg.get("start_urls") or [])]
+    if old.get("actions"):
+        src["actions"] = old["actions"]
     if (old.get("login") or {}).get("enabled"):
         src["login"] = old["login"]
     cfg["source"] = src
@@ -1690,8 +1746,11 @@ def describe_route(cfg: dict, description: str = "") -> Dict[str, str]:
         if pl.get("type") == "filter" and pl.get("op") == "between":
             import datetime
             try:
-                t0 = datetime.datetime.fromtimestamp(int(pl["min"])).strftime("%Y-%m-%d")
-                t1 = datetime.datetime.fromtimestamp(int(pl["max"])).strftime("%Y-%m-%d")
+                # 收官十二轮（审查）：配置日期语义是北京时间——用本机时区曾让
+                # 非 CST 机器显示差一天，与注入给 AI 的口径不一致
+                _cst = datetime.timezone(datetime.timedelta(hours=8))
+                t0 = datetime.datetime.fromtimestamp(int(pl["min"]), _cst).strftime("%Y-%m-%d")
+                t1 = datetime.datetime.fromtimestamp(int(pl["max"]), _cst).strftime("%Y-%m-%d")
                 summary_parts.append(f"日期过滤: {t0} ~ {t1}")
             except Exception:
                 pass
@@ -1905,15 +1964,23 @@ def _save_learned(cfg: dict, description: str, log=None) -> None:
 
 
 def _try_learned_config(description: str, log=None) -> Optional[Dict[str, Any]]:
-    """任务启动前：从描述里找已知域名 → 命中「已学精配」直接返回配置（跳过 AI 生成）。"""
+    """任务启动前：从描述里找已知域名 → 命中「已学精配」直接返回配置（跳过 AI 生成）。
+
+    收官十二轮（审查，实测）：描述里有**显式 URL** 时，已学配置的旧入口曾原样
+    覆盖用户本次给的 URL——"同站另一板块"的任务全部打到旧入口（选择器恰好能用
+    → 全流程报成功，实际抓的是旧页面）。现按域名保留映射：复用解析器的同时，
+    入口换成本次描述里的 URL。"""
     try:
-        # 1) 描述里显式 URL 的域名
+        # 1) 描述里显式 URL 的域名（顺带记录 URL 本身，复用时替换入口）
         hosts = set()
-        for m in re.finditer("https?://([^/\\s'\"]+)", description):
+        url_by_host: Dict[str, str] = {}
+        for m in re.finditer(r"https?://[^\s'\"]+", description):
             from .cookies import _norm_domain
-            h = _norm_domain(m.group(1))
+            u = m.group(0).rstrip(".,;，。）)；")
+            h = _norm_domain(re.match(r"https?://([^/\s'\"]+)", u).group(1))
             if h:
                 hosts.add(h)
+                url_by_host.setdefault(h, u)
         # 2) 描述关键词匹配已学域名（含 www. 前缀归一）
         if not hosts and LEARNED_DIR.exists():
             _d = description.lower()
@@ -1937,7 +2004,13 @@ def _try_learned_config(description: str, log=None) -> Optional[Dict[str, Any]]:
             cfg = d.get("config") or {}
             if not cfg.get("start_urls"):
                 continue
-            if log:
+            if h in url_by_host:
+                cfg = dict(cfg)
+                cfg["start_urls"] = [url_by_host[h]]
+                if log:
+                    log(f"🧠 命中已学精配[{h}]（复用解析器，入口已换成本次描述的 URL: "
+                        f"{url_by_host[h][:60]}）")
+            elif log:
                 log(f"🧠 命中已学精配[{h}]（跳过 AI 生成，直接复用上次成功配置）")
             return cfg
     except Exception:
@@ -1995,7 +2068,7 @@ def url_variants(url: str, max_n: int = 6) -> list:
     """入口 URL 变体（对标 Crawlee URL normalization）：小白常贴错协议/www/
     尾斜杠，或站点实际是移动版——按序生成可达性候选，预检失败时逐一尝试。
     顺序：原始（去 fragment）→ 剥跟踪参数 → 协议互换 → 加/去 www → m. 移动版。"""
-    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    from urllib.parse import urlsplit, urlunsplit
     try:
         sp = urlsplit(str(url or "").strip())
     except Exception:
@@ -2021,10 +2094,16 @@ def url_variants(url: str, max_n: int = 6) -> list:
     def _u(scheme, netloc, path, query):
         return urlunsplit((scheme, netloc, path or "/", query, ""))
 
-    # 剥 utm_*/fbclid 等跟踪参数（只影响分析统计，不影响资源寻址）
-    q = [(k, v) for k, v in parse_qsl(sp.query, keep_blank_values=True)
-         if not k.lower().startswith(("utm_", "fbclid", "gclid", "ref_"))]
-    qstr = urlencode(q)
+    # 剥 utm_*/fbclid 等跟踪参数（只影响分析统计，不影响资源寻址）。
+    # 收官十二轮（审查，实测）：parse_qsl 默认按 UTF-8 解——GBK 百分号编码（大量
+    # 老站/政企站）被解成 U+FFFD 再编码，base 变体即损坏（%C6%FB%B3%B5"汽车" →
+    # %EF%BF%BD…）。改为在**原始查询串**上按键前缀过滤、原样保留命中的参数
+    # （零解码零重编码，对任何编码都无损）
+    _track = ("utm_", "fbclid", "gclid", "ref_")
+    _qparts = [p for p in sp.query.split("&") if p]
+    _kept_q = [p for p in _qparts
+               if not p.split("=", 1)[0].lower().startswith(_track)]
+    qstr = "&".join(_kept_q)
     base = _u(sp.scheme, host, sp.path or "/", qstr)
     no_track = _u(sp.scheme, host, sp.path.rstrip("/") or "/", qstr) if sp.path not in ("", "/") else base
     alt_scheme = _u("http" if sp.scheme == "https" else "https", host, sp.path or "/", qstr)
@@ -2647,6 +2726,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     _precise = _try_precise_first(description or "", config, limit, log, out_name=name)
     _precise_done = bool(_precise and _precise.get("rows"))
     _precise_attempted = _precise is not None   # run 型已试过：末尾不再重复打站
+    _auto_precise_rejected = False  # 收官十二轮：与 auto_task 同款——本轮被否决的精配，末尾不再无门禁覆盖
     if _precise_done:
         sample = _precise["rows"][:5]
         files = _precise["files"]
@@ -2757,6 +2837,10 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                                     round_timeout=round_timeout)
             if _ap is not None:
                 return _ap
+            # 收官十二轮（审查，实测）：None 可能是"质量门否决"（自动精配结果不达
+            # 要求）而非"没试过"——末尾 run_site 覆盖缺这个标志时会把刚否决的坏
+            # 结果重新采纳入库并报成功（auto_task 同款守卫在 2569 行，此处曾漏拷）
+            _auto_precise_rejected = True
 
         # 🛡️ WAF 滑块拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
         # 注意：即使本轮有真实行，只要 WAF 拦截导致关键字段缺失/详情失败，也必须升级
@@ -2844,8 +2928,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
 
     # 收官四轮（审查 H 同款）：run_with_config 的末尾精配覆盖加同款门禁——
-    # 已有成功结果（total>0）时不用精配覆盖
-    if not _precise_done and not _precise_attempted and total <= 0:
+    # 已有成功结果（total>0）或本轮已否决过精配时不用精配覆盖
+    if not _precise_done and not _precise_attempted and not _auto_precise_rejected and total <= 0:
         try:
             su = (config.get("start_urls") or [""])[0]
             from .sites import match_site, run_site

@@ -189,22 +189,26 @@ def _llm(messages: List[Dict[str, str]], timeout: int = 150) -> str:
 def _parse_action(raw: str) -> Dict[str, Any]:
     import re
     # OCR R131 二轮（M）：贪婪 \{.*\} 曾吞多个 JSON 块/噪声——与 llm.py 同口径：
-    # 先试最短片段，失败再回退贪婪（嵌套 JSON 保持可提取性）
-    mm = re.search(r"\{.*?\}", raw or "", re.S)
-    d = None
-    if mm:
+    # 先试最短片段，失败再回退贪婪（嵌套 JSON 保持可提取性）。
+    # 收官十二轮（审查，实测）：最短片段"解析成功但缺 action"时曾直接报错——
+    # LLM 先输出说明性 JSON（页面摘要）再给真正动作的形态被丢掉。改为遍历全部
+    # 最短块找含 action 的 dict，找不到再试贪婪（嵌套 JSON），两者皆无才报错
+    for mm in re.finditer(r"\{.*?\}", raw or "", re.S):
         try:
             d = json.loads(mm.group(0))
         except Exception:
-            d = None
-    if d is None:
-        mm = re.search(r"\{.*\}", raw or "", re.S)
-        if not mm:
-            raise AgentError("LLM 未返回动作 JSON: " + (raw or "")[:120])
-        d = json.loads(mm.group(0))
-    if not isinstance(d, dict) or "action" not in d:
-        raise AgentError("动作缺少 action 字段")
-    return d
+            continue
+        if isinstance(d, dict) and "action" in d:
+            return d
+    mm = re.search(r"\{.*\}", raw or "", re.S)
+    if mm:
+        try:
+            d = json.loads(mm.group(0))
+            if isinstance(d, dict) and "action" in d:
+                return d
+        except Exception:
+            pass
+    raise AgentError("LLM 未返回含 action 的 JSON: " + (raw or "")[:120])
 
 
 def _extract_items(description: str, page_text: str, schema: Dict[str, Any],
@@ -222,20 +226,30 @@ def _extract_items(description: str, page_text: str, schema: Dict[str, Any],
         {"role": "user", "content": prompt},
     ], timeout=150)
     import re as _re
-    # OCR R131 二轮（M）：同 _parse_action——最短优先、贪婪回退
-    arr = None
-    m = _re.search(r"\[.*?\]", raw or "", _re.S)
-    if m:
+    # OCR R131 二轮（M）：同 _parse_action——最短优先、贪婪回退。
+    # 收官十二轮（审查，实测）：最短片段"解析成功但不含 dict 条目"时曾静默 0 条
+    # （LLM 回显 schema 字段名的短数组顶掉真数据；且贪婪跨两段数组解析不了）。
+    # 改为遍历全部最短块取"含 dict 条目最多"者，无则贪婪兜底，再无按 [] 处理
+    _cands = []
+    for mm in _re.finditer(r"\[.*?\]", raw or "", _re.S):
         try:
-            arr = json.loads(m.group(0))
+            a = json.loads(mm.group(0))
         except Exception:
-            arr = None
-    if not isinstance(arr, list):
-        m = _re.search(r"\[.*\]", raw or "", _re.S)
-        try:
-            arr = json.loads(m.group(0)) if m else []
-        except Exception:
-            arr = []
+            continue
+        if isinstance(a, list):
+            _cands.append(a)
+    _dict_cands = [a for a in _cands if any(isinstance(it, dict) for it in a)]
+    if not _dict_cands:
+        mm = _re.search(r"\[.*\]", raw or "", _re.S)
+        if mm:
+            try:
+                a = json.loads(mm.group(0))
+                if isinstance(a, list):
+                    _dict_cands.append(a)
+            except Exception:
+                pass
+    arr = (max(_dict_cands, key=lambda a: sum(1 for it in a if isinstance(it, dict)))
+           if _dict_cands else None)
     if not isinstance(arr, list):
         return []
     items = [it for it in arr if isinstance(it, dict) and any(str(v or "").strip() for v in it.values())]

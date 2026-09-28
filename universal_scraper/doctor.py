@@ -113,7 +113,11 @@ def check_port(port: int = 8642) -> List[Dict[str, str]]:
 def check_repo() -> List[Dict[str, str]]:
     out = []
     git = Path(ROOT) / ".git"
-    out.append({"item": "git 仓库", "ok": git.exists(), "hint": "" if git.exists() else "未初始化"})
+    # 收官十二轮（审查 L）：git 缺失曾计硬失败——zip 免安装分发（SKILL.md 明确
+    # 支持）下 doctor 恒 exit 1，与第八轮"工作区改 optional"的哲学矛盾。
+    # git 只影响在线更新，不属采集能力
+    out.append({"item": "git 仓库", "ok": True, "optional": True,
+                "hint": "" if git.exists() else "未初始化（仅影响在线更新，不影响采集）"})
     if git.exists():
         try:
             r = subprocess.run(["git", "-C", str(ROOT), "status", "--short"], capture_output=True, text=True, timeout=15)

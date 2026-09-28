@@ -42,24 +42,35 @@ def _guess_records_path(obj: Any, depth: int = 0) -> str:
               "datas", "content", "page"):
         if k in obj:
             v = obj[k]
-            if isinstance(v, list) and v and isinstance(v[0], dict):
+            # 收官十二轮（审查，实测）：空数组曾返回 "" → one_config 误判
+            # single_record=True → 引擎把整响应当一条记录（翻到底/被过滤的查询
+            # 常捕获到空页）。空数组路径仍返回该键（空 ≠ 单对象响应）
+            if isinstance(v, list) and (not v or isinstance(v[0], dict)):
                 return k
             if isinstance(v, dict):
                 sub = _guess_records_path(v, depth + 1)
                 if sub:
                     return f"{k}.{sub}" if sub != "." else k
-    # 兜底：任何含 dict 列表的键
+    # 兜底：任何含 dict 列表的键（含空数组）
     for k, v in obj.items():
-        if isinstance(v, list) and v and isinstance(v[0], dict):
+        if isinstance(v, list) and (not v or isinstance(v[0], dict)):
             return k
     return ""
 
 
-def _page_param_holders(params: Dict[str, Any]) -> Dict[str, Any]:
-    """把翻页参数替换成 {{page}} 模板占位。"""
+def _page_param_holders(params: Dict[str, Any], _prefix: str = "") -> Dict[str, Any]:
+    """把翻页参数替换成 {{page}} 模板占位（递归——收官十二轮审查：嵌套体
+    {"query":{"pageNum":1}} 曾原样保留数字页码，配置 strategy=none 静默只抓第 1 页）。"""
     out = {}
     for k, v in params.items():
-        if k.lower() in PAGE_KEYS and str(v).lstrip("-").isdigit():
+        if isinstance(v, dict):
+            _sub = _page_param_holders(v)
+            if _sub != v:
+                out[k] = _sub
+            else:
+                out[k] = v
+        elif k.lower() in PAGE_KEYS and str(v).lstrip("-").rstrip("0").rstrip(".").isdigit() or \
+                (k.lower() in PAGE_KEYS and isinstance(v, (int, float))):
             out[k] = "{{page}}"
         else:
             out[k] = v
@@ -135,25 +146,39 @@ def _detect_chains(samples: list, log=print) -> list:
                     hit = None
                     for r in a_rows[:10]:
                         if f in r and v_s and str(r.get(f)) == v_s:
-                            hit = ("value", f, v_s)
+                            hit = ("value", f, v_s, k)
                             break
                     if hit is None:
                         _norm = lambda s: s.lower().replace("_", "").replace("-", "")
                         if _norm(k) == _norm(f):
-                            hit = ("name", f, v_s)
+                            hit = ("name", f, v_s, k)
                     if hit:
-                        if best is None or (hit[0] == "value" and best[0] != "value"):
+                        if best is None:
                             best = hit
+                        else:
+                            _nm = lambda s: str(s).lower().replace("_", "").replace("-", "")
+                            _better = (hit[0] == "value" and best[0] != "value")
+                            if hit[0] == best[0] and not _better:
+                                # 同级命中（如同值多参数 ?a=12&id=12 都等于样本 id）：
+                                # 参数名与字段名一致者优先——id 参数才是链变量
+                                if _nm(hit[3]) == _nm(hit[1]) and _nm(best[3]) != _nm(best[1]):
+                                    _better = True
+                            if _better:
+                                best = hit
             if best is None:
                 continue
-            kind, field, val = best
+            # 收官十二轮（审查，实测）：hit 元组曾不带参数名——下方 re.sub 用的是
+            # 循环泄漏的**最后一个**参数名 k。多参数详情 URL（?id=12&sig=1234）拿
+            # "sig" 找 "sig=12" 永不命中 → 脚手架丢失；末位参数值恰等于命中值时
+            # （?id=7&x=7）生成 ?id=7&x={id}——变量错挂，每行详情都是 id=7 的内容
+            kind, field, val, pk = best
             b_url = b_src.get("url", "")
             post_only = bool(b_src.get("json_body") or b_src.get("body"))
             # 审查 M2：曾按 f"={val}" 裸替换——"?a=12&id=12" 会替换错参数、
             # "?id=1234&x=12" 会截断别的值。按参数名锚定（?k= 或 &k= 起头）
             _tmpl_url = ""
             if not post_only and val:
-                _tmpl_url = re.sub(rf"([?&]{re.escape(k)}=){re.escape(val)}(?=&|$)",
+                _tmpl_url = re.sub(rf"([?&]{re.escape(pk)}=){re.escape(val)}(?=&|$)",
                                    rf"\g<1>{{{field}}}", b_url, count=1)
             if _tmpl_url and _tmpl_url != b_url:
                 b_url = _tmpl_url

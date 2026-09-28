@@ -21,7 +21,9 @@ class MiddlewareChain:
         action = spec.get("action")
         if action == "log":
             self._handlers[on].append(self._mk_log(on, spec.get("message", "")))
-        elif action and ":" in action:  # module:function
+        elif isinstance(action, str) and ":" in action:  # module:function
+            # 收官十二轮（审查 M）：`":" in action` 对 callable 曾先抛 TypeError，
+            # 下面的 callable 分支不可达——docstring 声称的"Python 可调用路径"是死的
             mod, fn = action.split(":", 1)
             try:
                 func = getattr(importlib.import_module(mod), fn)

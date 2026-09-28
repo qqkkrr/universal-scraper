@@ -253,8 +253,12 @@ def parse_comments(capture: Path, note_id: str) -> List[Dict[str, Any]]:
 
 def parse_user_profile(capture: Path, user_id: str) -> Dict[str, Any]:
     """从捕获的用户主页 SSR 解析公开资料。"""
+    import re as _re
     for _, rec in _iter_capture(capture):
-        if user_id not in str(rec.get("url", "")):
+        # 收官十二轮（审查 L）：裸子串匹配曾让 uid 前缀撞车（aaaa 命中 aaaabbbb）
+        # 取到别人的资料——复用 parse_note_detail 同款字母数字边界正则
+        if _re.search(rf"(?<![0-9A-Za-z]){_re.escape(str(user_id))}(?![0-9A-Za-z])",
+                      str(rec.get("url", ""))) is None:
             continue
         body = rec.get("body")
         if not isinstance(body, str):

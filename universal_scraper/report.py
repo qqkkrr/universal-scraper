@@ -25,7 +25,23 @@ def _num(v: object) -> float | None:
     # OCR R131（M）：区间两端均可带单位（"1万-2万"曾只认后置单位 → 误读成 1万）
     # 审查二轮（H）：混合单位（"1万-2亿"）曾把高位单位套到低端。规则：
     # 无单位端继承有单位端（"4-5万"的 4 = 4万）；两端单位不同才各自换算
-    m = re.search(r'([+-]?\d+(?:\.\d+)?)\s*(万|亿)?\s*-\s*([+-]?\d+(?:\.\d+)?)\s*(万|亿)?', s)
+    # 收官十二轮（审查，实测）：负号/区间允许出现在串中间——电话 "010-88886666"
+    # 被当区间取中值 44443338、"A-100" 的中间 "-" 被当负号得 -100。改为数字/
+    # 负号必须起始于串首或非字母数字边界之后
+    _rejected = False
+    m = re.search(r'(?<![0-9A-Za-z])([+-]?\d+(?:\.\d+)?)\s*(万|亿)?\s*-\s*([+-]?\d+(?:\.\d+)?)\s*(万|亿)?', s)
+    if m:
+        _u1, _u2 = m.group(2) or "", m.group(4) or ""
+        _l, _r = m.group(1), m.group(3)
+        _zpad = lambda t: len(t.lstrip("+-")) > 1 and t.lstrip("+-").startswith("0")
+        # 收官十二轮（审查，实测）：结构像区间的还有电话与月日——"010-88886666"
+        # （前导零+无单位）、"10-08"（右侧前导零）、"010-8888-6666"（第三段）。
+        # 无单位且任一端前导零、或匹配后还有连字符段 → 不是数值（整串判非数值，
+        # 否则单值兜底又把左侧数字抓走）
+        if "-" in s[m.end():].lstrip() or \
+                (not (_u1 or _u2) and (_zpad(_l) or _zpad(_r))):
+            m = None
+            _rejected = True
     if m:
         def _scaled(num_s: str, unit: str) -> float:
             n = float(num_s)
@@ -36,7 +52,12 @@ def _num(v: object) -> float | None:
         lo = _scaled(m.group(1), u1 or u2)
         hi = _scaled(m.group(3), u2 or u1)
         return (lo + hi) / 2
-    m = re.search(r'([+-]?\d+(?:\.\d+)?)\s*(万|亿)?', s)
+    if _rejected:
+        return None
+    m = re.match(r'([+-]?\d+(?:\.\d+)?)\s*(万|亿)?', s)
+    if not m:
+        # 末位数字兜底：串首不是数字但尾部有独立数值（"约1.2万"）
+        m = re.search(r'(?<![0-9A-Za-z-])(\d+(?:\.\d+)?)\s*(万|亿)?', s)
     if not m: return None
     n = float(m.group(1))
     unit = m.group(2) or ""
@@ -107,6 +128,10 @@ def generate(path: str, group_col: str | None = None, out: str = "report.html") 
             "missing": _missing(rows, c),
         })
     # 分组统计
+    # 收官十二轮（审查）：--group 列名不存在曾静默成功（exit 0、0 组、无任何提示）
+    # ——与"数据确实无法分组"不可区分。改为显式报错
+    if group_col and group_col not in cols:
+        raise ValueError(f"分组列不存在: {group_col!r}（实际列: {cols[:8]}）")
     group_stats = []
     if group_col and group_col in cols:
         by = {}
@@ -143,7 +168,8 @@ svg text{{font-size:11px}}
 <table><tr><th>列</th><th>非空</th><th>缺失</th><th>样例</th></tr>"""]
     for c in cols:
         nonempty = n - _missing(rows, c)
-        sample = str(rows[0].get(c, ""))[:40] if rows else ""
+        # 收官十二轮（审查 L）：DictReader 短行补位的 None 曾渲染成字面 "None"
+        sample = str(rows[0].get(c) or "")[:40] if rows else ""
         miss = _missing(rows, c)
         parts.append(f"<tr><td>{_h.escape(c)}</td><td>{nonempty}</td><td class='missing'>{miss}</td><td>{_h.escape(sample)}</td></tr>")
     parts.append("</table>")
