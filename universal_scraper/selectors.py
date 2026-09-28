@@ -11,12 +11,21 @@ import re
 from typing import Any, Dict, List
 
 try:
-    from lxml import html as _lxml_html
-    # 可用性探测：cssselect 是 lxml 的可选扩展（缺失则 HAS_LXML=False 走正则回退）
-    _CSSSelector = __import__("lxml.cssselect", fromlist=["CSSSelector"]).CSSSelector
-    HAS_LXML = True
+    # 可用性探测：lxml 与 cssselect 分开——cssselect 是 lxml 的可选扩展，
+    # 缺失时仍可用 lxml 解析 + _css_to_xpath（收官十轮：原实现把两者绑成
+    # 一个 HAS_LXML，缺 cssselect 时直接掉进"把开始标签当文本"的正则回退）
+    from lxml import html as _lxml_html  # noqa: F401
+    _HAS_LXML = True
 except Exception:  # pragma: no cover
-    HAS_LXML = False
+    _lxml_html = None
+    _HAS_LXML = False
+try:
+    _CSSSelector = __import__("lxml.cssselect", fromlist=["CSSSelector"]).CSSSelector
+    _HAS_CSSSELECT = True
+except Exception:  # pragma: no cover
+    _HAS_CSSSELECT = False
+# 向后兼容：既有外部引用/测试以 HAS_LXML 表示"能走 CSS 快路径"
+HAS_LXML = _HAS_LXML and _HAS_CSSSELECT
 
 
 # ---------------------------------------------------------------- JSON 路径
@@ -111,19 +120,52 @@ def _strip_pseudo(selector: str):
     return sel, None, None
 
 
+def _visible_text(el) -> str:
+    """元素文本（含后代），剔除 script/style/noscript/template 的源码文本。
+
+    收官十轮（审查，实测）：lxml 的 text_content() 不过滤 script/style——真实
+    抓取页的 #main 抽出 1012 字符里约 795 字符是内联 JS（"removeEventListener…"），
+    字段值被脚本源码污染，长度过滤与日期/价格正则全部失真，且无任何告警。
+    同仓库 extractors.html_to_markdown 对同源问题显式 drop_tree，语义应一致。"""
+    if not hasattr(el, "text_content"):
+        return _strip_tags(str(el))
+    try:
+        nodes = el.xpath(
+            ".//text()[not(ancestor::script) and not(ancestor::style)"
+            " and not(ancestor::noscript) and not(ancestor::template)]")
+    except Exception:
+        return el.text_content()
+    return "".join(str(n) for n in nodes)
+
+
+def _strip_tags(s: str) -> str:
+    """退化路径（无 lxml）用：去掉标记，只留文本。"""
+    return re.sub(r"<[^>]*>", "", s or "")
+
+
 def css_elements(html: str, selector: str) -> List[Any]:
     if not selector:
         return []
     real, _pseudo, _arg = _strip_pseudo(selector)
     if not real:
         return []
-    if HAS_LXML:
+    if _HAS_LXML:
         doc = None
         try:
             doc = _lxml_html.fromstring(html)
-            return doc.cssselect(real)
+            if _HAS_CSSSELECT:
+                return doc.cssselect(real)
         except Exception:
             pass  # fromstring/cssselect 失败时 doc 可能为 None——下方守卫
+        # 收官十轮（审查）：缺 cssselect 时不再掉进"返回开始标签"的正则回退——
+        # 用自带 _css_to_xpath 走 lxml XPath（本文件早已实现该转换器，此前不可达）
+        if doc is not None and not _HAS_CSSSELECT:
+            xp = _css_to_xpath(real)
+            if xp:
+                try:
+                    return doc.xpath(xp)
+                except Exception:
+                    pass
         if doc is not None:
             xp = _css_to_xpath(real)
             if xp:
@@ -131,7 +173,7 @@ def css_elements(html: str, selector: str) -> List[Any]:
                     return doc.xpath(xp)
                 except Exception:
                     return []
-    # 退化：简单 class/id 正则
+    # 退化：简单 class/id 正则（无 lxml：只拿得到标签串，文本侧另行去标记）
     out = []
     for m in re.finditer(r"<[^>]+(?:class|id)=[\"']([^\"']*" + re.escape(selector.lstrip(".#")) + r"[^\"']*)[\"'][^>]*>", html):
         out.append(m.group(0))
@@ -141,7 +183,9 @@ def css_elements(html: str, selector: str) -> List[Any]:
 def css_text(html: str, selector: str, limit: int = 0, joiner: str = "\n") -> str:
     parts = []
     for el in css_elements(html, selector):
-        t = el.text_content() if hasattr(el, "text_content") else str(el)
+        # 收官十轮（审查）：曾用 text_content()——script/style 源码混入字段值。
+        # 退化路径拿到的是标签串：去标记后再取文本（至少不把标签当数据）
+        t = _visible_text(el) if hasattr(el, "text_content") else _strip_tags(str(el))
         t = re.sub(r"\s+", " ", t).strip()
         if t:
             parts.append(t)
@@ -351,15 +395,35 @@ def _regex_sub_conflicts(sub, ic: bool) -> bool:
         return False
 
     def _single_variable_repeat(ops) -> bool:
-        """R4（审查八轮新增）：重复体是"单个变长重复元素"——(a{1,3})+ / ([a-z]{2,5})+。
+        r"""R4（审查八轮新增）：重复体是"单个变长重复元素"——(a{1,3})+ / ([a-z]{2,5})+。
         每次迭代可消费 1..n 个同一字符集字符，切分方式数随长度指数增长（实测
-        (a{1,3})+$ 对 24 字符 0.27s、每 +2 字符涨约 3.3 倍）。只在"整体仅此一个
-        消费元素"时判：定长（lo==hi，如 (a{3})+）安全；首集不重叠的多元素体
-        （如 (ab{1,3})+，每次迭代起点由 'a' 唯一确定）同样安全，不误杀。"""
-        consuming = [(op, av) for op, av in ops
-                     if str(op) not in ("ASSERT", "ASSERT_NOT")]
-        if len(consuming) != 1:
-            return False
+        (a{1,3})+$ 对 24 字符 0.27s、每 +2 字符涨约 3.3 倍）。定长（lo==hi，如
+        (a{3})+）安全；首集不重叠的多元素体（如 (ab{1,3})+，每次迭代起点由 'a'
+        唯一确定）同样安全，不误杀。
+
+        收官十轮（审查 P1，实测复现）：原判据"恰好一个消费元素"过窄——体里加个
+        可空元素即被关掉，而可空元素不消费字符、不消解歧义：实测
+        (?:\d{1,4}\.?)+$ 对 60 字符输入 >25s 不返回（CPython re 在 C 层回溯不
+        释放 GIL → 整个采集进程冻结）。判据改为"**至多一个非可空消费元素**，
+        其余全可空"——可空元素（.? / []? / 可空分支）不参与歧义计算。"""
+        def _nonnull(seq) -> list:
+            """非可空消费元素（SUBPATTERN 透明展开，零宽断言不计）。"""
+            out = []
+            for op, av in seq:
+                o = str(op)
+                if o in ("ASSERT", "ASSERT_NOT"):
+                    continue
+                if o == "SUBPATTERN":
+                    out.extend(_nonnull(av[-1]))
+                elif not _nullable([(op, av)]):
+                    out.append((op, av))
+            return out
+
+        consuming = _nonnull(ops)
+        if not consuming:
+            return False            # 全体可空 → R2 已判
+        if len(consuming) > 1:
+            return False            # 多元素体：起点由首元素唯一确定（如 (ab{1,3})+）
         op, av = consuming[0]
         o = str(op)
         if o in ("MAX_REPEAT", "MIN_REPEAT"):
@@ -554,9 +618,10 @@ def xpath_text(html: str, xpath: str, limit: int = 0, joiner: str = "\n") -> str
     parts = []
     for el in xpath_elements(html, xpath):
         if isinstance(el, str):
-            t = el
+            t = _strip_tags(el)
         else:
-            t = el.text_content() if hasattr(el, "text_content") else str(el)
+            # 收官十轮（审查）：与 css_text 同源问题——script/style 源码曾混入
+            t = _visible_text(el) if hasattr(el, "text_content") else _strip_tags(str(el))
         t = re.sub(r"\s+", " ", t).strip()
         if t:
             parts.append(t)
@@ -617,13 +682,53 @@ def extract_embedded_json_rows(html: str, spec: Any) -> List[Dict[str, Any]]:
         rf"(?:var|let|const)\s+{re.escape(name)}\s*(?<![=!<>])=(?!=)\s*",
         rf"(?<![\w$.]){re.escape(name)}\s*(?<![=!<>])=(?!=)\s*",
     )
+
+    def _usable(v: Any) -> bool:
+        """解析成功但结果为空壳（SSR 占位初始化）时不算数。
+        收官十轮（审查）：曾以"JSON 能解析"为唯一成功条件——真赋值之前出现的
+        `window.pageData = {}` / `{"list":[]}` 会顶掉后面的真数据，抽出 [{}] 或 []。"""
+        if not drill:
+            if isinstance(v, dict):
+                return bool(v)
+            if isinstance(v, list):
+                return any(isinstance(r, dict) for r in v)
+            return False
+        cur = v
+        for part in drill.split("."):
+            if isinstance(cur, dict):
+                cur = cur.get(part)
+            elif isinstance(cur, list):
+                try:
+                    cur = cur[int(part)]
+                except (ValueError, IndexError):
+                    return False
+            else:
+                return False
+            if cur is None:
+                return False
+        if isinstance(cur, dict):
+            return bool(cur)
+        if isinstance(cur, list):
+            return any(isinstance(r, dict) for r in cur)
+        return False
+
     for pat in pats:
         for m in re.finditer(pat, html):
-            val = _balanced_json(html, m.end(), _json)
-            if val is not None:
+            cand = _balanced_json(html, m.end(), _json)
+            if cand is not None and _usable(cand):
+                val = cand
                 break
         if val is not None:
             break
+    # 全部出现位置都是空壳：仍返回最后一个可解析值（保持"占位也算数据"的旧兜底）
+    if val is None:
+        for pat in pats:
+            for m in re.finditer(pat, html):
+                cand = _balanced_json(html, m.end(), _json)
+                if cand is not None:
+                    val = cand
+            if val is not None:
+                break
     if val is None:
         return []
 

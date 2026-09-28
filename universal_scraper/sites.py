@@ -172,8 +172,27 @@ def seed_url_for(desc: str) -> str:
 
 
 def _dianping_fetch(url, cookie="", proxy=None):
+    """精配入口：从 URL 解析关键词与页码（收官十轮审查——曾硬编码"美食"第 2 页，
+    任何 URL（如"火锅"）都返回同一份数据，静默与用户需求不符）。"""
     from .dianping import fetch_search_page
-    return fetch_search_page("美食", 2, cookie=cookie, proxy=proxy)
+    from urllib.parse import unquote as _uq, urlparse as _up, parse_qs as _pq
+    kw, page = "美食", 2
+    try:
+        u = _up(url or "")
+        # 形如 /search/keyword/2/0_火锅 或 ?keyword=火锅
+        m = re.search(r"/\d+/(\d+)_([^/?#]+)", u.path or "")
+        if m:
+            page = int(m.group(1)) or 2
+            kw = _uq(m.group(2)) or kw
+        else:
+            qs = _pq(u.query or "")
+            if qs.get("keyword"):
+                kw = _uq(qs["keyword"][0])
+            if qs.get("page") and str(qs["page"][0]).isdigit():
+                page = int(qs["page"][0])
+    except Exception:
+        pass
+    return fetch_search_page(kw, page, cookie=cookie, proxy=proxy)
 
 
 def _dianping_parse(html, url):
@@ -228,14 +247,20 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
 
 
 def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
-               timeout: int = 20, allow_html_404: bool = True) -> Dict[str, Any]:
+               timeout: int = 20, allow_html_404: bool = True,
+               extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """GET URL 返回 HTML/JSON（curl_cffi TLS 指纹伪装优先，回退 urllib）。
-    成功 {ok, status, html, final_url, headers}。"""
+    成功 {ok, status, html, final_url, headers}。
+
+    extra_headers：站点必需的自定义头（如上交所/新浪行情要求 Referer——
+    不带时接口直接回错误包/403，把"缺请求头"误诊为"被封"）。"""
     from .core import smart_decode
     headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/json,*/*",
                "Accept-Language": "zh-CN,zh-Hans;q=0.9", "Accept-Encoding": "gzip, deflate"}
     if cookie:
         headers["Cookie"] = cookie
+    if extra_headers:
+        headers.update(extra_headers)
     # 1) curl_cffi：伪装 TLS/JA3/HTTP2 指纹（反 403）。
     #    注意：curl_cffi 没有 "auto" 目标（会抛 ImpersonateError），这里 Python 侧随机选合法目标，
     #    且不传 UA（让 curl_cffi 按目标浏览器生成配套 UA，避免 "Safari UA + Chrome TLS" 错配）。
@@ -311,7 +336,12 @@ def parse_site_html(url: str, html: str) -> List[Dict[str, Any]]:
     s = SITES[site]
     try:
         rows = s["parse"](html, url)
-    except Exception:
+    except Exception as e:
+        # 收官十轮（审查）：曾静默 return []——解析器崩溃与"站点无数据"不可区分，
+        # engine_v3 专门为此加的 warning（"曾静默吞掉会误导成软封锁"）永不触发
+        from .core import log as _log
+        _log(f"⚠️ 站点解析器 {site} 异常（{type(e).__name__}: {e}）——本次按 0 条处理，"
+             "请检查页面结构是否变更", "WARN")
         return []
     if not isinstance(rows, list):
         return []
@@ -860,7 +890,10 @@ def _ajcass_block(row_html: str, field: str, default: str = "") -> str:
         m = re.search(r'href="([^"]*(?:Magazine/Show|Magazine/show)[^"]*)"', row_html, re.I)
         return m.group(1) if m else default
     if field == "authors":
-        m = re.search(r"作者[：:]\s*([^。；;\n]{1,120}?)", txt)
+        # 收官十轮（审查，实测）：`{1,120}?` 惰性量词后无终止模式——永远只捕获
+        # 1 个字符（"张三、李四"→"张"）且无报错。改惰性 + 终止锚（站点分隔符
+        # ｜/| 或紧随的年份 2026.43(1) 形态），兼容无分隔符的排版
+        m = re.search(r"作者[：:]\s*([^。；;｜|\n]{1,120}?)(?=\s*(?:[｜|]|\d{4}\s*\.|$))", txt)
         return m.group(1).strip().rstrip("】") if m else default
     if field == "issue":
         m = re.search(r"(\d{4})\s*\.\s*(\d+)\s*\((\d+)\)", txt)
@@ -1007,6 +1040,10 @@ def _ggzy_run(url: str, cookie: str = "", proxy: Optional[str] = None,
             out.append(row)
             if len(out) >= limit:
                 break
+        if len(out) >= limit:
+            # 收官十轮（审查）：内层 break 只跳出记录循环，外层 stage 循环继续——
+            # 下一 stage 首条先 append 再判断，导致返回 limit+(stage数-1) 条
+            break
     return out
 
 
@@ -1699,9 +1736,16 @@ def parse_fundrank(html: str, url: str) -> List[Dict[str, Any]]:
         m = re.search(r"datas:\s*\[(.*?)\]", html, re.S)
     if not m:
         return []
+    # 收官十轮（审查，实测）：线上 rankhandler 每行已是 **25 字段**，旧 names 表
+    # 只有 19 项且把"今年来/成立来/成立日期"整体左移了一格 → 列名错位静默产出错值
+    # （实测旧映射给出 {'近5年':'94.92','今年来':'566.26','成立来':'2017-05-12'}，
+    # 官方 FundMNPeriodIncrease 对同一基金的真值是 近5年=373.84/今年来=94.92/
+    # 成立来=566.26/成立日期=2017-05-12）。新表按实测 25 列定位，尾部 18-23 列
+    # 语义由实测样本推断（[19]/[20] 为 1.50%/0.15% 费率对、[17]/[21]/[23] 为 0/1 标志）
     names = ["代码", "名称", "拼音", "日期", "单位净值", "累计净值", "日增长率",
-             "近1周", "近1月", "近3月", "近6月", "近1年", "近2年", "近3年", "近5年",
-             "今年来", "成立来", "成立日期", "自定义"]
+             "近1周", "近1月", "近3月", "近6月", "近1年", "近2年", "近3年",
+             "今年来", "成立来", "成立日期", "自定义", "成立来原始值",
+             "原费率", "现费率", "可购买", "申购折扣", "可购买标志", "近5年"]
     out = []
     for raw in re.findall(r'"([^"]+)"', m.group(1)):
         parts = raw.split(",")
@@ -1731,18 +1775,23 @@ def parse_douban_events(html: str, url: str) -> List[Dict[str, Any]]:
     except Exception:
         return []
     out = []
-    for li in doc.cssselect(".events-list li")[:50]:
+    # 收官十轮（审查，实测）：`.events-list li` 会连带选中每个活动内部的
+    # <li>时间：…/<li>地点：…/<li>费用：…（实测 50 行里 30 行无 url、20 行标题
+    # 是"地点：…"碎片，真实活动只有 10 个）。改为直接子元素 + 必须有活动链接
+    for li in doc.cssselect("ul.events-list > li, .events-list > li")[:50]:
         txt = re.sub(r"\s+", " ", li.text_content()).strip()
         if not txt:
             continue
-        a = li.cssselect("a")
-        link = a[0].get("href") if a else ""
+        a = [x for x in li.cssselect("a") if "/event/" in (x.get("href") or "")]
+        if not a:
+            continue
+        link = a[0].get("href") or ""
         m_time = re.search(r"时间：\s*(.+?)\s+地点：", txt)
         m_place = re.search(r"地点：\s*(.+?)\s+费用：", txt)
         m_fee = re.search(r"费用：\s*(.+?)\s+发起", txt)
         m_want = re.search(r"(\d+)人感兴趣", txt)
         out.append({
-            "title": txt.split("时间：")[0].strip()[:120],
+            "title": (a[0].text_content().strip() or txt.split("时间：")[0].strip())[:120],
             "url": link,
             "time": (m_time.group(1) if m_time else "")[:80],
             "place": (m_place.group(1) if m_place else "")[:80],
@@ -2552,7 +2601,20 @@ def _parse_zige_pdf(path: str) -> List[Dict[str, Any]]:
                     name = name.replace("\n", "")
                     sub = sub.replace("\n", "")
                     cat = re.sub(r"\s+", "", cat)
-                    dept = re.sub(r"\s*\n\s*", "、", dept).strip("、")
+                    # 收官十轮（审查，实测）：dept 曾无条件把换行换"、"——PDF 排版
+                    # 断行会把词切断，产出"国家林业和草、原局""紧急救援行业技能鉴定
+                    # 机、构"（实测 96 行中 14 行被污染）。改为：下一行以机构前缀
+                    # 起头才视为新部门插"、"，否则按续行直接拼接
+                    _dept_lines = [p.strip() for p in re.split(r"\s*\n\s*", dept) if p.strip()]
+                    _dept_out = ""
+                    for _ln in _dept_lines:
+                        if _dept_out and re.match(
+                                r"^(?:国家|中国|全国|各省|省|自治区|市|县|部|局|委|办|协会|"
+                                r"学会|中心|集团|公司|银行|院|校|署|厅|站|所|会)", _ln):
+                            _dept_out += "、" + _ln
+                        else:
+                            _dept_out += _ln
+                    dept = _dept_out.strip("、")
                     # 设定依据：换行后若下一行以《开头视为新法规加"；"，否则是续行直接拼接
                     _bp = basis.split("\n")
                     basis = _bp[0] + "".join(
@@ -2963,6 +3025,22 @@ def match_crossref(url: str) -> bool:
     return "api.crossref.org/works" in (url or "").lower()
 
 
+def _crossref_date(it: Dict[str, Any]) -> str:
+    """Crossref 记录日期（print 优先、缺则 online）。
+
+    收官十轮（审查，实测）：原内联式 `(it.get("published-print", {}).get(
+    "date-parts", [[None]])[0] or ...)` —— 无 published-print 时 `.get` 返回
+    `[[None]]`，`[None]` 是**真值**，`or` 不会回退到 online 日期，`"-".join`
+    得到字面量 "None"（实测 20 条里 12 条发表日期为字符串 "None"）。"""
+    for key in ("published-print", "published-online", "issued"):
+        parts = (it.get(key) or {}).get("date-parts") or []
+        if parts and isinstance(parts[0], list):
+            nums = [n for n in parts[0] if isinstance(n, int)]
+            if nums:
+                return "-".join(str(n) for n in nums)
+    return ""
+
+
 def _crossref_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
     from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
     q = _pq(_up(url).query).get("query", ["machine learning"])[0] or "machine learning"
@@ -2980,7 +3058,7 @@ def _crossref_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> li
             "标题": title_list[0] if title_list else "",
             "DOI": it.get("DOI", ""),
             "期刊": (it.get("container-title") or [""])[0],
-            "发表日期": "-".join(str(d) for d in (it.get("published-print", {}).get("date-parts", [[None]])[0] or it.get("published-online", {}).get("date-parts", [[0]])[0])),
+            "发表日期": _crossref_date(it),
             "引用数": it.get("is-referenced-by-count", 0),
             "类型": it.get("type", ""),
             "URL": it.get("URL", ""),
@@ -3005,7 +3083,10 @@ def _openalex_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> li
     from urllib.parse import quote as _q, urlparse as _up, parse_qs as _pq
     q = _pq(_up(url).query).get("search", ["machine learning"])[0] or "machine learning"
     max_r = min(int(limit) or 20, 200)
-    api = f"{_OPENALEX_BASE}?search={_q(q)}&per_page={max_r}&select=id,title,publication_date,cited_by_count,authorships"
+    # 收官十轮（审查）：select 未请求 doi 却在下方读 it.get("doi")（恒空），
+    # 且 URL 曾用 work id 拼 https://doi.org/W2741809807（不是 DOI，链接无效）
+    api = (f"{_OPENALEX_BASE}?search={_q(q)}&per_page={max_r}"
+           "&select=id,doi,title,publication_date,cited_by_count,authorships")
     r = fetch_html(api, timeout=30)
     if not r.get("ok"):
         raise RuntimeError(f"OpenAlex 请求失败: {r.get('error', '')}")
@@ -3020,7 +3101,10 @@ def _openalex_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> li
             "作者": authors,
             "发表日期": it.get("publication_date", ""),
             "引用数": it.get("cited_by_count", 0),
-            "URL": it.get("id", "").replace("https://openalex.org/", "https://doi.org/"),
+            # 收官十轮（审查）：ID 形态的 work id 不是 DOI——有 DOI 用 DOI 拼，
+            # 否则原样给 OpenAlex 页面链接（不再拼出无效的 doi.org/W123）
+            "URL": ("https://doi.org/" + (it.get("doi") or "").replace("https://doi.org/", ""))
+                   if it.get("doi") else str(it.get("id", "")),
         })
     return rows
 
@@ -3039,12 +3123,15 @@ def match_hn(url: str) -> bool:
 
 
 def _hn_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
-    from urllib.parse import quote as _q
+    from urllib.parse import quote as _q, unquote as _uq
     q = "large language model"
     m = re.search(r"query=([^&]+)", url)
     if m:
-        q = _q(m.group(1))
-    api = f"{_HN_BASE}?query={_q(q)}&hitsPerPage={limit}"
+        # 收官十轮（审查，实测）：URL 里已百分号编码的查询词曾被二次编码
+        # （%E5%A4%A7→%2525E5…），Algolia 按字面百分号串检索 → 返回完全无关的
+        # 结果且不报错（"大模型"搜出 Let's Encrypt 帖）。先 decode 再统一编码
+        q = _q(_uq(m.group(1)))
+    api = f"{_HN_BASE}?query={q}&hitsPerPage={limit}"
     r = fetch_html(api, timeout=30)
     if not r.get("ok"):
         raise RuntimeError(f"HN 请求失败: {r.get('error', '')}")
@@ -3112,11 +3199,20 @@ def match_sina_quote(url: str) -> bool:
 
 def _sina_quote_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
     from urllib.parse import urlparse as _up, parse_qs as _pq
-    symbols = _pq(_up(url).query).get("list", ["sh000001,sz399001"])
-    if isinstance(symbols, list):
-        symbols = ",".join(symbols)
-    api = f"{_SINA_BASE}list={symbols}"
-    r = fetch_html(api, timeout=15)
+    # 收官十轮（审查，实测）：`list=` 在 path 里（hq.sinajs.cn/list=sh600519），
+    # parse_qs(urlparse(url).query) 取不到 → 曾回退默认两标的；且 _SINA_BASE 已含
+    # "list="，又拼一次得到 "list=list=sh600519"，线上返回空值 var hq_str_list=...
+    # （正则 (.+) 不匹配）→ 用户请求的标的静默丢失。改为 path 兜底解析 + 不重复拼
+    _q = _pq(_up(url).query).get("list", [])
+    if not _q:
+        _path = _up(url).path or ""
+        _m = re.search(r"list=([^&/]+)", _path)
+        if _m:
+            _q = [_m.group(1)]
+    symbols = ",".join(_q) if _q else "sh000001,sz399001"
+    api = f"{_SINA_BASE}{symbols}"
+    # 该站无 Referer 直接 403（实测）——带站点内引用
+    r = fetch_html(api, timeout=15, extra_headers={"Referer": "https://finance.sina.com.cn"})
     if not r.get("ok"):
         raise RuntimeError(f"新浪行情请求失败: {r.get('error','')}")
     text = r.get("html", "")
@@ -3186,7 +3282,11 @@ def _36kr_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
     if not rows:
         for m in re.finditer(r'"widgetTitle":"([^"]+)"', text):
             try:
-                title = m.group(1).encode().decode("unicode_escape", errors="ignore")
+                # 收官十轮（审查，实测）：无条件 encode().decode("unicode_escape")
+                # 会把**未转义**的中文按 latin-1 解字节 → mojibake（"大模型"→
+                # "å¤§æ¨¡å…"）。仅当确含 \uXXXX 转义时才解码
+                raw = m.group(1)
+                title = raw.encode().decode("unicode_escape", errors="ignore") if "\\u" in raw else raw
                 rows.append({"标题": title})
             except Exception:
                 pass
@@ -3570,7 +3670,11 @@ def _sse_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
     api = ("https://query.sse.com.cn/security/stock/queryCompanyBulletinNew.do"
            f"?jsonCallBack=jsonpCallback&isPagination=true&pageHelp.pageSize={limit or 20}"
            f"&start_date=2026-01-01&end_date=2026-12-31&type=&bulletinType=")
-    r = fetch_html(api, timeout=20, cookie=cookie)
+    # 收官十轮（审查，实测）：query.sse.com.cn 要求 Referer——不带时返回
+    # `({"jsonCallBack":…,"success":"false","error":"系统繁忙…"})`，旧代码匹配不到
+    # jsonpCallback(...) 便报"非 JSONP 响应（可能被拦截）"，把"缺请求头"误诊为被封
+    r = fetch_html(api, timeout=20, cookie=cookie,
+                   extra_headers={"Referer": "https://www.sse.com.cn/"})
     if not r.get("ok"):
         raise RuntimeError("上交所公告请求失败")
     text = r.get("html", "")
@@ -3688,14 +3792,42 @@ def _fund_eastmoney_run(url: str, cookie: str = "", proxy=None, limit: int = 20)
     if not r.get("ok"):
         raise RuntimeError("天天基金请求失败")
     text = r.get("html", "")
-    m = re.search(r"var db=(\[.*?\]);", text, re.S)
-    if not m:
+    # 收官十轮（审查，实测）：线上返回 `var db={chars:[…],datas:[[…]],count:…}`——
+    # JS 对象字面量（键无引号）而非数组，旧正则要求 `var db=[` 恒不匹配 → 静默 0 条。
+    # 直接抽 datas 数组（本身是合法 JSON），避免整体解析 JS 字面量
+    raw = []
+    m = re.search(r"datas:\s*(\[\s*\[.*?\]\s*\])\s*[,}]", text, re.S)
+    if m:
+        try:
+            raw = json.loads(m.group(1))
+        except Exception:
+            raw = []
+    if not raw:
+        m2 = re.search(r"var db=(\{.*?\})\s*;", text, re.S)
+        if m2:
+            try:
+                _js = re.sub(r"([{,]\s*)([A-Za-z_]\w*)\s*:", r'\1"\2":', m2.group(1))
+                raw = json.loads(_js).get("datas", [])
+            except Exception:
+                raw = []
+    if not raw:
+        # 旧数组形态（var db=[[...]]）兼容
+        m3 = re.search(r"var db=(\[\s*\[.*?\]\s*\])\s*;", text, re.S)
+        if m3:
+            try:
+                raw = json.loads(m3.group(1))
+            except Exception:
+                raw = []
+    if not raw:
         return []
-    raw = json.loads(m.group(1))
     rows = []
     for it in raw[:limit or 20]:
-        if isinstance(it, list) and len(it) > 5:
-            rows.append({"代码": it[0], "名称": it[1], "最新净值": it[3] if len(it) > 3 else ""})
+        if isinstance(it, list) and len(it) > 2:
+            # 列语义：官方 chars 字段描述"哪些主列参与"未随响应返回，位置映射无法
+            # 离线证实（实测 it[3] 是日期列而非"最新净值"）——不做臆测标签，
+            # 前两列（代码/名称，线上实测确认）具名，其余原样并入"其他列"
+            rows.append({"代码": it[0], "名称": it[1],
+                         "其他列": " | ".join(str(x) for x in it[2:12])})
     return rows
 
 register("fund_eastmoney", match_fund_eastmoney, lambda h, u: [], run=_fund_eastmoney_run,
@@ -3740,9 +3872,21 @@ def _xiachufang_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> 
         raise RuntimeError("下厨房请求失败")
     text = r.get("html", "")
     rows = []
-    for m in re.finditer(r'<a[^>]*href="(/recipe/\d+/)"[^>]*>.*?<p[^>]*class="name"[^>]*>([^<]+)</p>.*?<p[^>]*class="ing"[^>]*>([^<]+)</p>', text, re.S):
+    # 收官十轮（审查，实测）：线上是 <div class="recipe…"><a href="/recipe/N/">…
+    # <p class="name"><a href="/recipe/N/">菜名</a></p>（菜名在 p.name 内的 a 里），
+    # 旧正则要求菜名直接是 p.name 的文本子节点 → 恒 0 条（25 个菜谱全丢）
+    for m in re.finditer(
+            r'<p[^>]*class="name"[^>]*>\s*<a[^>]*href="(/recipe/\d+/)"[^>]*>\s*([^<]+?)\s*</a>.*?<p[^>]*class="ing"[^>]*>([^<]*)</p>',
+            text, re.S):
         rows.append({"菜名": m.group(2).strip(), "食材": m.group(3).strip()[:100],
                      "URL": f"https://www.xiachufang.com{m.group(1)}"})
+    if not rows:
+        # 兜底：菜名直接是 p.name 文本（老版页面）
+        for m in re.finditer(
+                r'<a[^>]*href="(/recipe/\d+/)"[^>]*>.*?<p[^>]*class="name"[^>]*>([^<]+)</p>.*?<p[^>]*class="ing"[^>]*>([^<]+)</p>',
+                text, re.S):
+            rows.append({"菜名": m.group(2).strip(), "食材": m.group(3).strip()[:100],
+                         "URL": f"https://www.xiachufang.com{m.group(1)}"})
     return rows[:limit or 20]
 
 register("xiachufang", match_xiachufang, lambda h, u: [], run=_xiachufang_run,
@@ -3870,9 +4014,11 @@ def match_exchange_rate(url: str) -> bool:
 
 def _exchange_rate_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
     from urllib.parse import urlparse as _up
-    base = _up(url).path.split("/")[-1] if "/" in (url or "") else "CNY"
-    if not base or base == "" or "/" in base:
-        base = "CNY"
+    # 收官十轮（审查，实测）：曾把路径末段直接当基准币种——对 `…/exchange_rate`
+    # （无币种）取到 "exchange_rate"，请求 /v6/latest/exchange_rate 返回非 JSON，
+    # 抛裸 JSONDecodeError。仅当末段是 3 位币种代码时才采用
+    _seg = _up(url or "").path.rstrip("/").split("/")[-1].upper() if "/" in (url or "") else ""
+    base = _seg if re.fullmatch(r"[A-Z]{3}", _seg or "") else "CNY"
     api = f"https://open.er-api.com/v6/latest/{base}"
     r = fetch_html(api, timeout=20)
     if not r.get("ok"):
@@ -3902,7 +4048,9 @@ def _douban_movie_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -
     text = r.get("html", "")
     rows = []
     for m in re.finditer(
-        r'<li[^>]*class="[^"]*list-item[^"]*"[^>]*>.*?data-title="([^"]+)".*?data-rating="([^"]*)".*?data-releaseyear="([^"]*)".*?data-region="([^"]*)"', text, re.S):
+        # 收官十轮（审查，实测）：线上 li.list-item 用 data-score/data-release
+        # （实测 data-score 29 个、data-rating 0 个），旧属性名恒不匹配 → 恒 0 条
+        r'<li[^>]*class="[^"]*list-item[^"]*"[^>]*>.*?data-title="([^"]+)".*?data-score="([^"]*)".*?data-release="([^"]*)".*?data-region="([^"]*)"', text, re.S):
         rows.append({"标题": m.group(1), "评分": m.group(2),
                      "年份": m.group(3), "地区": m.group(4)})
     return rows
@@ -4030,10 +4178,12 @@ def _zhihu_hot_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> l
         raise RuntimeError("知乎热榜请求失败")
     data = json.loads(r.get("html", "{}"))
     rows = []
-    for it in data.get("data", []):
+    # 收官十轮（审查）：排名列曾取 detail_text（"1234 万热度"）与热度列重复，
+    # 真实名次信息丢失——按列表顺序生成
+    for idx, it in enumerate(data.get("data", []), 1):
         target = it.get("target", {})
         rows.append({
-            "排名": it.get("detail_text", "") or "",
+            "排名": idx,
             "标题": target.get("title", ""),
             "热度": it.get("detail_text", ""),
             "摘录": (target.get("excerpt", "") or "")[:100],
@@ -4056,7 +4206,12 @@ def _baidu_hot_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> l
         raise RuntimeError("百度热搜请求失败")
     text = r.get("html", "")
     rows = []
-    for m in re.finditer(r'<div[^>]*class="[^"]*c-single-text-ellipsis[^"]*"[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', text):
+    # 收官十轮（审查，实测）：线上结构是 <a class="title_…"><div class=
+    # "c-single-text-ellipsis">热搜词</div></a>（div 在 a 内），旧正则要求
+    # div 在外 a 在内 → 恒 0 条（页面 51 处 class 用法，实测 0 命中）
+    for m in re.finditer(
+            r'<a[^>]*href="([^"]+)"[^>]*>\s*<div[^>]*class="[^"]*c-single-text-ellipsis[^"]*"[^>]*>\s*([^<]+?)\s*</div>',
+            text):
         rows.append({"热搜词": m.group(2).strip(), "链接": m.group(1).strip()})
     return rows[:limit or 50]
 

@@ -145,32 +145,79 @@ def save_cookies(domain: str, cookies: List[Dict[str, Any]]) -> bool:
             return False
 
 
+def _load_exact(domain: str) -> List[Dict[str, Any]]:
+    """读取该域**精确**档案（不做父域回退）。损坏隔离与过期过滤在此层。"""
+    p = _cookie_path(domain)
+    if not p.exists():
+        return []
+    try:
+        raw = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []          # 并发删除：不是损坏
+    except OSError as e:
+        print(f"[WARN] Cookie 存档暂时读取失败（domain={domain}）："
+              f"{type(e).__name__}: {e}；本次按未登录处理，档案未改动，可重试",
+              file=sys.stderr, flush=True)
+        return []
+    try:
+        d = json.loads(raw)
+        now = time.time()
+        return [c for c in d.get("cookies", [])
+                if isinstance(c, dict) and c.get("name") and not _cookie_expired(c, now)]
+    except Exception as e:
+        try:
+            p.rename(p.with_name(p.name + ".corrupt"))
+        except Exception:
+            pass
+        print(f"[WARN] ⚠️ Cookie 存档损坏，已隔离为 {p.name}.corrupt"
+              f"（domain={domain}）：{e}；请重新登录/导入该域会话",
+              file=sys.stderr, flush=True)
+        return []
+
+
+def _parent_domains(domain: str) -> List[str]:
+    """逐级父域（父域档案回退用）：api.example.com → [example.com]；不走到 TLD。"""
+    parts = [p for p in _norm_domain(domain).split(".") if p]
+    return [".".join(parts[i:]) for i in range(1, len(parts) - 1)]
+
+
 def load_cookies(domain: str) -> List[Dict[str, Any]]:
-    """加载域名 cookie 数组；无则 []。存档损坏时隔离为 <path>.corrupt 并告警
-    （与"从没存过"区分：损坏说明曾存过但丢了，需要重新登录/导入）。
+    """加载域名 cookie 数组；无则 []。存档**内容**损坏时隔离为 <path>.corrupt
+    并告警（与"从没存过"区分：损坏说明曾存过但丢了，需要重新登录/导入）。
 
     深度改进③：已硬过期的 cookie 不再返回（留 5 分钟时钟偏差宽限）——
     过期令牌播种出去只会被登录墙吃掉，还常被误诊为"被封"。全过期时
     本函数返回 []，has_cookies() 随之为 False，acquire_for_task 会自动尝试
-    从调试 Chrome 重新导入新会话。"""
+    从调试 Chrome 重新导入新会话。
+
+    收官十轮（审查，实测复现）两处修复：
+    ① 只有**内容**解析失败才隔离——原实现把任意异常都当损坏：瞬时系统错误
+       （EMFILE/PermissionError）会把内容完好的凭据档案改名隔离，此后
+       load/has_cookies 恒空 且 list_saved()（只 glob *.json）看不到 .corrupt，
+       等于静默丢失登录态；并发删除也会打出假的"损坏"告警劝用户重新登录。
+    ② 精确档案为空时按 RFC 6265 单向过滤回退父域档案：调试 Chrome 登录
+       example.com 时站点把会话种在 .example.com → 导入落在 example.com.json，
+       而任务入口是 api.example.com 时旧行为恒"未登录"，给出的处方（再登录
+       一次 api.example.com）永远无效——站点仍只下发 .example.com。
+    """
     domain = _norm_domain(domain)
     with _LOCK:
-        p = _cookie_path(domain)
-        if p.exists():
-            try:
-                d = json.loads(p.read_text(encoding="utf-8"))
-                now = time.time()
-                return [c for c in d.get("cookies", [])
-                        if isinstance(c, dict) and c.get("name") and not _cookie_expired(c, now)]
-            except Exception as e:
-                try:
-                    p.rename(p.with_name(p.name + ".corrupt"))
-                except Exception:
-                    pass
-                print(f"[WARN] ⚠️ Cookie 存档损坏，已隔离为 {p.name}.corrupt"
-                      f"（domain={domain}）：{e}；请重新登录/导入该域会话",
-                      file=sys.stderr, flush=True)
-    return []
+        out = _load_exact(domain)
+        if out:
+            return out
+        for cand in _parent_domains(domain):
+            seen = set()
+            for c in _load_exact(cand):
+                # RFC 6265 单向：请求域必须是 cookie 域或其子域，跨域一律丢弃
+                if not _cookie_matches_archive(c.get("domain"), domain):
+                    continue
+                if c.get("name") in seen:
+                    continue
+                seen.add(c.get("name"))
+                out.append(c)
+            if out:
+                return out
+    return out
 
 
 def session_health(domain: str) -> Dict[str, Any]:

@@ -130,6 +130,62 @@ check("opener_for 无默认 env ProxyHandler", not any(
                                                       "https": "http://127.0.0.1:1"}
     for h in _chain), str([type(h).__name__ for h in _chain]))
 
+print("== 收官十轮回归（lint 加固/文本净化/分页/站点解析） ==")
+from universal_scraper.selectors import regex_is_dangerous, css_text
+
+# R4 判据放宽后：变长有界元素+尾部可空元素族必须判危险（曾漏判 → 60 字符 25s 冻结）
+for p in (r"(?:\d{1,4}\.?)+$", r"(?:[^,]{1,10},?)+$", r"(?:[\w-]{1,12}[ ]?)+$"):
+    check(f"lint TP {p[:24]}", regex_is_dangerous(p))
+for p in (r"(ab{1,3})+", r"(a{3})+", r"(\d{1,3}\.){3}\d{1,3}", r"(?:ab|ba)+"):
+    check(f"lint FP {p}", not regex_is_dangerous(p))
+
+# css_text 不得把 script/style 源码当字段值（真实页曾 78% 是 JS）
+check("css_text 去 script", css_text(
+    '<div class="t">Title<script>var x=1;</script></div>', ".t") == "Title")
+check("css_text 去 style", css_text(
+    '<div class="p">9.9<style>.x{}</style></div>', ".p") == "9.9")
+
+from universal_scraper.modules.parsers import JsonPagedParser, ConfigParser
+from universal_scraper.protocols import Response, Request, ParseContext
+
+_p = JsonPagedParser({"type": "json_paged", "records_path": "data.records",
+                      "strategy": "offset", "offset_param": "offset", "max_pages": 50}, {})
+_r = _p.parse(Response(request=Request(url="http://a/list?offset=20"), text="",
+                       url="http://a/list?offset=20",
+                       json={"data": {"records": [{"id": i} for i in range(20)]}}),
+              ParseContext(None, {}, {}))
+check("offset 分页换算", _r.requests and _r.requests[0].meta.get("params", {}).get("offset") == 40,
+      str(_r.requests[0].meta.get("params") if _r.requests else None))
+
+_cp = ConfigParser({"type": "html", "row_css": "li",
+                    "fields": {"gone": {"css": ".nope", "default": "N/A"}}}, {})
+_it = _cp.parse(Response(request=Request(url="http://a"), text="<ul><li>x</li></ul>",
+                         url="http://a"), ParseContext(None, {}, {})).items
+check("HTML 字段 default 生效", _it and _it[0].get("gone") == "N/A", str(_it))
+
+from universal_scraper.sites import (_crossref_date, _ajcass_block, _dianping_fetch,
+                                     _fund_eastmoney_run, parse_fundrank)
+
+check("crossref 日期不产 None", _crossref_date(
+    {"published-print": {"date-parts": [[None]]},
+     "published-online": {"date-parts": [[2023, 2, 3]]}}) == "2023-2-3")
+check("ajcass 作者不被截成 1 字", _ajcass_block(
+    "作者：张三、李四 ｜ 2026.43(1) 共有 1 人次浏览", "authors") == "张三、李四")
+
+import universal_scraper.dianping as _DP
+_calls = []
+_DP.fetch_search_page = lambda kw, page, **k: (_calls.append((kw, page)) or {})
+_dianping_fetch("https://www.dianping.com/search/keyword/2/0_%E7%81%AB%E9%94%85")
+check("点评 URL 解出关键词", _calls and _calls[-1] == ("火锅", 2), str(_calls))
+
+_fh = universal_scraper_fetch = None
+import universal_scraper.sites as _S
+_S.fetch_html = lambda u, **k: {"ok": True, "status": 200, "html":
+    'var db={chars:["0"],datas:[["007869","基金B","M","1.23"]],count:[1]};',
+    "final_url": u, "headers": {}}
+_f = _fund_eastmoney_run("https://fund.eastmoney.com/fund_rank", limit=1)
+check("fund eastmoney 对象形态", bool(_f) and _f[0]["代码"] == "007869", str(_f)[:60])
+
 print("== ReDoS lint ==")
 from universal_scraper.selectors import regex_is_dangerous
 

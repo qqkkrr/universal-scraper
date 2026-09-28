@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
@@ -74,18 +75,37 @@ def _normalize(entry: str, protocol: str) -> Optional[str]:
         return None
     if "://" in entry:
         sp = entry.split("://", 1)
-        if len(sp) == 2 and sp[0] in ("http", "https", "socks5"):
-            host_port = sp[1].rsplit("/", 1)[0]
-            # OCR R131（M）：端口 >65535 曾照单全收——非法地址进轮换池白烧尝试
-            if ":" in host_port:
-                try:
-                    _p = int(host_port.rsplit(":", 1)[1])
-                    if not (1 <= _p <= 65535):
-                        return None
-                except ValueError:
-                    return None
-            return entry
-        return None
+        # 收官十轮（审查，实测）：旧实现只要含 `://` 且前缀匹配就 return 原文——
+        # `http://www.example.com/error.html`、带空格的 HTML 残片都被当代理塞进
+        # 轮换池（实测 HTML 报错页正文行 → 1 条假代理）；而 `HTTP://1.2.3.4:8080`
+        # （scheme 大小写合法）反被误杀。改为：scheme 小写归一 + 强制 host:port
+        # 形态（无端口/带 path/带空白一律 None），并保留 IPv6 字面量与尾斜杠写法
+        if len(sp) != 2 or sp[0].lower() not in ("http", "https", "socks5"):
+            return None
+        scheme = sp[0].lower()
+        rest = sp[1].rstrip("/")
+        if any(c.isspace() for c in rest):
+            return None                     # 带空格 = 文本残片，不是代理
+        if any(c in rest for c in "/?#"):
+            return None                     # 带 path/查询 = 页面 URL，不是代理
+        if "@" in rest:                     # user:pass@host:port：取 @ 之后
+            rest = rest.rsplit("@", 1)[1]
+        if rest.startswith("["):            # IPv6 字面量 [::1]:8080
+            _m = re.match(r"^\[[0-9A-Fa-f:.]+\]:(\d{2,5})$", rest)
+            if not _m or not (1 <= int(_m.group(1)) <= 65535):
+                return None
+            return f"{scheme}://{rest}"
+        if ":" not in rest:
+            return None                     # 无端口 = 普通主机名
+        _host, _, _port = rest.rpartition(":")
+        if not re.match(r"^[A-Za-z0-9._-]+$", _host):
+            return None
+        try:
+            if not (1 <= int(_port) <= 65535):
+                return None
+        except ValueError:
+            return None
+        return f"{scheme}://{rest}"
     import re as _re
     if _ENTRY_RE is None:
         _ENTRY_RE = _re.compile(r"^[A-Za-z0-9._-]+:\d{2,5}$")
@@ -141,7 +161,23 @@ def fetch_proxies(api_url: str, format: str = "auto", protocol: str = "http",
     from .core import make_http_client
     client = make_http_client({"min_interval": 0, "timeout": timeout,
                                "max_retries": 1, "rotate_ua": False})
-    res = client.get(api_url)
+    # 收官十轮（审查，实测）：allow_private_api=True 曾完全无效——本模块只跳过了
+    # 自己的判定，而真正发请求的 core 出站守卫（_entry_guard_error）只认环境变量
+    # US_ALLOW_PRIVATE=1，于是文档承诺的"内网/本机网关 API"场景必失败
+    # （实测 RuntimeError: 出站守卫：拒绝访问私网）。这里在**已通过显式豁免**的
+    # 前提下，为本请求临时打开进程级开关（try/finally 还原，不影响其它请求）
+    _prev_allow = os.environ.get("US_ALLOW_PRIVATE")
+    _tmp_allow = allow_private_api and not _is_public_http_url(api_url)
+    if _tmp_allow:
+        os.environ["US_ALLOW_PRIVATE"] = "1"
+    try:
+        res = client.get(api_url)
+    finally:
+        if _tmp_allow:
+            if _prev_allow is None:
+                os.environ.pop("US_ALLOW_PRIVATE", None)
+            else:
+                os.environ["US_ALLOW_PRIVATE"] = _prev_allow
     if not res.get("ok"):
         raise RuntimeError(f"代理 API 请求失败: HTTP {res.get('status', 0)} "
                            f"{(res.get('text') or '')[:120]}")

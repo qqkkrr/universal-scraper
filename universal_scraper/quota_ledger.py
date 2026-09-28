@@ -71,7 +71,11 @@ class QuotaLedger:
             for _dim, _entries in data.items():
                 if not isinstance(_entries, dict):
                     continue
-                if _dim in ("domain", "action_budgets", "budget_meta", "notes"):
+                if _dim in ("action_budgets", "budget_meta", "notes"):
+                    # 收官十轮（审查，实测）：`domain` 曾在此豁免名单里，但它在本
+                    # 仓库就是时间戳维度（domain_budget.mark 写 int(time.time())）——
+                    # 文件里该键为字符串（手编/旧版/外部工具）时既不隔离也不剔除，
+                    # in_cooldown/check 的算术直接 TypeError，正是本校验要消灭的形态
                     continue  # 结构化维度不按时间戳校验
                 for _k in list(_entries.keys()):
                     if isinstance(_entries[_k], bool) or \

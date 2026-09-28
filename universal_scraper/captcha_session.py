@@ -42,17 +42,32 @@ class CaptchaSession:
         except Exception:
             return {"alive": False}
 
-    def wait_alive(self, timeout: float = 30.0) -> Dict[str, Any]:
-        """等桥上报心跳；超时抛错（附诊断方向）。"""
+    def wait_alive(self, timeout: float = 30.0, require_after: float = 0.0) -> Dict[str, Any]:
+        """等桥上报心跳；超时抛错（附诊断方向）。
+
+        require_after（epoch 秒，>0 生效）：只接受**该时刻之后**产生的心跳。
+        收官十轮（审查，实测复现）：原实现只查 alive 字段——被 SIGKILL 的旧桥
+        残留 status.json（alive:true）会让 `cli captcha --start` 立即"成功"返回
+        死桥的 mode/url，而真正新起的桥若启动失败已写墓碑退出，cli 里"启动超时
+        击杀孤儿"的防线（依赖本函数抛错）永不触发。启动方须传 require_after=启动
+        时刻。"""
         t0 = time.time()
         while time.time() - t0 < timeout:
             st = self.status()
             if st.get("alive"):
-                return st
-            if st.get("error"):
+                if not require_after:
+                    return st
+                try:
+                    ts = float(st.get("ts", 0)) / 1000.0
+                except (TypeError, ValueError):
+                    ts = 0.0
+                if ts >= require_after:
+                    return st
+                # 心跳比本次启动还早 = 残留文件，继续等新桥心跳（或超时）
+            elif st.get("error"):
                 raise RuntimeError(f"验证码桥启动失败: {st['error']}")
             time.sleep(0.5)
-        raise RuntimeError(f"验证码桥 {timeout:.0f}s 内未上报心跳——"
+        raise RuntimeError(f"验证码桥 {timeout:.0f}s 内未上报新心跳——"
                            f"是否已用 `cli captcha start --dir {self.dir}` 启动？")
 
     # ---- 生命周期（文件语义）----
@@ -70,7 +85,14 @@ class CaptchaSession:
 
     def stop(self) -> None:
         """触摸 stop 文件（桥 0.4s 轮询内优雅退出：关专用 tab、删墓碑文件），
-        并清掉全部交接文件——is_running 立即转 False。"""
+        并清掉全部交接文件——is_running 立即转 False。
+
+        收官十轮（审查，实测复现）：曾在本方法里挂一个"2 秒后删除 stop"的线程——
+        只要有 op 在飞（goto 最长 90s），桥要等 op 结束才在循环顶部检查 stop，
+        届时文件已被客户端自己删掉 → 桥收到"已停止"却继续运行（浏览器不关、
+        心跳继续刷、is_running 转回 True），且新 --start 被"已有桥在运行"拒绝，
+        用户既停不掉也开不起来。桥退出时本来就自删 stop（captcha_bridge.cjs
+        退出清理段），故此处不删；残留 stop 由 --start 启动前清理。"""
         try:
             (self.dir / "stop").touch()
         except Exception:
@@ -80,22 +102,6 @@ class CaptchaSession:
                 (self.dir / f).unlink(missing_ok=True)
             except Exception:
                 pass
-        # 审查三轮（H）：stop 文件曾永久残留——下次桥启动首轮轮询即 break，
-        # 永远起不来。延迟 2s 删除（桥 0.4s 轮询早已读到退出指令）
-        import threading as _th
-        import time as _t
-
-        def _rm_stop():
-            _t.sleep(2.0)
-            try:
-                (self.dir / "stop").unlink(missing_ok=True)
-            except Exception:
-                pass
-
-        # 非 daemon：cli captcha --stop 在 stop() 返回后进程立即退出，daemon 线程
-        # 会在 2s 睡眠内被杀、stop 文件永久残留（下次桥首轮轮询即退出起不来）；
-        # 非 daemon 让解释器退出前等这 ≤2s 的删除真正落盘
-        _th.Thread(target=_rm_stop).start()
 
     # ---- 文件协议 ----
     def send(self, op: str, timeout: float = 60.0, **kw) -> Dict[str, Any]:

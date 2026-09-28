@@ -41,6 +41,7 @@ class Task:
                                 has_custom_parser=(self.modules_dir / "parser.py").exists())
         self.name = self.config.get("name", root.name)
         self.modules: Dict[str, Any] = {}
+        self._mod_errors: Dict[str, BaseException] = {}   # 加载失败的异常（重复抛出用）
 
     # ---- 模块加载（按文件缓存：同一任务内每个自定义模块只 exec 一次，
     #      避免 get_parsers/get_custom_parser_classes 重复加载导致副作用双跑）----
@@ -50,6 +51,11 @@ class Task:
 
     def _load_module_file_locked(self, filename: str) -> Optional[Type]:
         if filename in self.modules:
+            # 收官十轮（审查，实测）：exec 失败的 None 曾被静默复用——第二次调用
+            # 直接回退内置类（无异常无告警），任务会用错 parser/fetcher 跑；
+            # 磁盘上改好文件后同一实例也不重载。改为重复抛出原异常（响亮失败）
+            if filename in self._mod_errors:
+                raise self._mod_errors[filename]
             return self.modules[filename]
         fp = self.modules_dir / filename
         if not fp.exists():
@@ -65,11 +71,13 @@ class Task:
         sys.modules[spec.name] = mod
         try:
             spec.loader.exec_module(mod)
-        except BaseException:
+        except BaseException as _e:
             # 审查 L4：exec 失败曾残留 sys.modules 半成品且不缓存失败键——
-            # 下次调用重复 exec（用户模块副作用重跑）。清掉并记 None
+            # 下次调用重复 exec（用户模块副作用重跑）。清掉并记 None。
+            # 收官十轮：另缓存异常对象，后续调用重新抛出而非静默回退内置类
             sys.modules.pop(spec.name, None)
             self.modules[filename] = None
+            self._mod_errors[filename] = _e
             raise
         self.modules[filename] = mod
         return mod

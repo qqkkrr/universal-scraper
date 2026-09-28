@@ -1197,14 +1197,21 @@ def main() -> int:
             if args.url:
                 boot["url"] = args.url
             wdir.mkdir(parents=True, exist_ok=True)
+            # 收官十轮：清理可能的残留 stop（上次 stop 时桥未在运行 → 桥没机会自删
+            # 该文件，新桥首轮轮询即 break 永远起不来）
+            try:
+                (wdir / "stop").unlink(missing_ok=True)
+            except Exception:
+                pass
             (wdir / "boot.json").write_text(_json.dumps(boot), encoding="utf-8")
             env = {**_os.environ, "NODE_PATH": str(_SD.parent / "node_modules")}
+            _spawn_after = time.time()      # 只认此刻之后的心跳（防残留 status.json）
             proc = _sp.Popen(
                 [_rn(), str(_BRIDGE), "--dir", str(wdir)],
                 cwd=str(_SD.parent), env=env,
                 stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
             try:
-                st = s.wait_alive(30)
+                st = s.wait_alive(30, require_after=_spawn_after)
             except Exception as e:
                 # 孤儿进程防线（审查 P1）：启动超时必须击杀残留桥，否则留下
                 # 无人认领的浏览器窗口（墓碑错误路径下桥已自退，kill 无害）

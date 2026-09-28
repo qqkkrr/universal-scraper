@@ -97,28 +97,39 @@ class ConfigParser(BaseParser):
     def _css_value(el_html: str, fspec: Dict[str, Any], limit: int = 0) -> str:
         """取字段值：优先显式 attr；兼容 css 里的 ::attr(name) 写法（如 .p1 a::attr(href)）。
         默认按单值字段处理：多元素拼接明显是"同一行多个链接/标签"时自动只留第一个，
-        避免 title 变成 'd\nf'、href 变成 '/a /b'。字段显式 multiple/join 时保留全部。"""
+        避免 title 变成 'd\nf'、href 变成 '/a /b'。字段显式 multiple/join 时保留全部。
+
+        收官十轮（审查）：所有分支取值为空时回退 fspec["default"]——JSON 字段映射
+        （_map）一直支持 default，HTML 侧曾静默忽略（配置里写的兜底值被吞，
+        调用方无法区分"真的空"与"选择器写错"）。"""
         from ..selectors import css_attr, css_text, xpath_text, regex_extract
+        _dflt = fspec.get("default")
+
+        def _fin(v):
+            if v:
+                return v
+            return "" if _dflt is None else str(_dflt)
+
         multi = bool(fspec.get("multiple") or fspec.get("join"))
         css = fspec.get("css") or ""
         if fspec.get("attr"):
             v = css_attr(el_html, css, fspec["attr"], fspec.get("limit", limit))
-            return v if multi else ConfigParser._smart_single(v, "attr")
+            return _fin(v if multi else ConfigParser._smart_single(v, "attr"))
         if "::attr(" in css:
             import re as _re
             m = _re.search(r"::attr\(([^)]*)\)", css)
             attr = m.group(1).strip().strip("'\"") if m else "href"
             v = css_attr(el_html, css, attr, fspec.get("limit", limit))
-            return v if multi else ConfigParser._smart_single(v, "attr")
+            return _fin(v if multi else ConfigParser._smart_single(v, "attr"))
         if fspec.get("xpath"):
             v = xpath_text(el_html, fspec["xpath"], fspec.get("limit", limit))
-            return v if multi else ConfigParser._smart_single(v, "text")
+            return _fin(v if multi else ConfigParser._smart_single(v, "text"))
         if css:
             v = css_text(el_html, css, fspec.get("limit", limit))
-            return v if multi else ConfigParser._smart_single(v, "text")
+            return _fin(v if multi else ConfigParser._smart_single(v, "text"))
         if fspec.get("regex"):
-            return regex_extract(el_html, fspec["regex"], fspec.get("group", 0))
-        return ""
+            return _fin(regex_extract(el_html, fspec["regex"], fspec.get("group", 0)))
+        return "" if _dflt is None else str(_dflt)
 
     @staticmethod
     def _smart_single(v: str, kind: str = "text") -> str:
@@ -439,6 +450,11 @@ class JsonPagedParser(BaseParser):
         # OCR R131（H）：resp.request 可为 None（合成 Response/无请求上下文）——
         # ConfigParser.parse 同场景已做守卫，这里曾裸访问必崩
         _meta = (resp.request.meta if resp.request else None) or {}
+        # 收官十轮（审查，实测复现）：page_size 兜底曾在此之后才算，导致 offset
+        # 策略下 URL 推断分支拿不到它 → 把 offset 原值当页号（offset=20 → 下一跳
+        # 400，静默丢 19 页；offset=40 + max_pages=10 → 整轮只剩 1 页；offset=0
+        # → 重复请求同一页）。提前到推断之前，与下方 len(rows) 兜底同源
+        page_size = max(1, int(cfg.get("page_size", len(rows) or 1)))  # R128：防 0 除
         page = int(_meta.get("page", 0)) or int(cfg.get("start", 1))
         if not _meta.get("page"):
             # 从 URL 查询参数推断起始页（--url 覆盖入口时无需 meta.page）
@@ -451,21 +467,35 @@ class JsonPagedParser(BaseParser):
                 except (ValueError, TypeError):
                     val = None
                 if val is not None:
-                    if cfg.get("strategy") == "offset" and cfg.get("page_size"):
-                        page = val // int(cfg["page_size"]) + 1
+                    # offset 策略下查询参数是"偏移量"即页的起点，一律按 page_size 换算页号
+                    if cfg.get("strategy") == "offset":
+                        page = val // page_size + 1
                     else:
                         page = val
         if page >= max_pages:
             return result
         total = jpath(data, cfg.get("total_path", ""), None) if cfg.get("total_path") else None
-        page_size = max(1, int(cfg.get("page_size", len(rows) or 1)))  # R128：防 0 除
         total_n = None
         if total is not None:
             try:
-                # 兼容 "1,000" / "1000" / 1000 等格式；纯非数字视为"未知"→继续翻页（由 max_pages 兜底）
-                _digits = re.sub(r"[^\d]", "", str(total))
-                total_n = int(_digits) if _digits else None
+                # 收官十轮（审查）：曾用 re.sub(r"[^\d]","") 刮出所有数字——"1.2万"
+                # （真实 12000）被读成 12、"3.5k"读成 35 → 提前停抓静默丢页；
+                # 反向 "100.0" 读成 1000 则多翻页。改为只接受干净的数字形态，
+                # 带单位/小数点/嵌套对象一律视为"未知"（由 max_pages 兜底翻页）
+                if isinstance(total, bool):
+                    total_n = None
+                elif isinstance(total, int):
+                    total_n = total
+                elif isinstance(total, float):
+                    total_n = int(total) if total.is_integer() else None
+                elif isinstance(total, str):
+                    _t = total.strip().replace(",", "").replace("，", "")
+                    total_n = int(_t) if _t.isdigit() else None
+                else:
+                    total_n = None
             except (TypeError, ValueError):
+                total_n = None
+            if total_n is not None and total_n <= 0:
                 total_n = None
 
         # 还有下一页？

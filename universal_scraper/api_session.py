@@ -52,6 +52,11 @@ def run_session(plan: Dict[str, Any], out_dir: Path, max_requests: Optional[int]
     import re as _re
     name = _re.sub(r"[^\w\u4e00-\u9fff-]", "_", name)[:60] or "session"
     steps: List[Dict[str, Any]] = plan.get("steps") or []
+    # 收官十轮（审查 L2）：计划字段曾无类型守卫——"steps": {...}（dict）会漏过
+    # falsy 检查后在 step.get 处 AttributeError；"min_gap": null 在 float() 处
+    # TypeError。都以裸 traceback 逃出 run_session，与模块"结构化返回"风格不符
+    if not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps):
+        return {"name": name, "error": "steps 应为对象数组（如 [{\"name\":..,\"url\":..}]）"}
     if not steps:
         return {"name": name, "error": "计划无 steps"}
     # 总量风险闸门（P0-B）：步数超阈值须显式 risk_accepted 才放行
@@ -80,8 +85,15 @@ def run_session(plan: Dict[str, Any], out_dir: Path, max_requests: Optional[int]
     # 改为显式 None 判定：只有真的没给（None）才回落计划值，0 就是 0（=不限）。
     _mr = max_requests if max_requests is not None else plan.get("max_requests")
     set_request_budget(int(_mr) if _mr is not None else 0)
-    client = make_http_client({"min_interval": float(min_gap if min_gap is not None
-                               else plan.get("min_gap", 2.5)), "timeout": timeout,
+    # 收官十轮（审查 L2）：min_gap 类型守卫（null 曾 float(None) TypeError）
+    _mg = min_gap if min_gap is not None else plan.get("min_gap", 2.5)
+    try:
+        _mg = float(_mg) if _mg is not None else 2.5
+        if _mg < 0:
+            _mg = 0.0
+    except (TypeError, ValueError):
+        return {"name": name, "error": f"min_gap 应为非负数字，实际 {plan.get('min_gap')!r}"}
+    client = make_http_client({"min_interval": _mg, "timeout": timeout,
                                "http_backend": "auto"})
     audit_path = out_dir / f"requests_{name}.jsonl"
 
@@ -165,6 +177,12 @@ def run_session(plan: Dict[str, Any], out_dir: Path, max_requests: Optional[int]
             streak.reset()
         elif streak.feed(len(res.get("body") or b"")):
             stopped = "blocked"
+            # 收官十轮（审查 L1）：连击启发式停机曾沿用本次判型（多为 session_none/
+            # detail 空）写 blocked.json——证据文件自称封禁、kind 却对不上语义，
+            # 申诉/复盘时误导。给连击路径一个自己的 kind 与说明
+            _bd = {"kind": "short_page_streak",
+                   "detail": "连续 3 页响应极短且长度一致且均非声明 JSON（启发式）"}
+            _kind = _bd["kind"]
             logger.error("⛔ 连续 3 页响应极短且长度一致且均非声明 JSON——疑似封禁页连发，硬停机")
             break
         # 挑战壳冷却：可恢复挑战类 → 冷却 60s 重试一次（两次尝试都进审计）
