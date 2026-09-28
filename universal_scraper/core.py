@@ -894,9 +894,9 @@ def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optio
         fetch_bytes.last_error = f"curl_cffi: {type(e).__name__}: {e}"
     try:
         req = urllib.request.Request(url, headers=hdrs)
-        opener = urllib.request.build_opener(_SafeRedirectHandler())
-        if proxy:
-            opener.add_handler(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        # 收官九轮（审查）：显式代理曾 add_handler 在默认 ProxyHandler 之后被忽略
+        from .net import opener_for
+        opener = opener_for(proxy, _SafeRedirectHandler())
         with opener.open(req, timeout=timeout) as resp:
             raw = resp.read(max_size + 1) if max_size else resp.read()
             if max_size and len(raw) > max_size:

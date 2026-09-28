@@ -50,9 +50,9 @@ def fetch_search_page(keyword: str, city: int = 2, cookie: str = "",
     }
     if cookie:
         headers["Cookie"] = cookie
-    opener = urllib.request.build_opener()
-    if proxy:
-        opener.add_handler(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    # 收官九轮（审查）：显式代理曾 add_handler 在默认 ProxyHandler 之后被忽略
+    from .net import opener_for
+    opener = opener_for(proxy)
     req = urllib.request.Request(url, headers=headers)
     try:
         from .core import smart_decode

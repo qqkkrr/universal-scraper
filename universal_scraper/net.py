@@ -36,6 +36,21 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def opener_for(proxy: str = "", *handlers):
+    """构造 opener，使显式代理**真正**生效（proxy 为空则保持 urllib 默认读环境变量）。
+
+    收官九轮（审查，实测复现）：`build_opener(_X())` 会自动装入读环境变量的默认
+    ProxyHandler，之后 `add_handler(ProxyHandler({...}))` 只排在它**后面**——
+    `_call_chain` 取首个返回非 None 的 handler，环境变量代理（Clash 等）恒先命中，
+    显式代理被静默忽略（实测 env 死端口先被使用、显式活端口只作兜底）。
+    修法：把 ProxyHandler 作为参数传给 build_opener，触发其 skip 逻辑替换默认实例。
+    四处同型站点（core/sites/dianping/net）统一走本函数。"""
+    hs = list(handlers)
+    if proxy:
+        hs.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    return urllib.request.build_opener(*hs)
+
+
 def detect_ip(timeout: int = 15, proxy: str = "") -> Dict[str, Any]:
     """返回 {ip, isp, city, region, org}；失败返回 {error}。
     审查六轮（M5）：proxy 非空时经该代理探测——真实出口与代理出口是两回事，
@@ -43,10 +58,7 @@ def detect_ip(timeout: int = 15, proxy: str = "") -> Dict[str, Any]:
     try:
         req = urllib.request.Request(_guard_echo_url("http://ip-api.com/json/?lang=zh-CN"),
                                      headers={"User-Agent": "Mozilla/5.0"})
-        _opener = urllib.request.build_opener(_NoRedirect())
-        if proxy:
-            _opener.add_handler(urllib.request.ProxyHandler(
-                {"http": proxy, "https": proxy}))
+        _opener = opener_for(proxy, _NoRedirect())
         with _opener.open(req, timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8", "ignore"))
         if d.get("status") == "success":

@@ -19,6 +19,22 @@ from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------- 数据对象
 
+def _stable(obj: Any, _depth: int = 0) -> Any:
+    """递归归一键值：set/frozenset 排序、dict 按键排序、深嵌套截断。
+
+    收官九轮（审查）：`str(set)` 的顺序随 PYTHONHASHSEED 每进程变化（实测三次
+    运行三个不同键）——跨进程 resume 时旧键永不命中，已抓页被重复抓取。"""
+    if _depth > 10:                      # 循环引用/超深结构：截断为 repr，停止递归
+        return repr(obj)
+    if isinstance(obj, dict):
+        return {str(k): _stable(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (set, frozenset)):
+        return sorted((_stable(v, _depth + 1) for v in obj), key=repr)
+    if isinstance(obj, (list, tuple)):
+        return [_stable(v, _depth + 1) for v in obj]
+    return obj
+
+
 def _key_extra(params: Any) -> str:
     """params 的键后缀（排序序列化）。独立成函数：queue.mark_seen 与 Request.key
     必须共用同一实现，否则 resume 注入键与新请求键口径漂移（审查二轮 H）。"""
@@ -26,9 +42,9 @@ def _key_extra(params: Any) -> str:
         return ""
     try:
         import json as _json
-        return "|" + _json.dumps(params, sort_keys=True, ensure_ascii=False, default=str)
+        return "|" + _json.dumps(_stable(params), sort_keys=True, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
-        return "|" + str(params)
+        return "|" + str(_stable(params))
 
 
 @dataclass

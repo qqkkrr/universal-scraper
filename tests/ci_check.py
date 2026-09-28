@@ -100,6 +100,36 @@ from universal_scraper.diagnose import classify_block  # noqa: E402
 _cb = classify_block(403, "forbidden", {"server": "nginx"})
 check("diagnose: 403 判型为阻断", bool(_cb.get("is_block")))
 
+print("== 收官九轮回归（跨进程确定性 / 引号形态 / 代理优先） ==")
+from universal_scraper.protocols import _key_extra
+
+# set 的 str 顺序随 PYTHONHASHSEED 变化 → resume 键跨进程漂移（曾实测三跑三键）
+_k1 = _key_extra({"tags": {"a", "b", "c", "d", "e", "f", "g"}})
+_k2 = _key_extra({"tags": {"g", "f", "e", "d", "c", "b", "a"}})
+check("set 键跨进程确定", _k1 == _k2, f"{_k1} != {_k2}")
+_circ = {"a": 1}
+_circ["self"] = _circ
+check("循环引用不死循环", len(_key_extra(_circ)) > 0)
+
+from universal_scraper.structure import summarize_html
+
+_sq = "<div class='item-title'>A</div>" * 4
+check("summarize 单引号 class 可见", "item-title" in summarize_html(_sq, "https://x.com"))
+_dq = '<div class="item-title">A</div>' * 4
+check("summarize 双引号 class 可见", "item-title" in summarize_html(_dq, "https://x.com"))
+
+from universal_scraper.net import opener_for
+
+# 显式代理必须排在默认（读环境变量）ProxyHandler 之前——add_handler 会排在其后而失效
+import urllib.request as _ur
+
+_op = opener_for("http://127.0.0.1:1")
+_chain = _op.handle_open.get("http", [])
+check("opener_for 无默认 env ProxyHandler", not any(
+    isinstance(h, _ur.ProxyHandler) and h.proxies != {"http": "http://127.0.0.1:1",
+                                                      "https": "http://127.0.0.1:1"}
+    for h in _chain), str([type(h).__name__ for h in _chain]))
+
 print("== ReDoS lint ==")
 from universal_scraper.selectors import regex_is_dangerous
 

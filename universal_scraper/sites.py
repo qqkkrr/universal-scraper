@@ -269,9 +269,9 @@ def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
     hdrs = dict(headers)
     hdrs.pop("Accept-Encoding", None)
     hdrs["Accept-Encoding"] = "identity"
-    opener = urllib.request.build_opener()
-    if proxy:
-        opener.add_handler(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    # 收官九轮（审查）：显式代理曾 add_handler 在默认 ProxyHandler 之后被忽略
+    from .net import opener_for
+    opener = opener_for(proxy)
     req = urllib.request.Request(url, headers=hdrs)
     try:
         with opener.open(req, timeout=timeout) as r:

@@ -47,14 +47,18 @@ def summarize_html(html: str, url: str, max_classes: int = 25, max_ids: int = 15
     tags = Counter(re.findall(r"<([a-zA-Z][\w-]*)\b", html))
     top_tags = [t for t, c in tags.most_common(20) if c >= 3]
 
-    classes = Counter(re.findall(r'class="([^"]+)"', html))
+    # 收官九轮（审查）：双引号专属正则曾让单引号属性页（合法 HTML）在
+    # diagnose 里完全不可见——class/id/href 三处统一改双形态捕获
+    classes = Counter(m[0] or m[1] for m in
+                      re.findall(r'''class\s*=\s*(?:"([^"]+)"|'([^']+)')''', html))
     flat = Counter()
     for v in classes:
         for c in v.split():
             flat[c] += classes[v]
     top_classes = [(c, n) for c, n in flat.most_common(max_classes) if n >= 3]
 
-    ids = Counter(re.findall(r'id="([^"]+)"', html))
+    ids = Counter(m[0] or m[1] for m in
+                  re.findall(r'''id\s*=\s*(?:"([^"]+)"|'([^']+)')''', html))
     top_ids = [(i, n) for i, n in ids.most_common(max_ids) if n >= 2]
 
     # 候选列表行：出现 >=3 次的“重复块”标签（div/li/tr/article）
@@ -71,7 +75,8 @@ def summarize_html(html: str, url: str, max_classes: int = 25, max_ids: int = 15
         row_candidates.append("ul li")
 
     # 详情链接模式：提取指向其它页面的相对链接（去掉静态资源）
-    hrefs = re.findall(r'href="([^"#]+)"', html)
+    hrefs = [m[0] or m[1] for m in
+             re.findall(r'''href\s*=\s*(?:"([^"#]+)"|'([^'#]+)')''', html)]
     detail_links = []
     seen_href = set()
     for h in hrefs:
