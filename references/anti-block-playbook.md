@@ -9,6 +9,7 @@
 | **挑战壳引用 `/_fec_sbu/fec_wrapper.js` + `hxk_fec_*.js`（非 `$_ts`），HTTP 通道 406；真浏览器能过但**每次完整导航后 1-2 次内即出「Sorry, you have been blocked」+ Request-ID 封锁页，冷却约 10 分钟** | **FE 前端挑战 + 导航频控 WAF（wcjs.sbj.cnipa.gov.cn 实测 2026-09）** | L3 真实 Chrome 一次过；**每冷却窗口只做 1 次导航，把"点菜单→填条件→查询→capture_all"全部塞进同一会话动作链**；活页内 XHR 交互不重复触发；封禁窗口内连静态 /js/*.js 都 403 |
 | 200 且内容齐全在 HTML 里 | 直接可抓 | L0 |
 | 页面是 JS 应用（有界面壳、数据靠 XHR 拼，如 EUIPO eSearch） | SPA 应用 | **接口捕获（capture_all）优先**，浏览器只留交互 |
+| **页面本身被拦/是壳，但站方另有公开数据接口**（排行榜/公告/搜索的 JSONP、RSS、open API，不校验 UA/签名/登录） | **公开 API 直通型** | **L0 直通：先找接口再谈反爬**——`jsrecon`／`capture_all` 找端点，或直接查站方 open API/RSS（实战例：天天基金 `data/rankhandler.aspx`、中彩网 JSONP、Crossref/OpenAlex 开放接口）。命中时**不要**升级浏览器/代理；只有接口字段不够时才回退页面路线。判定要点：**接口能用就不算"被阻断"**，别把页面拦截误判成任务障碍 |
 | 返回"Just a moment"/Turnstile 挑战页；headless 也被卡；偶发 ERR_CONNECTION_CLOSED | Cloudflare 类 | 直接 L3：真实调试 Chrome 过一次校验 → 配置 cdp 附加（R16），headless 别硬试 |
 | **首页/老路径 302 → `captcha.eo.qq.com`/`captcha.eo.gtimg.com` 加载 TEOCaptchaWidget（腾讯云 EdgeOne），CDP 真 Chrome 也弹验证码；`diagnose` 可能只看到 302** | **腾讯云 EdgeOne 验证码关卡（kaijiang.500.com 实测 2026-09）** | **人工关卡，L4 人机协同；自主任务无人在环时直接换源**（同任务换官方行业中彩网 jc.zhcw.com JSONP 接口完成交付），别程序绕 |
 | 403 / 412 / 468 / 503，或正常 UA 也被拒 | WAF 指纹拦截 | L1 |

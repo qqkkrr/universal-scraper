@@ -70,7 +70,9 @@ def check_netlink() -> list:
     elif sp.get("enabled"):
         out.append({"item": f"系统代理已开启（{', '.join(sp['sources']) or _hp}）",
                     "ok": True,  # 提示级：不算失败
-                    "hint": "直连请求可能被劫持！配额诊断前先确认真实出口（cli ip），必要时关系统代理"})
+                    "hint": "直连请求可能被劫持！配额诊断前先确认真实出口（cli ip）。"
+                            "别默认关代理——目标站依赖它时关掉直接连不上；只想给本次请求锁直连用 "
+                            "no_proxy 即可；改系统代理属用户环境变更，由用户决定"})
     elif sp.get("processes"):
         out.append({"item": f"有代理进程（{', '.join(sp['processes'])}）但系统代理未启用",
                     "ok": True,
