@@ -19,9 +19,9 @@ UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like 
 
 
 def _fetch(url: str, timeout: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """轻量探测抓取：优先 HTTP，失败/JS 页面时交给调用方决定。"""
     import os as _os
     timeout = timeout or int(_os.environ.get("US_PROBE_TIMEOUT", "12"))
-    """轻量探测抓取：优先 HTTP，失败/JS 页面时交给调用方决定。"""
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
     try:
@@ -47,14 +47,18 @@ def summarize_html(html: str, url: str, max_classes: int = 25, max_ids: int = 15
     tags = Counter(re.findall(r"<([a-zA-Z][\w-]*)\b", html))
     top_tags = [t for t, c in tags.most_common(20) if c >= 3]
 
-    classes = Counter(re.findall(r'class="([^"]+)"', html))
+    # 收官九轮（审查）：双引号专属正则曾让单引号属性页（合法 HTML）在
+    # diagnose 里完全不可见——class/id/href 三处统一改双形态捕获
+    classes = Counter(m[0] or m[1] for m in
+                      re.findall(r'''class\s*=\s*(?:"([^"]+)"|'([^']+)')''', html))
     flat = Counter()
     for v in classes:
         for c in v.split():
             flat[c] += classes[v]
     top_classes = [(c, n) for c, n in flat.most_common(max_classes) if n >= 3]
 
-    ids = Counter(re.findall(r'id="([^"]+)"', html))
+    ids = Counter(m[0] or m[1] for m in
+                  re.findall(r'''id\s*=\s*(?:"([^"]+)"|'([^']+)')''', html))
     top_ids = [(i, n) for i, n in ids.most_common(max_ids) if n >= 2]
 
     # 候选列表行：出现 >=3 次的“重复块”标签（div/li/tr/article）
@@ -62,8 +66,8 @@ def summarize_html(html: str, url: str, max_classes: int = 25, max_ids: int = 15
     for cls, n in top_classes:
         if n >= 3:
             row_candidates.append(f".{cls}")
-    for tag in ("li", "tr", "article", "div", "tr.row"):
-        if tags.get(tag, 0) >= 3 and tag not in ("div",):
+    for tag in ("li", "tr", "article"):  # OCR R131（L）：div 是死条目（恒被排除）；"tr.row" 非合法 tag 名（恒 miss）
+        if tags.get(tag, 0) >= 3:
             row_candidates.append(tag)
     if tags.get("tr", 0) >= 3:
         row_candidates.append("table tr")
@@ -71,7 +75,8 @@ def summarize_html(html: str, url: str, max_classes: int = 25, max_ids: int = 15
         row_candidates.append("ul li")
 
     # 详情链接模式：提取指向其它页面的相对链接（去掉静态资源）
-    hrefs = re.findall(r'href="([^"#]+)"', html)
+    hrefs = [m[0] or m[1] for m in
+             re.findall(r'''href\s*=\s*(?:"([^"#]+)"|'([^'#]+)')''', html)]
     detail_links = []
     seen_href = set()
     for h in hrefs:
@@ -87,8 +92,11 @@ def summarize_html(html: str, url: str, max_classes: int = 25, max_ids: int = 15
 
     # 翻页/分页链接：优先找 rel=next、Next/下一页/» 锚文本、page-\d+/page=\d+ 模式
     next_links: List[str] = []
-    for m in re.finditer(r'<a[^>]+href="([^"#]+)"[^>]*>([^<]{0,40})</a>', html, re.I | re.S):
-        h, txt = m.group(1).strip(), re.sub(r"\s+", " ", m.group(2)).strip()
+    for m in re.finditer(r'<a[^>]+href="([^"#]+)"[^>]*>(.*?)</a>', html, re.I | re.S):
+        h = m.group(1).strip()
+        # OCR R6：([^<]{0,40}) 遇嵌套标记（<a><span>下一页</span></a>）整体漏配——
+        # 改惰性抓全内层后剥标签取锚文本
+        txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2))).strip()
         if h.startswith(("javascript:", "mailto:", "tel:", "#")):
             continue
         anchor_txt = m.group(0) + " " + txt
@@ -203,7 +211,9 @@ def _css_path(el) -> str:
             same = [c for c in parent if c.tag == tag]
             if len(same) > 1:
                 idx = same.index(node) + 1
-                seg += f":nth-child({idx})"
+                # R128 修复（OCR）：nth-child 计的是所有子元素的序号，这里只算同
+                # 标签——应使用 nth-of-type 才能正确匹配目标节点
+                seg += f":nth-of-type({idx})"
         parts.append(seg)
         node = parent
     parts.reverse()
@@ -227,16 +237,21 @@ def _rel_path(row, el) -> str:
         if parent is not None:
             same = [c for c in parent if c.tag == tag]
             if len(same) > 1:
-                seg += f":nth-child({same.index(node) + 1})"
+                # OCR R131（H）：索引按同 tag 兄弟算，却用 :nth-child（含异 tag
+                # 计数）——混合子节点下错位。同 tag 计数对应 :nth-of-type
+                seg += f":nth-of-type({same.index(node) + 1})"
         parts.append(seg)
         node = parent
     parts.reverse()
-    return " > ".join(parts) if parts else tag
+    # OCR R131（M）：el 即 row / 首节点为注释（tag 非 str）时 parts 空——
+    # 曾返回未绑定的 tag 变量直接 UnboundLocalError
+    return " > ".join(parts) if parts else ""
 
 
 def _row_field_hints(row, url: str, max_fields: int = 12) -> List[str]:
     """行内字段样例：相对选择器 => 文本/href/src（省 token 的 scrapedown 输出）。"""
     out: List[str] = []
+    _seen_rels: set = set()  # OCR R131（L）：去重曾每元素重建 split 列表 O(n²)
     for el in row.iterdescendants():
         if not isinstance(el.tag, str):
             continue
@@ -251,14 +266,17 @@ def _row_field_hints(row, url: str, max_fields: int = 12) -> List[str]:
         if not txt and not href and not src:
             continue
         rel = _rel_path(row, el)
-        if rel in [o.split(" => ")[0] for o in out]:
+        if rel in _seen_rels:
             continue
+        _seen_rels.add(rel)
         if len(out) >= max_fields:
             break
         if href:
             if href.startswith(("javascript:", "mailto:", "tel:")):
                 continue
-            abs_h = urljoin(url, href) if href.startswith(("/", "http")) else href
+            # OCR R131（M）：startswith(("/","http")) 曾漏掉无前导 / 的相对路径
+            # （"item/123" 类）——urljoin 对绝对 URL 是恒等，直接全量补全
+            abs_h = urljoin(url, href)
             out.append(f"{rel} => {txt[:40] if txt else '(无文本)'} [href={abs_h[:90]}]")
         elif src:
             out.append(f"{rel} => {txt[:40] if txt else '(图片)'} [img={src[:70]}]")
@@ -286,7 +304,7 @@ def annotate_dom(html: str, url: str = "", max_chars: int = 7000,
         for el in doc.xpath(f"//{tag}"):
             el.drop_tree()
 
-    from collections import Counter, defaultdict
+    from collections import defaultdict  # OCR R131（L）：Counter 已在模块级导入
     counts: Counter = Counter()
     samples: Dict[Any, List[Any]] = defaultdict(list)
     for el in doc.iter():
@@ -335,10 +353,29 @@ def annotate_dom(html: str, url: str = "", max_chars: int = 7000,
         lines.append(f"  完整CSS: {full}")
         for i, el in enumerate(els[:2], 1):
             fields = _row_field_hints(el, url)
-            lines.append(f"  实例{i} ({tag}.{cls_str}:nth-child({i})):")
+            # 审查二轮（H）：曾用匹配序号当 :nth-child——兄弟混异 tag 时错位。
+            # 审查三轮（H）：list(parent).index 仍是全子节点序——nth-of-type
+            # 必须数同 tag 兄弟（与 _rel_path 口径一致）
+            _parent = el.getparent()
+            if _parent is not None:
+                # 审查八轮（MEDIUM）：曾对每个子节点重算 `list(_parent).index()`
+                # （两次调用，各自 O(n)）——单个元素即 O(n²)，实测同父 4000 子节点
+                # 15.9s（宽列表页卡十几秒）。改为一次筛出同 tag 兄弟再 index（O(n)）。
+                _sibs = [c for c in _parent if isinstance(c.tag, str) and c.tag == el.tag]
+                try:
+                    _idx = _sibs.index(el) + 1      # lxml 元素按同一性比较
+                except ValueError:
+                    _idx = len(_sibs)
+            else:
+                _idx = i
+            lines.append(f"  实例{i} ({tag}.{cls_str}:nth-of-type({_idx})):")
             for f in fields[:10]:
                 lines.append(f"    {f}")
     out = "\n".join(lines)
     if len(out) > max_chars:
-        out = out[:max_chars] + "\n...(截断)"
+        # 审查修复（N61）：硬截断曾把 CSS 选择器/字段行切成半截（如
+        # li.item:nth-of-typ）——LLM 会把残缺选择器当真抄进配置。回退到
+        # 最近一个完整行边界再截断
+        _cut = out.rfind("\n", 0, max_chars)
+        out = out[:_cut if _cut > 0 else max_chars] + "\n...(截断)"
     return out

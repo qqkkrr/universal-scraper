@@ -57,6 +57,13 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 TEST_URL = "https://example.com"          # 轻量连通测试（仅通用模式）
 # 目标站校验默认超时：免费代理慢，12s 实测过滤率与体感一致
 TARGET_TIMEOUT = 12
+# 无 marker 时的"真实页面"否定判据（审查八轮修复用）：拦截/拦截页常见特征。
+# 注意 TEST_URL=example.com 只有 559 字节——旧判据">5KB 或 JSON"对它恒假，
+# 导致 validate()/refresh（模块 docstring 的默认用法）恒判 0 可用。
+_BLOCK_HINTS = (b"captcha", b"forbidden", b"access denied", b"blocked",
+                b"not allowed", b"cloudflare", b"<title>error",
+                "安全验证".encode("utf-8"), "访问受限".encode("utf-8"),
+                "访问过于频繁".encode("utf-8"))
 
 
 def _guard_url(url: str) -> str:
@@ -68,17 +75,34 @@ def _guard_url(url: str) -> str:
 
 
 def proxy_addr_safe(px: str) -> bool:
-    """代理地址安全校验：拒绝 私网/环回/链路本地/保留段。"""
+    """代理地址安全校验：拒绝 私网/环回/链路本地/保留段。
+
+    OCR R131（H）：主机名形态（proxy.example.com:8080）曾被 ip_address 抛
+    ValueError 后一刀切拒绝——所有域名代理全被误杀。域名走 DNS 解析后按
+    解析 IP 判定；解析失败（离线/已下线）放行——是否可用交给连通校验。"""
     host = px
     for prefix in ("http://", "https://", "socks5://", "socks4://"):
         if host.startswith(prefix):
             host = host[len(prefix):]
-    host = host.rsplit("/", 1)[0].split("@")[-1].rsplit(":", 1)[0]
+    host = host.rsplit("/", 1)[0].split("@")[-1].rsplit(":", 1)[0].strip("[]")
     try:
         ip = ipaddress.ip_address(host)
         return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved)
     except ValueError:
-        return False
+        pass  # 主机名形态：走 DNS 判定
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return True  # 解析失败 ≠ 私网：放行，交给连通校验淘汰
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    return True
 
 
 # ---------------------------------------------------------------- 抓取
@@ -109,7 +133,11 @@ def _parse(text: str) -> List[str]:
     except Exception:
         pass
     for m in re.finditer(r"(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})", text):
-        out.append(f"http://{m.group(1)}:{m.group(2)}")
+        # OCR R131（M）：\d{2,5} 放过 >65535 与 0 端口——非法地址进验证池白烧 worker；
+        # 八位组 >255（如 999.1.1.1）同理，正则层一并拦
+        octs = m.group(1).split(".")
+        if 1 <= int(m.group(2)) <= 65535 and all(int(o) <= 255 for o in octs):
+            out.append(f"http://{m.group(1)}:{m.group(2)}")
     return list(dict.fromkeys(out))
 
 
@@ -127,10 +155,57 @@ def fetch_all(timeout: int = 12, log=print) -> List[str]:
 
 
 # ---------------------------------------------------------------- 校验
+_CFFI_PROBED = False
+_CFFI_OK = False
+
+
+def _cffi_available() -> bool:
+    """R22 修复：兑现 _fetch_via 文档承诺的"先探测一次，缺失则降级"——此前
+    curl_cffi 缺失时每个代理的校验都吞 ImportError，表现为沉默的"0 可用"，
+    还把全量代理写成 dead 污染持久台账。"""
+    global _CFFI_PROBED, _CFFI_OK
+    if not _CFFI_PROBED:
+        try:
+            import curl_cffi  # noqa: F401
+            _CFFI_OK = True
+        except Exception:
+            _CFFI_OK = False
+            print("[warn] curl_cffi 未安装：代理校验降级为 requests 指纹"
+                  "（TLS 门禁站可用率会偏低，但可用性判断诚实，不会假报全死）")
+        _CFFI_PROBED = True
+    return _CFFI_OK
+
+
+def _marker_hit(marker: str, content: bytes, text: str) -> bool:
+    """内容标记断言（审查修复）：utf-8 字节直配 → 响应解码文本 → 常见中文编码
+    显式解码 → charset 探测兜底。GBK 等非 UTF-8 目标站曾被一刀切误判不可用——
+    utf-8 字节序列在 GBK 响应里永不命中，而 .text 在响应未声明 charset 时可能
+    按默认编码错解。误报风险可忽略：特定标记串碰巧出现在错解文本里概率趋零。"""
+    if not marker:
+        return True
+    if marker.encode("utf-8") in (content or b""):
+        return True
+    if marker in (text or ""):
+        return True
+    for enc in ("gb18030", "big5", "cp1252"):  # gb18030 ⊇ GBK/GB2312（政学站点常见）
+        try:
+            if marker in (content or b"").decode(enc):
+                return True
+        except (UnicodeDecodeError, LookupError):
+            continue
+    try:
+        from charset_normalizer import from_bytes
+        best = from_bytes(content or b"").best()
+        return bool(best) and marker in str(best)
+    except Exception:
+        return False
+
+
 def _fetch_via(proxy: str, url: str, timeout: int, marker: Optional[str] = None) -> Tuple[bool, int]:
     """经代理 GET url；marker 给定时断言响应含标记内容。返回 (ok, latency_ms)。
-    审查修复：curl_cffi 缺失不再逐代理吞 ImportError（表现为沉默的"0 可用"）——
-    先探测一次，缺失则降级 requests 并大声提示。"""
+    curl_cffi 缺失时降级 requests（_cffi_available 内一次性大声提示）。"""
+    if not _cffi_available():
+        return _fetch_via_requests(proxy, url, timeout, marker)
     import curl_cffi.requests as cffi
     p = {"http": proxy, "https": proxy}
     t0 = time.time()
@@ -138,11 +213,28 @@ def _fetch_via(proxy: str, url: str, timeout: int, marker: Optional[str] = None)
                  allow_redirects=False)
     ok = r.status_code == 200
     if ok and marker:
-        ok = marker.encode("utf-8") in r.content or marker in r.text
+        ok = _marker_hit(marker, r.content, r.text)
     if ok and not marker:
-        # 无标记时至少要求是真实页面而非拦截页（>5KB 或 JSON）
-        ok = len(r.content) > 5120 or r.content[:1] in (b"{", b"[")
+        ok = _looks_like_real_page(r.content)
     return ok, int((time.time() - t0) * 1000)
+
+
+def _looks_like_real_page(body: bytes) -> bool:
+    """无 marker 时的通用可用性判据（审查八轮修复）。
+
+    旧判据 `len > 5120 or JSON` 对 TEST_URL=example.com（559 字节 HTML）恒假，
+    于是 `validate()` / `python -m universal_scraper.proxy_fetch --refresh`
+    （模块 docstring 宣传的默认用法）恒判 0 个可用，并把既有 proxies.txt 覆盖成空。
+    新判据 = "拿到真内容 且 不是拦截页"：体积下限 200 字节（JSON 例外），
+    且不含 captcha/forbidden/安全验证 等拦截特征。
+    """
+    body = body or b""
+    if not body:
+        return False
+    low = body[:4096].lower()
+    if any(h in low for h in _BLOCK_HINTS):
+        return False
+    return len(body) >= 200 or body[:1] in (b"{", b"[")
 
 
 def _fetch_via_requests(proxy: str, url: str, timeout: int, marker: Optional[str] = None) -> Tuple[bool, int]:
@@ -154,9 +246,9 @@ def _fetch_via_requests(proxy: str, url: str, timeout: int, marker: Optional[str
                 headers={"User-Agent": UA})
     ok = r.status_code == 200
     if ok and marker:
-        ok = marker in r.text or marker.encode("utf-8") in r.content
+        ok = _marker_hit(marker, r.content, r.text)
     if ok and not marker:
-        ok = len(r.content) > 5120 or r.content[:1] in (b"{", b"[")
+        ok = _looks_like_real_page(r.content)   # 与 curl_cffi 通道同判据（避免两通道口径分叉）
     return ok, int((time.time() - t0) * 1000)
 
 
@@ -235,13 +327,22 @@ class PoolState:
         except Exception as e:
             # 损坏自动重建，但必须出声 + 带时间戳隔离（审查修复：静默清零 burned
             # 等于把烧尽代理重新放回战场；二次损坏曾覆盖前一份证据）
-            import sys as _sys
+            import sys as _sys, uuid as _uuid
             print(f"⚠️ 代理池状态损坏（{type(e).__name__}: {str(e)[:60]}），隔离后从零重建: {self.path}",
                   file=_sys.stderr)
+            # OCR R131（H）：rename 失败（同秒碰撞/跨设备/权限）曾被吞——证据没隔离
+            # 成功，data 却已清零，下次 save 直接覆盖原始损坏文件。加 uuid 后缀
+            # 防同秒碰撞；rename 仍失败时把损坏内容复制一份再放行重建
+            _dest = self.path.with_suffix(f".corrupt.{int(time.time())}.{_uuid.uuid4().hex[:6]}")
             try:
-                self.path.rename(self.path.with_suffix(f".corrupt.{int(time.time())}"))
+                self.path.rename(_dest)
             except Exception:
-                pass
+                try:
+                    import shutil as _sh
+                    _sh.copy2(self.path, _dest)
+                except Exception as _ce:
+                    print(f"⚠️ 损坏证据隔离彻底失败（{_ce}）——原文将在下次 save 被覆盖",
+                          file=_sys.stderr)
             self.data = {}
 
     def save(self):
@@ -255,6 +356,12 @@ class PoolState:
     def mark(self, proxy: str, state: str, latency_ms: int = -1):
         rec = self.data.setdefault(proxy, {"state": "fresh", "ok": 0, "blocked": 0,
                                            "latency_ms": -1, "ts": 0})
+        # OCR R131（H）：burned 是 24h 隔离终态——窗口内任何降/升级标记都曾把
+        # 烧尽代理放回战场（refresh 侧有守卫，mark 自身没有）。窗口内拒绝改态
+        if rec.get("state") == "burned" and state != "burned" \
+                and int(rec.get("burned_until", 0)) > int(time.time()):
+            return
+        _prev_state = rec.get("state")
         rec["state"] = state
         rec["ts"] = int(time.time())
         if latency_ms >= 0:
@@ -264,7 +371,10 @@ class PoolState:
             rec["burned_until"] = int(time.time()) + 86400
         if state == "alive":
             rec["ok"] += 1
-        self.save()
+        # OCR R131（M）：同态重复标记（alive×N）曾每次全量落盘——只在状态迁移
+        # 或带延迟测量时写盘；纯计数增量靠后续落盘捎带（崩溃最多丢计数精度）
+        if _prev_state != state or latency_ms >= 0:
+            self.save()
 
     def usable(self, exclude_burned: bool = True) -> List[str]:
         now = int(time.time())
@@ -329,21 +439,53 @@ def refresh(out: str = "outputs/proxies.txt", workers: int = 30,
         log(f"⚠️ 可用代理仅 {len(good)} 个（阈值 {min_ok}），仍会写入供应急使用")
     fp = Path(out).expanduser()
     fp.parent.mkdir(parents=True, exist_ok=True)
-    fp.write_text("\n".join(good) + ("\n" if good else ""), encoding="utf-8")
+    # 审查八轮（HIGH，数据丢失防护）：本轮 0 可用时**不覆盖**既有池文件——
+    # 旧判据恒判 0 可用（见 _looks_like_real_page 注释），refresh 会把上一轮
+    # 验证好的可用池直接清空成空文件（实测复现），用户手里再没有可用代理。
+    _kept = False
+    if not good and fp.exists():
+        try:
+            _old = fp.read_text(encoding="utf-8").strip()
+        except Exception:
+            _old = ""
+        if _old:
+            kept_n = len([x for x in _old.splitlines() if x.strip()])
+            log(f"⚠️ 本轮 0 个可用——保留既有 {fp}（{kept_n} 行）不覆盖，"
+                "请先查证源站/网络再重跑")
+            _kept = True
+    if not _kept:
+        fp.write_text("\n".join(good) + ("\n" if good else ""), encoding="utf-8")
     log(f"✅ 可用代理 {len(good)} 个 → {fp}（三态账本: {st.path}）")
-    return {"total": len(all_p), "ok": len(good), "file": str(fp),
+    return {"total": len(all_p), "ok": len(good), "file": str(fp), "kept_previous": _kept,
             "stats": st.stats(), "state_file": str(st.path)}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="🔄 免费代理池构建 v2（目标站校验 + 三态账本）")
-    ap.add_argument("--refresh", action="store_true", help="抓取+验证+写入")
+    # OCR R131（M）：--status 之前在 help 文档里承诺却不存在；--refresh 形同虚设
+    # （默认路径就是 refresh）。补 --status 只读查看；--refresh 保留为显式语义
+    ap.add_argument("--refresh", action="store_true", help="抓取+验证+写入（默认行为，显式声明）")
+    ap.add_argument("--status", action="store_true", help="只读查看池状态，不抓取不写入")
     ap.add_argument("--out", default="outputs/proxies.txt")
     ap.add_argument("--workers", type=int, default=30)
     ap.add_argument("--target-url", default=None, help="目标站真实页面 URL（推荐重页面 >50KB）")
     ap.add_argument("--marker", default=None, help="目标页唯一文案标记（如站名）")
     ap.add_argument("--sample", type=int, default=600, help="每轮抽样校验数")
     args = ap.parse_args()
+    if args.status:
+        import sys as _sys
+        sf = Path(args.out).with_suffix(".pool.json")
+        if not sf.exists():
+            print("池状态文件不存在（先跑一次刷新）", file=_sys.stderr)
+            return 1
+        st = PoolState(sf)
+        usable = st.usable()
+        print(f"池状态: {sf}")
+        print(f"  可用代理: {len(usable)} / 总记录 {len(st.data)}")
+        for px in usable[:20]:
+            rec = st.data.get(px, {})
+            print(f"  {px}  {rec.get('state')}  ok={rec.get('ok', 0)}  {rec.get('latency_ms', -1)}ms")
+        return 0
     r = refresh(out=args.out, workers=args.workers, target_url=args.target_url,
                 marker=args.marker, sample=args.sample)
     return 0 if r["ok"] else 1

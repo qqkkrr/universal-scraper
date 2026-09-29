@@ -14,6 +14,13 @@ except Exception:  # pragma: no cover
 from ..queue import extract_links
 
 
+def _cls_selector(cls: str) -> str:
+    """class 属性转 CSS 类选择器（OCR R131）：class="item active" 曾整串拼进
+    f"{tag}.{cls}" 变成后代选择器「tag.item active」——多 class 页面静默匹配
+    不到重复结构。按空格拆分逐个加点：→ ".item.active"。"""
+    return "".join("." + c for c in (cls or "").split() if c)
+
+
 class ConfigParser(BaseParser):
     """声明式解析器：parsers.<name> 配置驱动。
 
@@ -23,6 +30,12 @@ class ConfigParser(BaseParser):
       - 链接提取: extract_links{allow, deny} → 生成新请求（递归）
     """
     name = "config"
+
+    def __init__(self, config, task_vars):
+        super().__init__(config, task_vars)
+        # OCR R131（H）：_self_healing 曾只在 _html_rows 里赋值——json 模式等
+        # 不走 _html_rows 的请求会读到上一请求的残留 True，触发跨请求状态污染
+        self._self_healing = False
 
     def parse(self, resp: Response, ctx: ParseContext) -> ParseResult:
         cfg = self.config or {}
@@ -58,11 +71,14 @@ class ConfigParser(BaseParser):
         return result
 
     def _map(self, row: Dict[str, Any], fields: Dict[str, Any]) -> Dict[str, Any]:
+        import re as _re
         out: Dict[str, Any] = {}
         for name, spec in (fields or {}).items():
+            _strip = False
             if isinstance(spec, str):
                 out[name] = jpath(row, spec, None)
             elif isinstance(spec, dict):
+                _strip = bool(spec.get("strip_tags"))
                 if "from" in spec:
                     out[name] = jpath(row, spec["from"], spec.get("default"))
                 elif "path" in spec:
@@ -71,34 +87,49 @@ class ConfigParser(BaseParser):
                     out[name] = spec["constant"]
                 else:
                     out[name] = jpath(row, spec.get("path", ""), None)
+            # T4 实测（2026-09-27）：与 v1 引擎同款 strip_tags——搜索类 API 的
+            # <em>/<b>/<mark> 高亮标签是常见污染（gov.cn 即此），取值后统一后处理
+            if _strip and isinstance(out.get(name), str):
+                out[name] = _re.sub(r"<[^>]+>", "", out[name])
         return out
 
     @staticmethod
     def _css_value(el_html: str, fspec: Dict[str, Any], limit: int = 0) -> str:
         """取字段值：优先显式 attr；兼容 css 里的 ::attr(name) 写法（如 .p1 a::attr(href)）。
         默认按单值字段处理：多元素拼接明显是"同一行多个链接/标签"时自动只留第一个，
-        避免 title 变成 'd\nf'、href 变成 '/a /b'。字段显式 multiple/join 时保留全部。"""
+        避免 title 变成 'd\nf'、href 变成 '/a /b'。字段显式 multiple/join 时保留全部。
+
+        收官十轮（审查）：所有分支取值为空时回退 fspec["default"]——JSON 字段映射
+        （_map）一直支持 default，HTML 侧曾静默忽略（配置里写的兜底值被吞，
+        调用方无法区分"真的空"与"选择器写错"）。"""
         from ..selectors import css_attr, css_text, xpath_text, regex_extract
+        _dflt = fspec.get("default")
+
+        def _fin(v):
+            if v:
+                return v
+            return "" if _dflt is None else str(_dflt)
+
         multi = bool(fspec.get("multiple") or fspec.get("join"))
         css = fspec.get("css") or ""
         if fspec.get("attr"):
             v = css_attr(el_html, css, fspec["attr"], fspec.get("limit", limit))
-            return v if multi else ConfigParser._smart_single(v, "attr")
+            return _fin(v if multi else ConfigParser._smart_single(v, "attr"))
         if "::attr(" in css:
             import re as _re
             m = _re.search(r"::attr\(([^)]*)\)", css)
             attr = m.group(1).strip().strip("'\"") if m else "href"
             v = css_attr(el_html, css, attr, fspec.get("limit", limit))
-            return v if multi else ConfigParser._smart_single(v, "attr")
+            return _fin(v if multi else ConfigParser._smart_single(v, "attr"))
         if fspec.get("xpath"):
             v = xpath_text(el_html, fspec["xpath"], fspec.get("limit", limit))
-            return v if multi else ConfigParser._smart_single(v, "text")
+            return _fin(v if multi else ConfigParser._smart_single(v, "text"))
         if css:
             v = css_text(el_html, css, fspec.get("limit", limit))
-            return v if multi else ConfigParser._smart_single(v, "text")
+            return _fin(v if multi else ConfigParser._smart_single(v, "text"))
         if fspec.get("regex"):
-            return regex_extract(el_html, fspec["regex"], fspec.get("group", 0))
-        return ""
+            return _fin(regex_extract(el_html, fspec["regex"], fspec.get("group", 0)))
+        return "" if _dflt is None else str(_dflt)
 
     @staticmethod
     def _smart_single(v: str, kind: str = "text") -> str:
@@ -144,18 +175,20 @@ class ConfigParser(BaseParser):
                 if isinstance(fspec, dict):
                     v = self._css_value(el_html, fspec)
                     # 自愈模式：配置选择器没匹配时按字段名猜（仅当该字段全部为空才猜，避免覆盖）
-                    if not v and isinstance(el, _lxml_el) and self._self_healing:
+                    # R128 修复：_lxml_el 为 None（lxml 不可用）时 isinstance 崩溃
+                    if not v and _lxml_el is not None and isinstance(el, _lxml_el) and self._self_healing:
                         v = self._guess_field(el, name)
                     row[name] = v
                 else:
-                    row[name] = self._string_field(el_html, fspec, name)
+                    row[name] = self._string_field(el_html, fspec)
             out.append(row)
         return out
 
     @staticmethod
-    def _string_field(el_html: str, spec: str, name: str = "") -> str:
+    def _string_field(el_html: str, spec: str) -> str:
         """字符串形式字段选择器（AI 常用）：'sel' / 'sel::text' / 'sel::attr(href)' / xpath://...
-        修复：之前字符串 spec 直接把整行 HTML 塞进字段（title 变 <tr>...</tr>）。"""
+        修复：之前字符串 spec 直接把整行 HTML 塞进字段（title 变 <tr>...</tr>）。
+        OCR R131（L）：name 形参曾声明不用——已删（自愈走 dict 分支的 _guess_field）。"""
         from ..selectors import css_attr, css_text, xpath_text
         s = str(spec or "").strip()
         if not s:
@@ -293,14 +326,14 @@ class ConfigParser(BaseParser):
             if n >= 3 and n > best_n:
                 # 该重复块里至少要有链接，才像列表行
                 try:
-                    if doc.cssselect(f"{tag}.{cls} a[href]"):
+                    if doc.cssselect(f"{tag}{_cls_selector(cls)} a[href]"):
                         best, best_n = (tag, cls), n
                 except Exception:
                     pass
         if best is None:
             return []
         tag, cls = best
-        els = doc.cssselect(f"{tag}.{cls}")
+        els = doc.cssselect(f"{tag}{_cls_selector(cls)}")
         # 去重（嵌套重复块只取最外层）
         out = []
         for el in els:
@@ -310,7 +343,17 @@ class ConfigParser(BaseParser):
             title = (a[0].text_content() or "").strip() if a else (txt[:80])
             if not title and not link:
                 continue
-            if any(el is not o and el in o.iter() for o in out):
+            # 审查二轮（M）：`el in o.iter()` 曾对每个候选全量遍历已收集元素的
+            # 整棵子树（O(候选×子树×out)）——大页面卡秒级。cssselect 结果是
+            # 文档序，被嵌套者的祖先必已入 out：改为沿祖先链查（O(树深×out)）
+            _p = el.getparent()
+            _nested = False
+            while _p is not None:
+                if any(_p is o for o in out):
+                    _nested = True
+                    break
+                _p = _p.getparent()
+            if _nested:
                 continue
             out.append(el)
         return out[:200]
@@ -324,7 +367,10 @@ class ConfigParser(BaseParser):
                 else:
                     out[name] = self._css_value(html, spec)
             else:
-                out[name] = apply_extractor(spec, html, html, None)
+                # OCR R131（C）：字符串 spec 曾直接传 apply_extractor——其内部
+                # spec.get(...) 对 str 必抛 AttributeError。按声明式约定，
+                # 裸字符串视为 CSS 选择器取文本（等价 {"css": spec}）
+                out[name] = self._css_value(html, {"css": spec})
         return out
 
 
@@ -336,14 +382,15 @@ class LLMParser(BaseParser):
 
     def parse(self, resp: Response, ctx: ParseContext) -> ParseResult:
         from ..llm import LLMClient
-        schema = self.config.get("schema", {})
+        cfg = self.config or {}  # OCR R131（M）：config 为 None 时下方 .get 必炸
+        schema = cfg.get("schema", {})
         text = resp.text
         # 优先给纯文本（去掉标签）
         from ..extractors import html_to_markdown
         if "<" in text[:500]:
             text = html_to_markdown(text)[:8000] or re.sub(r"<[^>]+>", " ", resp.text)[:8000]
         client = LLMClient()
-        data = client.extract_json(text, schema, self.config.get("instruction", ""))
+        data = client.extract_json(text, schema, cfg.get("instruction", ""))
         return ParseResult(items=[data if isinstance(data, dict) else {"data": data}], requests=[])
 
 
@@ -400,11 +447,19 @@ class JsonPagedParser(BaseParser):
 
         strategy = cfg.get("strategy", "page_param")
         max_pages = int(cfg.get("max_pages", 1))
-        page = int((resp.request.meta or {}).get("page", 0)) or int(cfg.get("start", 1))
-        if not (resp.request.meta or {}).get("page"):
+        # OCR R131（H）：resp.request 可为 None（合成 Response/无请求上下文）——
+        # ConfigParser.parse 同场景已做守卫，这里曾裸访问必崩
+        _meta = (resp.request.meta if resp.request else None) or {}
+        # 收官十轮（审查，实测复现）：page_size 兜底曾在此之后才算，导致 offset
+        # 策略下 URL 推断分支拿不到它 → 把 offset 原值当页号（offset=20 → 下一跳
+        # 400，静默丢 19 页；offset=40 + max_pages=10 → 整轮只剩 1 页；offset=0
+        # → 重复请求同一页）。提前到推断之前，与下方 len(rows) 兜底同源
+        page_size = max(1, int(cfg.get("page_size", len(rows) or 1)))  # R128：防 0 除
+        page = int(_meta.get("page", 0)) or int(cfg.get("start", 1))
+        if not _meta.get("page"):
             # 从 URL 查询参数推断起始页（--url 覆盖入口时无需 meta.page）
             import urllib.parse as _up
-            qs = _up.parse_qs(_up.urlsplit(resp.request.url).query)
+            qs = _up.parse_qs(_up.urlsplit(resp.request.url if resp.request else resp.url).query)
             pp = cfg.get("page_param") or cfg.get("offset_param")
             if pp and pp in qs:
                 try:
@@ -412,21 +467,35 @@ class JsonPagedParser(BaseParser):
                 except (ValueError, TypeError):
                     val = None
                 if val is not None:
-                    if cfg.get("strategy") == "offset" and cfg.get("page_size"):
-                        page = val // int(cfg["page_size"]) + 1
+                    # offset 策略下查询参数是"偏移量"即页的起点，一律按 page_size 换算页号
+                    if cfg.get("strategy") == "offset":
+                        page = val // page_size + 1
                     else:
                         page = val
         if page >= max_pages:
             return result
         total = jpath(data, cfg.get("total_path", ""), None) if cfg.get("total_path") else None
-        page_size = int(cfg.get("page_size", len(rows) or 1))
         total_n = None
         if total is not None:
             try:
-                # 兼容 "1,000" / "1000" / 1000 等格式；纯非数字视为"未知"→继续翻页（由 max_pages 兜底）
-                _digits = re.sub(r"[^\d]", "", str(total))
-                total_n = int(_digits) if _digits else None
+                # 收官十轮（审查）：曾用 re.sub(r"[^\d]","") 刮出所有数字——"1.2万"
+                # （真实 12000）被读成 12、"3.5k"读成 35 → 提前停抓静默丢页；
+                # 反向 "100.0" 读成 1000 则多翻页。改为只接受干净的数字形态，
+                # 带单位/小数点/嵌套对象一律视为"未知"（由 max_pages 兜底翻页）
+                if isinstance(total, bool):
+                    total_n = None
+                elif isinstance(total, int):
+                    total_n = total
+                elif isinstance(total, float):
+                    total_n = int(total) if total.is_integer() else None
+                elif isinstance(total, str):
+                    _t = total.strip().replace(",", "").replace("，", "")
+                    total_n = int(_t) if _t.isdigit() else None
+                else:
+                    total_n = None
             except (TypeError, ValueError):
+                total_n = None
+            if total_n is not None and total_n <= 0:
                 total_n = None
 
         # 还有下一页？
@@ -436,23 +505,30 @@ class JsonPagedParser(BaseParser):
         elif not rows:
             return result
 
-        params = dict((resp.request.meta or {}).get("params", {}))
+        # OCR R131 终审（C）：resp.request None 守卫在此函数多处漏设——
+        # 合成 Response（无请求上下文）走到分页逻辑必裸 TypeError。无请求 = 无法
+        # 构造下一页请求，直接返回当前 items
+        _req = resp.request
+        if _req is None:
+            return result
+
+        params = dict((_req.meta or {}).get("params", {}))
         new_req = None
         if strategy == "page_param":
             params[cfg.get("page_param", "page")] = page + 1
-            new_req = Request(url=resp.request.url, depth=resp.request.depth,
-                              meta={**(resp.request.meta or {}), "params": params, "page": page + 1})
+            new_req = Request(url=_req.url, depth=_req.depth,
+                              meta={**(_req.meta or {}), "params": params, "page": page + 1})
         elif strategy == "offset":
             params[cfg.get("offset_param", "offset")] = page * page_size
-            new_req = Request(url=resp.request.url, depth=resp.request.depth,
-                              meta={**(resp.request.meta or {}), "params": params, "page": page + 1})
+            new_req = Request(url=_req.url, depth=_req.depth,
+                              meta={**(_req.meta or {}), "params": params, "page": page + 1})
         elif strategy == "next_url":
             nxt = jpath(data, cfg.get("next_path", "next"), None)
             if nxt:
                 from urllib.parse import urljoin
-                base = resp.url or (resp.request.url if resp.request else "")
-                new_req = Request(url=urljoin(base, str(nxt)), depth=resp.request.depth,
-                                  meta={**(resp.request.meta or {}), "page": page + 1})
+                base = resp.url or _req.url
+                new_req = Request(url=urljoin(base, str(nxt)), depth=_req.depth,
+                                  meta={**(_req.meta or {}), "page": page + 1})
         if new_req is not None:
             result.requests.append(new_req)
         return result

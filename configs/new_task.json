@@ -1,0 +1,53 @@
+{
+  "name": "my_task",
+  "vars": {
+    "keyword": "example"
+  },
+  "source": {
+    "type": "http_json",
+    "method": "GET",
+    "url": "https://api.example.com/search?q={{keyword}}",
+    "headers": {
+      "User-Agent": "universal-scraper"
+    }
+  },
+  "pagination": {
+    "strategy": "page_param",
+    "page_param": "page",
+    "start": 1,
+    "max_pages": 10,
+    "total_path": "data.total",
+    "records_path": "data.records"
+  },
+  "record": {
+    "fields": {
+      "id": {
+        "from": "id"
+      },
+      "title": {
+        "from": "title"
+      },
+      "url": {
+        "from": "url"
+      }
+    }
+  },
+  "pipeline": [],
+  "detail": {
+    "enabled": false
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "my_task",
+    "formats": [
+      "json",
+      "csv",
+      "xlsx"
+    ]
+  },
+  "anti_bot": {
+    "min_interval": 1.0,
+    "max_retries": 3,
+    "http_backend": "requests"
+  }
+}

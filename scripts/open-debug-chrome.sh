@@ -12,10 +12,20 @@ if [ -z "$CHROME" ]; then
 fi
 PROFILE="$HOME/.universal-scraper/cdp_profile"
 mkdir -p "$PROFILE"
+chmod 700 "$PROFILE" 2>/dev/null  # 审查修复（M）：CDP profile 含登录态 Cookie，收紧目录权限
 START_URL="${1:-about:blank}"
+# 审查修复（L）：START_URL 只放行 http/https 与 about:blank（防参数注入怪协议）
+case "$START_URL" in
+  http://*|https://*|about:blank) ;;
+  *) echo "⚠️ 起始 URL 非法（仅 http/https/about:blank），已回退 about:blank"; START_URL="about:blank" ;;
+esac
 
-if curl -s -m 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
+# 审查修复（M）：端口 9222 有监听 ≠ 是我们的调试 Chrome——验证 /json/version
+# 返回体含 Browser 字段再复用，否则提示端口被其他程序占用
+if curl -s -m 2 http://127.0.0.1:9222/json/version 2>/dev/null | grep -q '"Browser"'; then
   echo "✅ 调试端口 9222 已在运行，直接复用。"
+elif curl -s -m 1 http://127.0.0.1:9222 >/dev/null 2>&1; then
+  echo "❌ 端口 9222 已被其他程序占用（响应不是 Chrome DevTools 协议）"; exit 1
 else
   open -na "$CHROME" --args --remote-debugging-port=9222 --user-data-dir="$PROFILE" \
        --no-first-run --no-default-browser-check "$START_URL"

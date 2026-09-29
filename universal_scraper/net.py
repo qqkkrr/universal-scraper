@@ -27,12 +27,39 @@ def _guard_echo_url(url: str) -> str:
     return url
 
 
-def detect_ip(timeout: int = 15) -> Dict[str, Any]:
-    """返回 {ip, isp, city, region, org}；失败返回 {error}。"""
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """R129 修复（P1）：白名单服务的 302 一律不跟——ip-api 免费版是明文 HTTP
+    （可被中间人/其前置劫持），重定向会把出口 IP 探测变成对任意内网地址的
+    盲 SSRF。返回 None = 不处理 → urlopen 抛 HTTPError，被 detect_ip 捕获报错。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def opener_for(proxy: str = "", *handlers):
+    """构造 opener，使显式代理**真正**生效（proxy 为空则保持 urllib 默认读环境变量）。
+
+    收官九轮（审查，实测复现）：`build_opener(_X())` 会自动装入读环境变量的默认
+    ProxyHandler，之后 `add_handler(ProxyHandler({...}))` 只排在它**后面**——
+    `_call_chain` 取首个返回非 None 的 handler，环境变量代理（Clash 等）恒先命中，
+    显式代理被静默忽略（实测 env 死端口先被使用、显式活端口只作兜底）。
+    修法：把 ProxyHandler 作为参数传给 build_opener，触发其 skip 逻辑替换默认实例。
+    四处同型站点（core/sites/dianping/net）统一走本函数。"""
+    hs = list(handlers)
+    if proxy:
+        hs.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    return urllib.request.build_opener(*hs)
+
+
+def detect_ip(timeout: int = 15, proxy: str = "") -> Dict[str, Any]:
+    """返回 {ip, isp, city, region, org}；失败返回 {error}。
+    审查六轮（M5）：proxy 非空时经该代理探测——真实出口与代理出口是两回事，
+    "扫码前确认出口未被封"预检必须看采集实际要走的出口。"""
     try:
         req = urllib.request.Request(_guard_echo_url("http://ip-api.com/json/?lang=zh-CN"),
                                      headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        _opener = opener_for(proxy, _NoRedirect())
+        with _opener.open(req, timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8", "ignore"))
         if d.get("status") == "success":
             return {
@@ -65,7 +92,8 @@ def detect_system_proxy() -> Dict[str, Any]:
             txt = subprocess.run(["scutil", "--proxy"], capture_output=True,
                                  text=True, timeout=5).stdout
             m = re.search(r"HTTPEnable\s*:\s*1", txt)
-            p = re.search(r"HTTPProxy\s*:\s*(\S+)", txt)
+            # OCR R131（L）：\S+ 贪婪吞尾随标点/换行残片——收敛为合法主机字符
+            p = re.search(r"HTTPProxy\s*:\s*([A-Za-z0-9._:-]+)", txt)
             port = re.search(r"HTTPPort\s*:\s*(\d+)", txt)
             if m:
                 out["enabled"] = True
@@ -80,15 +108,31 @@ def detect_system_proxy() -> Dict[str, Any]:
     # 3) 常见本机代理进程（Clash/V2Ray/sing-box 等）
     if shutil.which("ps"):
         try:
-            ps = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=5).stdout
+            ps = subprocess.run(["ps", "-Axo", "comm="], capture_output=True, text=True, timeout=5).stdout
+            # 审查八轮（LOW）：曾扫 `ps aux` 全命令行——`grep clash`、`vim clash.md`、
+            # `python3 crawl.py --proxy v2ray` 这类"提到名字"的进程全都误报（实测六个
+            # 名字全中）。改扫 **可执行文件名**（comm 列取 basename）：只有真的是该
+            # 程序在跑才命中（ClashX/clash-verge 这类带后缀的仍能匹配）。
+            _names = "\n".join(os.path.basename(_l.strip()) for _l in ps.splitlines() if _l.strip())
             for name in ("clash", "mihomo", "verge", "v2ray", "sing-box", "surge"):
-                if re.search(name, ps, re.I):
+                # OCR R131（M）：子串匹配曾误报（如 "converge"/"purge" 命中 verge/
+                # surge）——词边界锚定。尾部放行大写/数字续接（ClashX 是客户端名），
+                # 仅拒绝小写字母续接（verges/surges 复数形）。审查二轮（M）：(?-i:)
+                # 内联关大小写——re.I 会让 [A-Z0-9] 连小写也放行，防复数形失效
+                if re.search(rf"\b{re.escape(name)}(?:\b|(?-i:[A-Z0-9]))", _names, re.I):
                     out["processes"].append(name)
         except Exception as e:
             out["sources"].append(f"进程检测失败({type(e).__name__})，结果不可信")
-    if out["enabled"] or out["processes"]:
-        out["warning"] = ("检测到系统代理/本机代理进程：'直连'请求可能被劫持到代理节点出口。"
+    if out["enabled"]:
+        out["warning"] = ("检测到系统代理已启用（" + ", ".join(out["sources"]) +
+                          "）：'直连'请求可能被劫持到代理节点出口。"
                           "诊断配额/IP 问题前先确认真实出口（detect_ip），必要时关闭系统代理或用 no_proxy 锁定直连。")
+    elif out["processes"]:
+        # 商标网战训（2026-09）：Clash 等进程 merely 在跑 ≠ 接管请求——
+        # env/scutil 均未启用时曾报"系统代理开启"误导排查方向。降级为提示。
+        out["warning"] = (f"本机有代理进程在运行（{', '.join(out['processes'])}）但 "
+                          "env/scutil 均未启用系统代理——当前请求大概率未被劫持；"
+                          "若诊断异常可再查真实出口（detect_ip）。")
     return out
 
 

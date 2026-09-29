@@ -198,6 +198,48 @@
     <span class="pill" style="cursor:pointer;background:#e8f5e9;color:#2e7d32;border-color:#c8e6c9" onclick="importCookies()" title="从调试 Chrome 自动导入已登录网站的 Cookie（登录态/过盾复用，无需手动复制）">🍪 导入会话</span>
   </div>
 </header>
+<!-- R101：任务时序走势（engine_v3 落 <out>/.metrics.json，本面板读 /api/metrics） -->
+<div id="metricsPanel" style="max-width:1080px;margin:12px auto 0;background:#fff;border:1px solid #e3e8ef;border-radius:10px;padding:12px 16px">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <b style="font-size:14px">📈 任务走势</b>
+    <input id="mxTask" placeholder="输出子目录名（如 task_xxx）" style="flex:0 1 240px;padding:4px 8px;border:1px solid #d5dbe3;border-radius:6px;font-size:13px">
+    <button onclick="loadMetrics()" style="padding:4px 12px;border:0;border-radius:6px;background:#2e7d32;color:#fff;cursor:pointer;font-size:13px">查看走势</button>
+    <span id="mxSummary" style="font-size:12px;color:#667"></span>
+  </div>
+  <div id="mxChart" style="margin-top:8px"></div>
+</div>
+<script>
+async function loadMetrics(){
+  const task = document.getElementById('mxTask').value.trim().replace(/^\/+|\/+$/g,'');
+  const box = document.getElementById('mxChart');
+  const sum = document.getElementById('mxSummary');
+  if(!task){ box.innerHTML=''; sum.textContent='请输入任务子目录名'; return; }
+  try{
+    const r = await api('/api/metrics?task='+encodeURIComponent(task));
+    const pts = r.points||[];
+    if(!pts.length){ box.innerHTML=''; sum.textContent='无采样数据（任务未运行或刚启动）'; return; }
+    const W=1000,H=180,P=28;
+    const mx=Math.max(1,...pts.map(p=>Math.max(p.fetched||0,p.items||0)));
+    const T=pts[pts.length-1].t||1;
+    const x=t=>P+(W-2*P)*(t/T), y=v=>H-P-(H-2*P)*(v/mx);
+    const line=(key,color)=>{ const seg=pts.filter(p=>(p[key]||0)>0||key==='fetched');
+      if(!seg.length) return '';
+      return `<polyline fill="none" stroke="${color}" stroke-width="2" points="${
+        seg.map(p=>`${x(p.t).toFixed(1)},${y(p[key]||0).toFixed(1)}`).join(' ')}"/>`; };
+    let grid='',labels='';
+    for(let i=0;i<=4;i++){ const gy=P+(H-2*P)*i/4, gv=Math.round(mx*(1-i/4));
+      grid+=`<line x1="${P}" y1="${gy}" x2="${W-P}" y2="${gy}" stroke="#eef1f5"/>`;
+      labels+=`<text x="${P-4}" y="${gy+4}" text-anchor="end" font-size="10" fill="#99a">${gv}</text>`; }
+    box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`+grid
+      +`<text x="${W-P}" y="${P-8}" text-anchor="end" font-size="11" fill="#c77">— 抓取累计 ${pts[pts.length-1].fetched}</text>`
+      +`<text x="${W-P}" y="${P+8}" text-anchor="end" font-size="11" fill="#3a7">— 条目累计 ${num(pts[pts.length-1].items)}</text>`
+      +line('fetched','#c77')+line('items','#3a7')+labels+`</svg>`;
+    const last=pts[pts.length-1];
+    const num=v=>Number(v)||0;  // R116：innerHTML 前数值强转（防御纵深）
+    sum.textContent=`采样 ${pts.length} 点 · 最近 QPS ${num(last.qps)} · 错误 ${num(last.errors)}`;
+  }catch(e){ box.innerHTML=''; sum.textContent='加载失败: '+e; }
+}
+</script>
 
 <nav aria-label="功能">
   <div class="seg">

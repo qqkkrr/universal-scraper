@@ -33,7 +33,7 @@ def run_bridge_jsonl(bridge: Path, params: Dict[str, Any], timeout: int = 300) -
         for obj in run_bridge(bridge, {k: str(v) for k, v in params.items()}, timeout=timeout):
             objs.append(obj)
     except BrowserBridgeError as e:
-        raise RuntimeError(f"战术桥失败：{e}")
+        raise RuntimeError(f"战术桥失败：{e}") from e  # OCR R131（M）：补链保住原始栈
     return objs
 
 
@@ -43,17 +43,34 @@ def run_bridge_jsonl(bridge: Path, params: Dict[str, Any], timeout: int = 300) -
 def cookie_click_run(meta: Dict[str, Any], url: str, limit: int = 200,
                      log: Optional[Callable[[str], None]] = None) -> List[Dict[str, Any]]:
     bridge = ROOT / "scripts" / "tactic_bridge.cjs"
-    seed = meta.get("seed") or "https://" + (meta.get("host") or "").split("//")[-1] + "/"
+    # R128 修复：host 为 None/空时曾产生 "https:///" 无效 URL
+    seed = meta.get("seed") or ""
+    if not seed:
+        _h = (meta.get("host") or "").split("//")[-1]
+        seed = f"https://{_h}/" if _h else ""
     item_css = meta.get("item_css") or ".sch-item"
     # run_site 默认 limit=20 视为“未指定”：点击列表尽量全量（500）
-    _max = 500 if int(limit or 0) <= 20 else int(limit or 500)
+    # 审查修复：int(limit or 0) 曾对非数字串直接 ValueError——对齐下方
+    # pdf_attach_run 的容错口径（给了正数就用之，未给/非法按未指定回退 500）
+    try:
+        _lim = int(limit)
+    except (TypeError, ValueError):
+        _lim = 0
+    _max = 500 if _lim <= 20 else _lim
+    # OCR R131（H）：seed/target 双空时曾照样起 600s 浏览器桥——注定 0 条还
+    # 烧一次冷启动（对齐 pdf_attach_run 的 R128 入口校验）
+    _target = url or meta.get("entry", "")
+    if not seed and not _target:
+        raise ValueError("cookie_click 缺少 seed/host 与 target/url——无法定位页面，拒绝起桥")
     objs = run_bridge_jsonl(bridge, {
-        "mode": "click_ids", "seed": seed, "target": url or meta.get("entry", ""),
+        "mode": "click_ids", "seed": seed, "target": _target,
         "item_css": item_css, "max": str(_max), "settle": "800",
     }, timeout=600)
     items = [o for o in objs if o.get("type") == "item"]
     if not items:
         raise RuntimeError("SPA 点击 0 条（可能没有可点击项或页面结构变化）")
+    if log:  # OCR R131（M）：log 形参曾声明不用——补过程可见性
+        log(f"🖱️ SPA 点击捕获 {len(items)} 项")
     tmpl = meta.get("url_template") or ""
     rows = []
     for it in items:
@@ -70,10 +87,11 @@ def cookie_click_run(meta: Dict[str, Any], url: str, limit: int = 200,
 def pdf_attach_run(meta: Dict[str, Any], url: str, limit: int = 20,
                    log: Optional[Callable[[str], None]] = None) -> List[Dict[str, Any]]:
     """PDF 战术：PDF 直链 / 页面 PDF 附件 → 通用解析（表格直出，文本才 LLM）。"""
-    import requests
     from .pdf_table import attachment_to_rows, extract_pdf_links, is_attachment_url
     from .llm import LLMClient
     entry = url or meta.get("entry", "") or ""
+    if not entry:
+        return []  # R128 修复：无 URL 时直接返回空（下游会报 0 条）
     fields = meta.get("fields") or []
     proxy = meta.get("proxy") or None
     # 1) 候选附件：直链（pdf/xlsx/docx）> HTTP 快扫 HTML > 浏览器兜底
@@ -81,13 +99,13 @@ def pdf_attach_run(meta: Dict[str, Any], url: str, limit: int = 20,
     if is_attachment_url(entry):
         pdfs = [entry]
     if not pdfs:
-        try:
-            r = requests.get(entry, timeout=25, verify=False,
-                             headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"})
-            pdfs = extract_pdf_links(r.text or "", entry)
-        except Exception as e:
-            if log:
-                log(f"⚠️ HTTP 快扫附件失败（{type(e).__name__}），改浏览器找附件…")
+        # R20 修复：快扫改走 sites.fetch_html（协议闸 + 超时内建）——此前裸
+        # requests 直连且关了证书校验，探测结果会喂给后续附件下载，未校验
+        # 通道的 MITM 内容会污染整条战术链
+        from .sites import fetch_html as _fetch_html
+        res = _fetch_html(entry, timeout=25)
+        if res.get("ok"):
+            pdfs = extract_pdf_links(res.get("html", ""), entry)
     if not pdfs:
         bridge = ROOT / "scripts" / "tactic_bridge.cjs"
         seed = meta.get("seed") or ""
@@ -101,13 +119,23 @@ def pdf_attach_run(meta: Dict[str, Any], url: str, limit: int = 20,
                 log(f"⚠️ 浏览器找附件失败：{e}")
     if not pdfs:
         raise RuntimeError("页面未找到 PDF/附件（可能需要登录或页面结构变化）")
-    _max = 20 if int(limit or 0) <= 20 else int(limit or 20)
+    # 审查二轮（M）：原 `20 if limit<=20 else limit` 把显式 limit=10 放大成 20。
+    # 给了正数就用之（含 <20），未给/非法回退 20
+    try:
+        _max = int(limit)
+        if _max <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        _max = 20
     rows: List[Dict[str, Any]] = []
     llm = LLMClient()
     for i, pu in enumerate(pdfs[:_max], 1):
         if not pu.startswith("http"):
-            base = entry.split("/")[:3]
-            pu = "//".join(base) + ("/" if not pu.startswith("/") else "") + pu
+            # R20 修复：相对 URL 用 urljoin 解析——旧拼接 "//".join(...) 会产出
+            # "https:////host"（无 host），requests 直接 InvalidURL，浏览器桥
+            # pdfs 模式返回的 iframe 原始 src 全部被静默跳过
+            from urllib.parse import urljoin as _urljoin
+            pu = _urljoin(entry, pu)
         try:
             res = attachment_to_rows(pu, proxy=proxy, fields=fields or None)
             if res.get("kind") == "table":
@@ -135,8 +163,9 @@ def pdf_attach_run(meta: Dict[str, Any], url: str, limit: int = 20,
                         log(f"⚠️ 第{i}个附件文本结构化失败: {e}")
                     rows.append({**{f: "" for f in (fields or ["内容"])}, "_pdf": pu, "_raw": txt[:500]})
                 continue
+            # OCR R131（L）：未知 kind 曾打出 "⚠️ None"——带 kind 便于诊断
             if log:
-                log(f"⚠️ {res.get('error')}")
+                log(f"⚠️ 附件返回未处理类型 kind={res.get('kind')}: {res.get('error') or '(无错误信息)'}")
         except Exception as e:
             if log:
                 log(f"⚠️ 第{i}个附件处理失败: {type(e).__name__}: {e}")
@@ -168,8 +197,9 @@ TACTIC_INFO = {
 }
 
 
-def decide_tactic(desc: str, detect: Dict[str, Any], log: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
-    """规则优先 + LLM 兜底，返回 {tactic, params}。"""
+def decide_tactic(desc: str, detect: Dict[str, Any]) -> Dict[str, Any]:
+    """规则优先 + LLM 兜底，返回 {tactic, params}。
+    OCR R131（M）：log 参数曾收下但函数体从不使用——删死参数（调用方同步）。"""
     from .pdf_table import is_pdf_url
     d = detect or {}
     text_len = int(d.get("textLen") or 0)

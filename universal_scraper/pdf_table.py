@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,6 +30,28 @@ _JOIN_BY_COL = {
     "；": ("依据", "法规", "条例", "规定", "办法", "通知", "文号"),
     "、": ("部门", "单位", "机构", "联系人", "地址"),
 }
+
+
+_OOXML_XML_MAX = 20 * 1024 * 1024
+
+
+def _parse_ooxml_xml_safe(xml: bytes):
+    """审查二轮（CRITICAL）：docx 的 document.xml 曾直接 ET 解析——恶意文档的
+    billion-laughs 实体展开可打穿解析进程。OOXML 规范不允许自定义 DTD 实体，
+    出现 DOCTYPE/ENTITY 即拒绝；超限拒绝；零依赖消除攻击面。
+    返回 Element 或 {"error": str}。"""
+    if len(xml) > _OOXML_XML_MAX:
+        return {"error": f"Word XML 超限（{len(xml)}B > {_OOXML_XML_MAX}B）"}
+    # 审查三轮（H）：曾只扫前 8192B——DOCTYPE/ENTITY 移到中段可绕过。全量扫描
+    # （已限 20MB，代价可控）
+    lowered = xml.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        return {"error": "Word XML 含非法 DOCTYPE/ENTITY（疑似恶意文档）"}
+    from xml.etree import ElementTree as _ET
+    try:
+        return _ET.fromstring(xml)
+    except Exception as e:
+        return {"error": f"Word XML 解析失败: {type(e).__name__}: {e}"}
 
 
 def is_pdf_url(url: str) -> bool:
@@ -67,6 +90,11 @@ def extract_pdf_links(html: str, base_url: Optional[str] = None) -> List[str]:
 def download_pdf(url: str, proxy: Optional[str] = None, timeout: int = 60,
                  headers: Optional[Dict[str, str]] = None) -> Path:
     """下载 PDF 到临时文件，返回路径；失败抛 RuntimeError。"""
+    # 审查八轮（HIGH）：本通道的 URL 来自被爬页面里的附件链接（页面可控）——
+    # 此前无任何出站守卫，`<a href="http://127.0.0.1/...">` 即盲打内网。与
+    # quick.fetch_url / pdf_attach._guard_url 同口径（US_ALLOW_PRIVATE=1 可放行）。
+    from .core import assert_public_url
+    assert_public_url(url, context="pdf_table.download_pdf")
     import requests
     hdrs = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -89,6 +117,25 @@ def download_pdf(url: str, proxy: Optional[str] = None, timeout: int = 60,
     return Path(tmp)
 
 
+def _dedup_names(names: List[str]) -> List[str]:
+    """重名列名去重（加递增数字后缀）。
+
+    收官十二轮（审查 H/L）：重名表头在建 row dict 时互相覆盖（前一列数据永久
+    丢失）——PDF 与 xlsx 两条路径统一走本函数。"""
+    _seen: Dict[str, int] = {}
+    out: List[str] = []
+    for nm in names:
+        base = nm
+        if base in _seen:
+            _n = _seen[base] + 1
+            while f"{base}{_n}" in _seen:
+                _n += 1
+            nm = f"{base}{_n}"
+        _seen[nm] = 1
+        out.append(nm)
+    return out
+
+
 def _clean_cell(cell: str, col_name: str = "", header: bool = False) -> str:
     """单元格清理：去空白、按列类型智能拼接换行。"""
     c = (cell or "").replace("\u3000", " ")
@@ -105,6 +152,10 @@ def _clean_cell(cell: str, col_name: str = "", header: bool = False) -> str:
     # 部门/单位类：顿号拼接（多单位并列）
     if any(k in (col_name or "") for k in _JOIN_BY_COL["、"]):
         return "、".join(lines)
+    # 收官十二轮（审查 L）：依据/法规类的分号拼接是**_JOIN_BY_COL 里定义了却从未
+    # 消费的死配置**——多行依据被无分隔直接连成一句
+    if any(k in (col_name or "") for k in _JOIN_BY_COL["；"]):
+        return "；".join(lines)
     # 其余：下一行以《【（( 开头视为新条目加分号，否则是续行直接拼接
     out = lines[0]
     for ln in lines[1:]:
@@ -149,6 +200,11 @@ def _merge_sparse_cols(table: List[List[Optional[str]]], drop: int,
                 row[ci - 1] = (left + " " + right).strip() if (left and right) else (left or right)
                 del row[ci]
         del empties[ci]
+        # 审查八轮（MEDIUM）：删列时曾漏删 hdr 对应列——表头比数据多一列，调用方按
+        # 位置取名时整体错位（实测 类别='100'、金额='备注X'）。合并保留的是左列标签，
+        # 因此删掉被合并掉的右列标签与行数据保持同构。
+        if hdr and ci < len(hdr):
+            del hdr[ci]
         ncols -= 1
     return table
 
@@ -160,8 +216,11 @@ def _looks_like_header(row: List[str]) -> bool:
     cells = [(c or "").strip() for c in row if (c or "").strip()]
     if len(cells) < 2:
         return False
-    # 表头是短词：任何单元格都不该是长句/带书名号
-    if any(len(c) > 12 or "《" in c or "。" in c for c in cells):
+    # 表头是短词：任何单元格都不该是长句/带书名号。
+    # 收官十二轮（审查 M）：12 字上限过严——"统一社会信用代码/纳税人识别号"（15 字）
+    # 的合法表头判不出，表头行被当数据行发出、列名退化成 列1..列N。放宽到 24 字
+    # 并保留长句判据（带句号/书名号/超长才否决）
+    if any(len(c) > 24 or "《" in c or "。" in c for c in cells):
         return False
     strong = sum(1 for c in cells if any(k in c for k in STRONG_HEADER_KWS))
     weak = sum(1 for c in cells if any(k in c for k in HEADER_KEYWORDS))
@@ -185,10 +244,22 @@ def extract_tables_from_pdf(path: str) -> List[Dict[str, Any]]:
     ctx: Dict[str, str] = {}  # 跨页上下文（类别/部门/备注）
     with pdfplumber.open(path) as pdf:
         for pi, page in enumerate(pdf.pages, 1):
-            tables = page.extract_tables()
+            # 审查修复（P2，R15）：单页损坏曾掀翻整个循环——已累计的前 N 页
+            # 表格全部丢弃，还降级成全文模式毫无提示
+            try:
+                tables = page.extract_tables()
+            except Exception as e:
+                print(f"⚠️ 第{pi}页表格提取失败（跳过该页）: {type(e).__name__}: {str(e)[:80]}",
+                      file=sys.stderr)
+                continue
             for ti, table in enumerate(tables, 1):
                 if not table:
                     continue
+                # OCR R131（M）：prev_seq/ctx 曾跨表泄漏——同页第二张表（无关表）
+                # 继承第一张表的序号/上下文，产出串行错数据。每表重置
+                if ti > 1:
+                    prev_seq = ""
+                    ctx = {}
                 # 找表头行（前 4 行内），列名做空白归一
                 hdr_idx, hdr = -1, []
                 for i, row in enumerate(table[:4]):
@@ -198,13 +269,28 @@ def extract_tables_from_pdf(path: str) -> List[Dict[str, Any]]:
                         # 表头空单元格 = 合并单元格 → 继承左邻列名
                         hdr = []
                         inherit_pos: List[int] = []
+                        _seen_h: Dict[str, int] = {}
+                        _last_base = ""      # 左邻**基名**（未加后缀），连续空继承用
                         for j, c in enumerate(cells):
                             name = re.sub(r"\s+", "", c or "").strip()
                             if not name and hdr:
-                                name = hdr[-1]  # 合并单元格：继承左邻
+                                name = _last_base or hdr[-1]  # 合并单元格：继承左邻基名
                                 inherit_pos.append(j)
                             elif not name:
                                 name = f"列{j + 1}"
+                            _last_base = name
+                            # 审查八轮（MEDIUM）：同名表头（两列都叫「数量」/合并单元格
+                            # 继承出同名）在建 row dict 时互相覆盖 → 前者数据永久丢失。
+                            # 同名列加数字后缀（colspan 展开后两列都能保留）。
+                            # 收官十二轮（审查 H，实测）：继承名与后缀名曾不登记——
+                            # 连续多空（colspan 合并）时第 2、3 列同名，两列数值被空
+                            # 格拼成一格（列边界丢失）。后缀名生成后立即登记
+                            if name in _seen_h:
+                                _n = _seen_h[name] + 1
+                                while f"{name}{_n}" in _seen_h:
+                                    _n += 1
+                                name = f"{name}{_n}"
+                            _seen_h[name] = 1
                             hdr.append(name)
                         last_header = hdr
                         last_inherit = inherit_pos
@@ -282,10 +368,17 @@ def normalize_field_names(rows: List[Dict[str, Any]], fields: List[str]) -> List
         return rows
     mapping: Dict[str, str] = {}
     used: set = set()
+    # 收官十二轮（审查 L）：映射曾只基于 rows[0] 的键——后续行才出现的列名
+    # 不参与匹配（列名不统一）。改为所有行键的并集
+    _all_cols: List[str] = []
+    for _r in rows:
+        for _k in _r.keys():
+            if _k not in _all_cols:
+                _all_cols.append(_k)
     for f in fields:
         fk = re.sub(r"[（(].*?[)）]", "", f or "")
         best_col, best_score = "", 0
-        for col in rows[0].keys():
+        for col in _all_cols:
             if col.startswith("_") or col in used:
                 continue
             ck = re.sub(r"[（(].*?[)）]", "", col)
@@ -298,7 +391,9 @@ def normalize_field_names(rows: List[Dict[str, Any]], fields: List[str]) -> List
                 score = 100
             if score > best_score:
                 best_col, best_score = col, score
-        if best_col and best_score >= 1:
+        # 阈值 ≥2：单字符重合即改名曾把"入党时间"错映射到字段"人数"一类
+        # （中文字符歧义太大）；不达标列按契约保留原名（审查七轮 N36）
+        if best_col and best_score >= 2:
             mapping[best_col] = f
             used.add(best_col)
     if not mapping:
@@ -335,9 +430,12 @@ def parse_pdf_auto(path: str, fields: Optional[List[str]] = None,
                 if fields:
                     rows = normalize_field_names(rows, fields)
                 return {"kind": "table", "rows": rows, "tables": len(by_table)}
-    except Exception:
-        # pdfplumber 失败不致命，回退文本
-        pass
+    except Exception as e:
+        # pdfplumber 失败不致命，回退文本——但留痕（OCR R131（M）：
+        # 依赖损坏 vs 文件损坏 vs 逻辑 bug 曾一律无声降级）
+        import sys as _sys
+        print(f"⚠️ pdfplumber 表格提取失败，回退文本模式（{type(e).__name__}: {str(e)[:80]}）",
+              file=_sys.stderr)
     try:
         from pdfminer.high_level import extract_text
         txt = extract_text(path) or ""
@@ -363,21 +461,24 @@ def parse_xlsx(path: str, fields: Optional[List[str]] = None) -> Dict[str, Any]:
     rows_iter = ws.iter_rows(values_only=True)
     header = None
     rows: List[Dict[str, Any]] = []
-    for r in rows_iter:
-        vals = ["" if v is None else str(v).strip() for v in r]
-        if not any(vals):
-            continue
-        if header is None:
-            # 第一行非空即表头（含关键词更好，但不强求）
-            header = [v or f"列{i + 1}" for i, v in enumerate(vals)]
-            continue
-        rec: Dict[str, Any] = {}
-        for i, v in enumerate(vals):
-            if i < len(header) and v:
-                rec[header[i]] = v
-        if rec:
-            rows.append(rec)
-    wb.close()
+    # OCR R131（M）：wb.close 曾只在 happy path——解析中途抛异常时句柄泄漏
+    try:
+        for r in rows_iter:
+            vals = ["" if v is None else str(v).strip() for v in r]
+            if not any(vals):
+                continue
+            if header is None:
+                # 第一行非空即表头（含关键词更好，但不强求）
+                header = _dedup_names([v or f"列{i + 1}" for i, v in enumerate(vals)])
+                continue
+            rec: Dict[str, Any] = {}
+            for i, v in enumerate(vals):
+                if i < len(header) and v:
+                    rec[header[i]] = v
+            if rec:
+                rows.append(rec)
+    finally:
+        wb.close()
     if not rows:
         return {"kind": "error", "error": "Excel 无数据行"}
     if fields:
@@ -387,6 +488,9 @@ def parse_xlsx(path: str, fields: Optional[List[str]] = None) -> Dict[str, Any]:
 
 def download_attachment(url: str, proxy: Optional[str] = None, timeout: int = 90) -> Path:
     """下载附件（PDF/Excel/Word）到临时文件，校验非空。"""
+    # 审查八轮（HIGH）：与 download_pdf 同源——附件 URL 由页面提供，必须过出站守卫
+    from .core import assert_public_url
+    assert_public_url(url, context="pdf_table.download_attachment")
     import requests
     hdrs = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                           "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15"}
@@ -419,19 +523,28 @@ def attachment_to_rows(url: str, proxy: Optional[str] = None,
         return {"kind": "error", "error": f"附件下载失败: {e}"}
     try:
         if low.endswith((".xlsx", ".xls")):
-            r = parse_xlsx(str(fp), fields=fields)
+            # 审查修复（P1，R15）：openpyxl 读不了 .xls/加密 .xlsx 曾裸抛——
+            # 违反"每分支都返回 kind:error"契约并炸掉调用方批量循环
+            try:
+                r = parse_xlsx(str(fp), fields=fields)
+            except Exception as e:
+                return {"kind": "error",
+                        "error": f"Excel 解析失败（.xls/加密文件不受支持，请转 .xlsx）: "
+                                 f"{type(e).__name__}: {e}",
+                        "_pdf": url}
             r["_pdf"] = url
             return r
         if low.endswith((".docx", ".doc")):
             # Word 附件：zip 解包 document.xml 抽文本（不装额外依赖）
             try:
                 import zipfile
-                from xml.etree import ElementTree as ET
                 txt_parts = []
                 with zipfile.ZipFile(fp) as z:
                     if "word/document.xml" in z.namelist():
                         xml = z.read("word/document.xml")
-                        root = ET.fromstring(xml)
+                        root = _parse_ooxml_xml_safe(xml)
+                        if isinstance(root, dict):  # 守卫返回错误字典
+                            return {"kind": "error", **root, "_pdf": url}
                         for p in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
                             t = "".join(n.text or "" for n in p.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"))
                             if t.strip():

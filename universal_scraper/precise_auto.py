@@ -19,6 +19,22 @@ CONFIG_DIR = ROOT / "configs"
 TASKS_DIR = ROOT / "tasks"
 
 
+def _assert_http_url(url: str) -> str:
+    """SSRF 边界（与 journals.py 同型）：仅 http/https；host 解析到
+    私网/环回/保留地址即拒绝。OCR 图源与探测 URL 都过这道闸。"""
+    import socket
+    import ipaddress
+    import urllib.parse
+    sp = urllib.parse.urlsplit(url)
+    if sp.scheme not in ("http", "https"):
+        raise ValueError(f"仅允许 http/https URL: {url}")
+    for info in socket.getaddrinfo(sp.hostname, None):
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+            raise ValueError(f"拒绝私有/保留地址: {sp.hostname} -> {ip}")
+    return url
+
+
 # ---------------------------------------------------------------------------
 # 探测
 # ---------------------------------------------------------------------------
@@ -168,22 +184,9 @@ def _normalize_engine_cfg(scheme: Dict[str, Any]) -> Dict[str, Any]:
     return cfg
 
 
-def _register_engine_config(cfg: Dict[str, Any], host: str, log: Optional[Callable[[str], None]] = None) -> Path:
-    """把 engine 配置写成任务包 tasks/auto_precise_<host>/config.json 并注册。"""
-    name = f"auto_precise_{_sanitize_host(host)}"
-    task_dir = TASKS_DIR / name
-    task_dir.mkdir(parents=True, exist_ok=True)
-    cfg.setdefault("name", name)
-    (task_dir / "config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    meta = {"host": host, "kind": "engine", "name": name, "task_dir": str(task_dir)}
-    (CONFIG_DIR / f"auto_precise_{_sanitize_host(host)}.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 注册到运行时注册表（sites.py 的配置型精配）
-    from . import sites as _sites
-    _sites.register_config_precise(host, task_dir, kind="engine")
-    if log:
-        log(f"✅ 精配已保存: configs/auto_precise_{_sanitize_host(host)}.json（任务包 tasks/{name}）")
-    return task_dir
+# OCR R131（M）：_register_engine_config 无任何调用方（R33 修复后注册逻辑
+# 内联进 _tactic_engine_probe 的"先试跑后注册"流程）；直接调用本函数会绕过
+# 试跑、把毒配置写进注册表。删除死代码
 
 
 def _run_engine_probe(task_dir: Path, limit: int, log: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
@@ -196,40 +199,41 @@ def _run_engine_probe(task_dir: Path, limit: int, log: Optional[Callable[[str], 
     except Exception as e:
         return {"rows": [], "files": {}, "error": f"{type(e).__name__}: {e}"}
     out_name = (res or {}).get("name") or task_dir.name
+    total = int((res or {}).get("total") or 0)
     rows = []
     fp = ROOT / "outputs" / f"{out_name}.json"
-    if fp.exists():
+    # 审查八轮（HIGH）：此前完全忽略 res["total"]，只看导出文件是否存在——
+    # engine_v3._finalize 仅在 `if rows:` 时导出，0 条运行既不写也不删旧文件，
+    # 而输出名按 host 复用（tasks/auto_precise_<host>）→ 站点改版后 0 条试跑
+    # 会把**上一次运行的旧导出**读回来当本轮成功，坏配置照样注册进注册表。
+    # 现在只有本轮确实产出行时才认导出文件；产出行但文件读不出也如实报错。
+    if total > 0:
+        if not fp.exists():
+            return {"rows": [], "files": {}, "error": f"本轮 {total} 条但导出文件缺失: {fp.name}"}
         try:
-            rows = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception:
-            rows = []
+            rows = json.loads(fp.read_text(encoding="utf-8")) or []
+        except Exception as e:
+            return {"rows": [], "files": {},
+                    "error": f"本轮导出文件不可读（结果不可信）: {type(e).__name__}: {e}"}
+        if not rows:
+            return {"rows": [], "files": {}, "error": "本轮导出为空（结果不可信）"}
     files = {}
     for ext in ("json", "csv", "xlsx"):
         p = ROOT / "outputs" / f"{out_name}.{ext}"
-        if p.exists():
+        if p.exists() and rows:
             files[ext] = f"outputs/{out_name}.{ext}"
+    if total <= 0:
+        return {"rows": [], "files": {}, "error": "试跑 0 条（未产出记录，配置不采纳）"}
     return {"rows": rows, "files": files, "error": ""}
 
 
-def _build_image_ranking_runner(cfg: Dict[str, Any], host: str, log: Optional[Callable[[str], None]] = None) -> Path:
-    """图片榜单：保存为 run 型精配（下载图片 → 千问视觉 OCR → 行）。"""
-    from . import sites as _sites
-    name = f"auto_precise_{_sanitize_host(host)}"
-    meta = {"host": host, "kind": "image_ranking", "name": name, "entry": cfg.get("entry", ""),
-            "img_src_hint": (cfg.get("parsers") or {}).get("img_hint", "")}
-    (CONFIG_DIR / f"auto_precise_{_sanitize_host(host)}.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    _sites._register_image_precise(meta)
-    if log:
-        log(f"✅ 图片榜单精配已注册: {name}（entry={meta['entry']}）")
-    return CONFIG_DIR / f"auto_precise_{_sanitize_host(host)}.json"
+# OCR R131（M）：_build_image_ranking_runner 无任何调用方（注册流程已改为
+# image_ranking meta + _image_ranking_run 直跑），删除死代码
 
 
 def _image_ranking_run(meta: Dict[str, Any], url: str, limit: int = 20,
                        log: Optional[Callable[[str], None]] = None) -> list:
     """图片榜单运行器：浏览器渲染 entry → 收集目标图片 → 下载 → OCR → 行。"""
-    import requests
     from .llm import LLMClient
     entry = meta.get("entry") or url
     hint = meta.get("img_src_hint") or ""
@@ -261,17 +265,27 @@ def _image_ranking_run(meta: Dict[str, Any], url: str, limit: int = 20,
     out_dir.mkdir(exist_ok=True)
     for i, src in enumerate(imgs, 1):
         if not src.startswith("http"):
-            src = "https://" + entry.split("//")[1].split("/")[0] + src
+            # 收官十二轮（审查，实测）：手工拼接曾产出畸形主机（src 无前导 /
+            # 时："https://x.com" + "uploads/rank.png" → https://x.comuploads/…）。
+            # urljoin 按语义解析，相对路径/根路径/协议相对全兼容
+            from urllib.parse import urljoin as _uj
+            src = _uj(entry, src)
         if log:
             log(f"🖼️ 正在 OCR 第 {i}/{len(imgs)} 张榜单图…")
         try:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            r = requests.get(src, timeout=40, verify=False,
-                             headers={"User-Agent": "Mozilla/5.0"})
-            r.raise_for_status()
-            data_url = "data:image/" + (src.rsplit(".", 1)[-1] if "." in src else "png") + ";base64," + \
-                       __import__("base64").b64encode(r.content).decode()
+            src = _assert_http_url(src)  # SSRF 边界：协议/私网校验后才下载
+            from .core import fetch_bytes
+            content = fetch_bytes(src, timeout=40, headers={"User-Agent": "Mozilla/5.0"})
+            if content is None:
+                raise RuntimeError(f"图片下载失败: {fetch_bytes.last_error}")
+            # MIME 按路径扩展名映射并白名单化（曾把 ?v=2 查询串拼进 data-url
+            # 产出 "image/png?v=2" 非法 MIME，视觉模型调用失败）
+            from urllib.parse import urlsplit as _usp
+            _ext = (_usp(src).path.rsplit(".", 1)[-1].lower() if "." in _usp(src).path else "")
+            _mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png",
+                     "webp": "webp", "gif": "gif"}.get(_ext, "png")
+            data_url = f"data:image/{_mime};base64," + \
+                       __import__("base64").b64encode(content).decode()
             prompt = ("这是排行榜/榜单表格图片。请逐行OCR表格内容，把每一行输出为JSON对象，"
                       "字段名用中文（如：排名、品牌、价值、公司、行业等，按表头原样）。"
                       "只输出JSON数组，数字务必准确，不要解释。")
@@ -307,13 +321,25 @@ def _image_ranking_run(meta: Dict[str, Any], url: str, limit: int = 20,
     fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
         import csv
-        with open(out_dir / f"{base}.csv", "w", newline="", encoding="utf-8-sig") as f:
-            keys = list(rows[0].keys())
-            w = csv.DictWriter(f, fieldnames=keys)
-            w.writeheader()
-            w.writerows(rows)
-    except Exception:
-        pass
+        import io
+        # R15 修复：LLM/OCR 行 schema 不定——表头取全行键并集（rows[0] 会在后续行
+        # 多键时让 DictWriter 报废）；内部溯源键 _image/_page 只留 JSON，不进 CSV；
+        # 导出文件名净化到安全字符集，经 out_dir.joinpath 限定在 outputs/ 内
+        csv_rows = [{k: v for k, v in r.items() if k not in ("_image", "_page")} for r in rows]
+        keys: list = []
+        for r in csv_rows:
+            for k in r:
+                if k not in keys:
+                    keys.append(k)
+        fname = re.sub(r"[^0-9A-Za-z._-]+", "_", f"{base}.csv").strip(".") or "export.csv"
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=keys)
+        w.writeheader()
+        w.writerows(csv_rows)
+        (out_dir.joinpath(fname)).write_bytes(buf.getvalue().encode("utf-8-sig"))
+    except Exception as e:
+        if log:
+            log(f"⚠️ CSV 导出失败: {e}")
     return rows
 
 
@@ -321,9 +347,15 @@ def _image_ranking_run(meta: Dict[str, Any], url: str, limit: int = 20,
 # 高级探测：HTTP 快探 → 浏览器 detect → 若 WAF/壳则种 Cookie 重试
 # ---------------------------------------------------------------------------
 def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
-    """返回 {url, seed, detect, http_status, waf}。"""
+    """返回 {url, seed, detect, http_status, waf}。
+
+    收官十二轮（审查，实测）：SSRF 闸门只在第 1 层 HTTP 直连生效——第 1 层的
+    except 曾把 `_assert_http_url` 的 ValueError 当普通网络失败吞掉，同一私网
+    URL 随后被无头浏览器（第 2/3 层）照常渲染，内网页面内容进入 detect 并被
+    拼进 LLM 提示词。改为入口处统一过闸、未过闸直接抛出。"""
     from urllib.parse import urlparse
     from .tactics import run_bridge_jsonl
+    _assert_http_url(url)  # SSRF 闸：所有探测层共用这一次判定
     bridge = ROOT / "scripts" / "tactic_bridge.cjs"
     host = urlparse(url).netloc
     seed = "https://" + host + "/"
@@ -334,6 +366,7 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
         if log:
             log("📄 识别到 PDF 直链，下载探测…")
         try:
+            _assert_http_url(url)  # R15b 补充：PDF 快探同样过 SSRF 边界
             fp = download_pdf(url, timeout=40)
             size = fp.stat().st_size
             fp.unlink(missing_ok=True)
@@ -352,13 +385,20 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
     if log:
         log(f"🔍 HTTP 快探: {url}")
     try:
-        import requests
-        r = requests.get(url, timeout=20, verify=False,
-                          headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"})
-        text = re.sub(r"<[^>]+>", " ", r.text or "")
-        text = re.sub(r"\s+", " ", text).strip()
-        if r.status_code == 200 and len(text) >= 300:
-            html = r.text or ""
+        from .core import fetch_bytes
+        _assert_http_url(url)  # SSRF 边界：协议/私网校验后才快探
+        body = fetch_bytes(url, timeout=20,
+                           headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"})
+        if body is None:
+            _m = re.search(r"HTTP (\d+)", fetch_bytes.last_error or "")
+            status_code = int(_m.group(1)) if _m else 0
+            text = ""
+        else:
+            status_code = 200
+            text = re.sub(r"<[^>]+>", " ", body.decode("utf-8", "ignore"))
+            text = re.sub(r"\s+", " ", text).strip()
+        if status_code == 200 and len(text) >= 300:
+            html = body.decode("utf-8", "ignore")
             imgs = [mm.group(1) for mm in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html)
                     if not re.search(r"logo|icon|qrcode|wechat|avatar", mm.group(1), re.I)]
             pdfs = [mm.group(1) for mm in re.finditer(r'(?:href|src|fileurl)=["\']([^"\']*?\.(?:pdf|docx?|xlsx?)[^"\']*)["\']', html, re.I)]
@@ -374,7 +414,9 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
                 log(f"✅ HTTP 直连可用（{len(text)} 字符 | 大图={len(d['bigImages'])} | PDF={len(d['pdfLinks'])} | Vue={d['hasVue']} | 表格={len(d['tables'])}）")
             return {"url": url, "seed": seed, "http_status": 200, "waf": False, "detect": d}
         if log:
-            log(f"⚠️ HTTP {r.status_code} / 内容 {len(text)} 字符（疑似 WAF 或 JS 壳），改浏览器探测…")
+            log(f"⚠️ HTTP {status_code} / 内容 {len(text)} 字符（疑似 WAF 或 JS 壳），改浏览器探测…")
+    except ValueError:
+        raise  # SSRF 闸门拒绝：不得降级到浏览器层（收官十二轮）
     except Exception as e:
         if log:
             log(f"⚠️ HTTP 失败（{type(e).__name__}），改浏览器探测…")
@@ -383,7 +425,11 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
     if log:
         log(f"🔍 浏览器探测（无 Cookie）: {url}")
     objs = run_bridge_jsonl(bridge, {"mode": "detect", "target": url, "settle": "1200"}, timeout=180)
-    det = next((o.get("data") or {}) for o in objs if o.get("type") == "detect") or {}
+    # 收官十二轮（审查 L）：next 曾无默认值——桥正常退出但零事件时抛裸
+    # StopIteration（webui 兜底显示 "StopIteration: "，用户无从得知原因）
+    det = next((o.get("data") or {} for o in objs if o.get("type") == "detect"), {})
+    if not det:
+        raise RuntimeError("浏览器探测无结果（桥未产出 detect 事件——target 无法打开或桥异常退出）")
     status = det.get("httpStatus")
     text_len = int(det.get("textLen") or 0)
     # 修复：status 非 2xx（含 None/0=连接失败）一律视为不可用，否则连不上的地址被误判"可用"
@@ -399,7 +445,9 @@ def _probe_advanced(url: str, log: Optional[Callable[[str], None]] = None) -> Di
     if log:
         log(f"⚠️ WAF/壳（status={status}, {text_len} 字符），先访问首页种 Cookie 再重试…")
     objs = run_bridge_jsonl(bridge, {"mode": "detect", "seed": seed, "target": url, "settle": "1200"}, timeout=180)
-    det2 = next((o.get("data") or {}) for o in objs if o.get("type") == "detect") or {}
+    det2 = next((o.get("data") or {} for o in objs if o.get("type") == "detect"), {})
+    if not det2:
+        raise RuntimeError("种 Cookie 重试无结果（桥未产出 detect 事件）")
     det2["_url"] = url
     det2["_waf_seed"] = seed
     if log:
@@ -419,6 +467,14 @@ def generate_precise(description: str, url: str, config: Optional[Dict[str, Any]
     from urllib.parse import urlparse
     host = urlparse(url if "//" in url else "https://" + url).netloc.lower()
     _lg(f"🎯 目标站点: {host}")
+    # 收官十二轮（审查 L）：导出名按 host 复用——上一轮遗留的 csv/xlsx 曾被
+    # _export_files 当作本轮产物列进报告。本轮开始时清掉同基名旧导出
+    # （文件由本工具生成，按名覆盖，清理不会误伤用户其它文件）
+    try:
+        for _ext in ("json", "csv", "xlsx"):
+            (ROOT / "outputs" / f"auto_precise_{_sanitize_host(host)}.{_ext}").unlink(missing_ok=True)
+    except Exception:
+        pass
 
     # 阶段 1：多轮探测（HTTP → 浏览器 → 种 Cookie）+ 入口候选自动探测
     probe = _entry_candidates(description, url, log=_lg)
@@ -430,7 +486,7 @@ def generate_precise(description: str, url: str, config: Optional[Dict[str, Any]
 
     # 阶段 2：战术决策（规则优先，LLM 兜底）
     from .tactics import decide_tactic, sanitize_host
-    decision = decide_tactic(description, detect, log=_lg)
+    decision = decide_tactic(description, detect)  # OCR R131（M）：decide_tactic 删死参数 log
     tactic = decision.get("tactic")
     _lg(f"🧩 选定战术: {tactic}（{decision.get('reason')}）")
 
@@ -573,7 +629,11 @@ def _rows_match_task(description: str, rows) -> bool:
 
 
 def _repair_probe(meta: Dict[str, Any], url: str, limit: int, runner, log=None):
-    """试跑 + 失败自动修复（最多 2 轮）。成功但数据与任务不相关也视为失败（防假成功）。"""
+    """试跑 + 失败自动修复（最多 2 轮）。成功但数据与任务不相关也视为失败（防假成功）。
+
+    收官十二轮（审查，实测）：第 2 轮用修复后的 entry/params 试跑成功时，生效的
+    meta2 曾只活在本函数局部——调用方持久化/注册的仍是**旧** meta，坏配置进了
+    注册表，该 host 后续任务永远用坏入口静默 0 条。改为把生效 meta 写回调用方。"""
     desc = meta.get("description") or ""
 
     def _run_once(m, u):
@@ -598,11 +658,22 @@ def _repair_probe(meta: Dict[str, Any], url: str, limit: int, runner, log=None):
         meta2["params"] = params2
         entry2 = fixed.get("entry") or params2.get("entry") or url
         try:
-            return _run_once(meta2, entry2)
+            rows, files, detail = _run_once(meta2, entry2)
         except Exception as e2:
             if log:
                 log(f"⚠️ 第 2 轮仍失败：{str(e2)[:200]}")
             raise RuntimeError(f"试跑未通过（已尝试自动修复）：{e2}")
+        # 修复生效：回写调用方的 meta（持久化/注册闭包读的就是它）与入口 url。
+        # 注册闭包读 meta.get("entry")（sites._register_tactic_precise），顶层
+        # entry 同样要更新；params 里的旧 entry 会经 setdefault 顶替顶层值，
+        # 必须一并覆盖
+        if fixed.get("entry"):
+            meta2["entry"] = fixed["entry"]
+            params2["entry"] = fixed["entry"]
+        meta.clear()
+        meta.update(meta2)
+        url = entry2
+        return rows, files, detail
 
 
 def _entry_candidates(description: str, url: str, log=None) -> Dict[str, Any]:
@@ -689,6 +760,12 @@ def _tactic_cookie_click_probe(meta: Dict[str, Any], url: str, limit: int,
         m = re.search(r"(.*?)(?:--(?:schId|infoId|orgId|itemId|pid|fid)|[?&/](?:id|Id))[-=]?[0-9A-Za-z_-]{1,40}(.*)$", u)
         if m:
             tmpl = m.group(1) + "{id}" + m.group(2)  # 占位符，cookie_click_run 会替换
+            # 审查修复：推断结果曾只存局部变量——试跑成功后 meta 落盘注册时
+            # url_template 恒为空，注册后的 cookie_click_run 永远生成不了"详情链接"。
+            # 写回 meta.params（试跑成功路径的 meta 即调用方持久化对象）
+            _mp = meta.get("params")
+            if isinstance(_mp, dict):
+                _mp.setdefault("url_template", tmpl)
     for r in rows:
         r.pop("_site", None)
     base = f"auto_precise_{_sanitize_host(meta.get('host',''))}"
@@ -760,13 +837,25 @@ def _llm_direct_extract(meta: Dict[str, Any], url: str, limit: int,
     fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
         import csv
-        with open(ROOT / "outputs" / f"{base}.csv", "w", newline="", encoding="utf-8-sig") as f:
-            keys = list(rows[0].keys())
-            w = csv.DictWriter(f, fieldnames=keys)
-            w.writeheader()
-            w.writerows(rows)
-    except Exception:
-        pass
+        import io
+        # R15 修复：同 _image_ranking_run——LLM 行 schema 不定，表头取键并集；
+        # 内部键不进 CSV；文件名净化 + joinpath 限定在 outputs/ 内
+        csv_rows = [{k: v for k, v in r.items() if k not in ("_image", "_page")} for r in rows]
+        keys: list = []
+        for r in csv_rows:
+            for k in r:
+                if k not in keys:
+                    keys.append(k)
+        fname = re.sub(r"[^0-9A-Za-z._-]+", "_", f"{base}.csv").strip(".") or "export.csv"
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=keys)
+        w.writeheader()
+        w.writerows(csv_rows)
+        (ROOT / "outputs").mkdir(exist_ok=True)
+        ((ROOT / "outputs").joinpath(fname)).write_bytes(buf.getvalue().encode("utf-8-sig"))
+    except Exception as e:
+        if log:
+            log(f"⚠️ CSV 导出失败: {e}")
     if log:
         log(f"✅ LLM 直抽成功：{len(rows)} 行")
     return rows, _export_files(base), f"LLM 直抽 {len(rows)} 行"
@@ -781,9 +870,43 @@ def _tactic_engine_probe(meta: Dict[str, Any], url: str, limit: int,
     scheme = _ask_scheme(meta.get("description") or "", sample, log=log)
     scheme = _normalize_engine_cfg(scheme)
     host = meta.get("host", "")
-    task_dir = _register_engine_config(scheme, host, log=log)
+    # R33 审查修复（P1）：先写任务包并试跑，通过后才写 meta/注册表——旧顺序
+    # 先注册后试跑，失败的"毒配置"留在注册表+磁盘，该 host 后续任务静默 0 条
+    name = f"auto_precise_{_sanitize_host(host)}"
+    task_dir = TASKS_DIR / name
+    # 收官十二轮（审查，实测）：host 已有一次成功精配时，本轮新方案先覆盖写
+    # config.json，试跑失败即 rmtree 整个任务目录——**此前能跑的好配置被静默
+    # 摧毁**，而 configs/ 注册指针仍指向已删除目录（悬空）。改为：已存在的
+    # 任务包先备份 config，失败轮恢复原 config 且不删目录
+    _prev_cfg = None
+    task_dir.mkdir(parents=True, exist_ok=True)
+    _cfg_fp = task_dir / "config.json"
+    if _cfg_fp.exists():
+        try:
+            _prev_cfg = _cfg_fp.read_text(encoding="utf-8")
+        except Exception:
+            _prev_cfg = None
+    scheme.setdefault("name", name)
+    _cfg_fp.write_text(json.dumps(scheme, ensure_ascii=False, indent=2), encoding="utf-8")
     probe = _run_engine_probe(task_dir, limit, log=log)
     if probe.get("error") or not probe.get("rows"):
-        # CSS 兜底失败 → LLM 直抽（成功即收，不空转重跑）
+        # 探测失败：本轮配置不算数（LLM 直抽兜底，不留下毒配置）。
+        # 收官十二轮：恢复既有 config（若有）——失败轮只回滚本轮写入；
+        # 目录确为空壳（从未成功过）才删
+        import shutil as _sh
+        if _prev_cfg is not None:
+            _cfg_fp.write_text(_prev_cfg, encoding="utf-8")
+            if log:
+                log("⚠️ 本轮 engine 试跑失败——已恢复此前的可用任务包，不删除")
+        else:
+            _sh.rmtree(task_dir, ignore_errors=True)
         return _llm_direct_extract(meta, url or (meta.get("params") or {}).get("entry", ""), limit, log)
+    # 试跑通过 → 正式持久化注册
+    (CONFIG_DIR / f"auto_precise_{_sanitize_host(host)}.json").write_text(
+        json.dumps({"host": host, "kind": "engine", "name": name, "task_dir": str(task_dir)},
+                   ensure_ascii=False, indent=2), encoding="utf-8")
+    from . import sites as _sites
+    _sites.register_config_precise(host, task_dir, kind="engine")
+    if log:
+        log(f"✅ 精配已保存: configs/auto_precise_{_sanitize_host(host)}.json（任务包 tasks/{name}）")
     return probe["rows"], probe.get("files", {}), f"engine 试跑 {len(probe['rows'])} 条"

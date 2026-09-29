@@ -11,12 +11,21 @@ import re
 from typing import Any, Dict, List
 
 try:
-    from lxml import html as _lxml_html
-    # 可用性探测：cssselect 是 lxml 的可选扩展（缺失则 HAS_LXML=False 走正则回退）
-    _CSSSelector = __import__("lxml.cssselect", fromlist=["CSSSelector"]).CSSSelector
-    HAS_LXML = True
+    # 可用性探测：lxml 与 cssselect 分开——cssselect 是 lxml 的可选扩展，
+    # 缺失时仍可用 lxml 解析 + _css_to_xpath（收官十轮：原实现把两者绑成
+    # 一个 HAS_LXML，缺 cssselect 时直接掉进"把开始标签当文本"的正则回退）
+    from lxml import html as _lxml_html  # noqa: F401
+    _HAS_LXML = True
 except Exception:  # pragma: no cover
-    HAS_LXML = False
+    _lxml_html = None
+    _HAS_LXML = False
+try:
+    _CSSSelector = __import__("lxml.cssselect", fromlist=["CSSSelector"]).CSSSelector
+    _HAS_CSSSELECT = True
+except Exception:  # pragma: no cover
+    _HAS_CSSSELECT = False
+# 向后兼容：既有外部引用/测试以 HAS_LXML 表示"能走 CSS 快路径"
+HAS_LXML = _HAS_LXML and _HAS_CSSSELECT
 
 
 # ---------------------------------------------------------------- JSON 路径
@@ -44,6 +53,10 @@ def jpath(obj: Any, path: str, default: Any = None) -> Any:
     for i, tok in enumerate(tokens):
         if tok == "*":
             if isinstance(cur, list):
+                if i == len(tokens) - 1:
+                    # 审查修复（P1，R7）：尾通配 `list.*` 曾把每个元素递归成 default
+                    # ——data.items.* 全部静默变 None。尾星直接返回元素列表
+                    return cur
                 # 用剩余 token 递归（修复多通配 a.*.b.*.c 时 index() 永远取第一个 * 的 bug）
                 out = [jpath(x, ".".join(tokens[i + 1:]), default) for x in cur]
                 return out
@@ -107,25 +120,60 @@ def _strip_pseudo(selector: str):
     return sel, None, None
 
 
+def _visible_text(el) -> str:
+    """元素文本（含后代），剔除 script/style/noscript/template 的源码文本。
+
+    收官十轮（审查，实测）：lxml 的 text_content() 不过滤 script/style——真实
+    抓取页的 #main 抽出 1012 字符里约 795 字符是内联 JS（"removeEventListener…"），
+    字段值被脚本源码污染，长度过滤与日期/价格正则全部失真，且无任何告警。
+    同仓库 extractors.html_to_markdown 对同源问题显式 drop_tree，语义应一致。"""
+    if not hasattr(el, "text_content"):
+        return _strip_tags(str(el))
+    try:
+        nodes = el.xpath(
+            ".//text()[not(ancestor::script) and not(ancestor::style)"
+            " and not(ancestor::noscript) and not(ancestor::template)]")
+    except Exception:
+        return el.text_content()
+    return "".join(str(n) for n in nodes)
+
+
+def _strip_tags(s: str) -> str:
+    """退化路径（无 lxml）用：去掉标记，只留文本。"""
+    return re.sub(r"<[^>]*>", "", s or "")
+
+
 def css_elements(html: str, selector: str) -> List[Any]:
     if not selector:
         return []
     real, _pseudo, _arg = _strip_pseudo(selector)
     if not real:
         return []
-    if HAS_LXML:
+    if _HAS_LXML:
+        doc = None
         try:
             doc = _lxml_html.fromstring(html)
-            return doc.cssselect(real)
+            if _HAS_CSSSELECT:
+                return doc.cssselect(real)
         except Exception:
+            pass  # fromstring/cssselect 失败时 doc 可能为 None——下方守卫
+        # 收官十轮（审查）：缺 cssselect 时不再掉进"返回开始标签"的正则回退——
+        # 用自带 _css_to_xpath 走 lxml XPath（本文件早已实现该转换器，此前不可达）
+        if doc is not None and not _HAS_CSSSELECT:
+            xp = _css_to_xpath(real)
+            if xp:
+                try:
+                    return doc.xpath(xp)
+                except Exception:
+                    pass
+        if doc is not None:
             xp = _css_to_xpath(real)
             if xp:
                 try:
                     return doc.xpath(xp)
                 except Exception:
                     return []
-            return []
-    # 退化：简单 class/id 正则
+    # 退化：简单 class/id 正则（无 lxml：只拿得到标签串，文本侧另行去标记）
     out = []
     for m in re.finditer(r"<[^>]+(?:class|id)=[\"']([^\"']*" + re.escape(selector.lstrip(".#")) + r"[^\"']*)[\"'][^>]*>", html):
         out.append(m.group(0))
@@ -135,7 +183,9 @@ def css_elements(html: str, selector: str) -> List[Any]:
 def css_text(html: str, selector: str, limit: int = 0, joiner: str = "\n") -> str:
     parts = []
     for el in css_elements(html, selector):
-        t = el.text_content() if hasattr(el, "text_content") else str(el)
+        # 收官十轮（审查）：曾用 text_content()——script/style 源码混入字段值。
+        # 退化路径拿到的是标签串：去标记后再取文本（至少不把标签当数据）
+        t = _visible_text(el) if hasattr(el, "text_content") else _strip_tags(str(el))
         t = re.sub(r"\s+", " ", t).strip()
         if t:
             parts.append(t)
@@ -159,6 +209,10 @@ def css_attr(html: str, selector: str, attr: str = "href", limit: int = 0) -> st
 def css_html(html: str, selector: str, limit: int = 0) -> str:
     out = []
     for el in css_elements(html, selector):
+        # 审查三轮（H）：退化路径返回原始 HTML 字符串——曾直接 tostring 崩
+        if isinstance(el, str):
+            out.append(el)
+            continue
         s = _lxml_html.tostring(el, encoding="unicode") if HAS_LXML else str(el)
         if s:
             out.append(s)
@@ -168,13 +222,304 @@ def css_html(html: str, selector: str, limit: int = 0) -> str:
 
 # ---------------------------------------------------------------- 正则
 
-def regex_extract(text: str, pattern: str, group: int = 0, flags: int = re.S | re.I) -> str:
+_TIMED_OUT_PATTERNS: set = set()   # 已知危险模式（lint 拒绝过一次的直接跳过）
+_REGEX_TEXT_CAP = 64 * 1024        # 用户正则参与的文本上限（截断防超长输入放大）
+_MAXREP = 0                        # sre_parse.MAXREPEAT（regex_is_dangerous 首调时填充）
+
+
+# R47 F4 精度：已知 CATEGORY 映射具体字符集——让 (\d+|color) 这类首集
+# 实际不相交的组合不被误判；未知类别仍记 "*"（保守相交）
+_CAT_SETS = {
+    "CATEGORY_DIGIT": "0123456789",
+    "CATEGORY_WORD": ("abcdefghijklmnopqrstuvwxyz"
+                      "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"),
+    "CATEGORY_SPACE": " \t\n\r\f\v",
+}
+
+
+def _first_of_seq(ops, out: set, ic: bool) -> bool:
+    """R47 重写：收集序列首字符集（遇第一个必消费元素即止，不再把整个分支
+    的字母表都算进首集——旧写法让 (ab|ba)+ 被 R3 误杀）；返回序列是否可空。
+    ic=True 时字符统一小写化（IGNORECASE 下 A 与 a 首集相交）。
+    LITERAL 在 sre_parse 里是码点 int，统一转 chr 字符串便于集合运算。"""
+    for op, av in ops:
+        o = str(op)
+        if o in ("MAX_REPEAT", "MIN_REPEAT"):
+            lo, _hi, inner = av
+            sub: set = set()
+            _first_of_seq(inner, sub, ic)  # OCR R131（L）：返回值曾存而不用（可空性由 lo==0 判定）
+            out |= {t if (t == "*" or not ic) else str(t).lower() for t in sub}
+            if lo == 0:
+                continue  # 可空重复：后续元素同样属于首集
+            return False
+        elif o == "SUBPATTERN":
+            if not _first_of_seq(av[-1], out, ic):
+                return False
+        elif o == "BRANCH":
+            any_nullable = False
+            for b in av[1]:
+                bs: set = set()
+                if _first_of_seq(b, bs, ic):
+                    any_nullable = True
+                out |= {t if (t == "*" or not ic) else str(t).lower() for t in bs}
+            if not any_nullable:
+                return False
+        elif o in ("ASSERT", "ASSERT_NOT"):
+            continue  # 零宽断言不消费字符
+        elif o == "IN":
+            for sub in av:
+                so = str(sub[0])
+                if so == "LITERAL":
+                    ch = chr(sub[1]) if isinstance(sub[1], int) else str(sub[1])
+                    out.add(ch.lower() if ic else ch)
+                elif so in _CAT_SETS:
+                    cs = _CAT_SETS[so]
+                    out |= {c.lower() if ic else c for c in cs}
+                else:  # 未知字符类：视为未知通配
+                    out.add("*")
+            return False
+        elif o == "ANY":
+            out.add("*")
+            return False
+        elif o == "LITERAL":
+            ch = chr(av) if isinstance(av, int) else str(av)
+            out.add(ch.lower() if ic else ch)
+            return False
+        else:
+            out.add("*")
+            return False
+    return True
+
+
+def _elements(ops, ic: bool) -> list:
+    """序列展开成元素 [(首集, 可空)]；SUBPATTERN 透明展开一层。"""
+    elems = []
+    for op, av in ops:
+        if str(op) == "SUBPATTERN":
+            elems.extend(_elements(av[-1], ic))
+        else:
+            s: set = set()
+            nullable = _first_of_seq([(op, av)], s, ic)
+            elems.append((s, nullable))
+    return elems
+
+
+def _regex_sub_conflicts(sub, ic: bool) -> bool:
+    """无界重复体的灾难形态判定（近似，宁缺勿滥——误杀合法模式会丢数据）：
+    R1 嵌套无界重复（(a+)+）；R2 重复体整体可空（(a?)+ / (a*)+）；R2b 体含
+    可空分支（sre 重写 (a|aa)+ → a(?:|a)+）；R3 体分支首集相交（(a|ab)+）；
+    F2 序列内可空元素与其后元素首集相交（(a?\\w)+）。
+    F1：零宽断言体（ASSERT）同样进入递归。ic = IGNORECASE 生效中。"""
+    def _nullable(ops) -> bool:
+        """子式能否匹配空串（序列全部元素可空）。"""
+        for op, av in ops:
+            o = str(op)
+            if o in ("MAX_REPEAT", "MIN_REPEAT"):
+                lo, _hi, inner = av
+                if lo > 0 and not _nullable(inner):
+                    return False
+            elif o == "SUBPATTERN":
+                if not _nullable(av[-1]):
+                    return False
+            elif o == "BRANCH":
+                if not any(_nullable(b) for b in av[1]):
+                    return False
+            elif o in ("ASSERT", "ASSERT_NOT"):
+                continue  # 零宽断言不消费
+            else:
+                # LITERAL / IN / ANY 等实质消费字符
+                return False
+        return True
+
+    def _sets_hit(s1: set, s2: set) -> bool:
+        """通配 "*"（字符类/ANY）与任意具体字符视为相交。"""
+        if "*" in s1 or "*" in s2:
+            return True
+        return bool(s1 & s2)
+
+    def _seq_overlap(ops) -> bool:
+        elems = _elements(ops, ic)
+        for i, (s1, n1) in enumerate(elems):
+            if not n1:
+                continue  # 只关心可空元素（多为 lo==0 重复/可空分支）
+            rest: set = set()
+            for s2, _n2 in elems[i + 1:]:
+                rest |= s2
+            if _sets_hit(s1, rest):
+                return True
+        return False
+
+    def _branch_overlap(ops) -> bool:
+        for op, av in ops:
+            o = str(op)
+            if o == "BRANCH":
+                sets = []
+                for b in av[1]:
+                    s2: set = set()
+                    _first_of_seq(b, s2, ic)
+                    sets.append(s2)
+                for i in range(len(sets)):
+                    for j in range(i + 1, len(sets)):
+                        # R61 修正：首集相交即致命——(a|a)+$ 实测 2^n 指数爆炸，
+                        # 等长定长分支并不能豁免。sre 把 (a|a) 常数折叠成
+                        # a(?:|)（两支均为空），故"两支首集皆为空集（均可空）"
+                        # 同样算相交。首集不相交的分支（(ab|ba)+、(\d+|color)）
+                        # 在 _sets_hit 已放行，不受影响
+                        si, sj = sets[i], sets[j]
+                        if (not si and not sj) or _sets_hit(si, sj):
+                            return True
+            elif o == "SUBPATTERN":
+                if _branch_overlap(av[-1]):
+                    return True
+        return False
+
+    def _has_nullable_branch(ops) -> bool:
+        """重复体含"可空分支"且另有非空分支（R47 修正）——纯空分支组（全部
+        可空）每迭代恒消费 0 字符、无长度变异，不构成回溯；混合才有变长歧义。
+        sre 会把 (a|aa)+ 重写成 a(?:|a)+——空分支 + 非空分支正是变长体痕迹。"""
+        for op, av in ops:
+            o = str(op)
+            if o == "BRANCH":
+                nb = [_nullable(b) for b in av[1]]
+                if any(nb) and any(not x for x in nb):
+                    return True
+                for b in av[1]:
+                    if _has_nullable_branch(b):
+                        return True
+            elif o == "SUBPATTERN":
+                if _has_nullable_branch(av[-1]):
+                    return True
+            elif o in ("MAX_REPEAT", "MIN_REPEAT"):
+                if _has_nullable_branch(av[2]):
+                    return True
+        return False
+
+    def _single_variable_repeat(ops) -> bool:
+        r"""R4（审查八轮新增）：重复体是"单个变长重复元素"——(a{1,3})+ / ([a-z]{2,5})+。
+        每次迭代可消费 1..n 个同一字符集字符，切分方式数随长度指数增长（实测
+        (a{1,3})+$ 对 24 字符 0.27s、每 +2 字符涨约 3.3 倍）。定长（lo==hi，如
+        (a{3})+）安全；首集不重叠的多元素体（如 (ab{1,3})+，每次迭代起点由 'a'
+        唯一确定）同样安全，不误杀。
+
+        收官十轮（审查 P1，实测复现）：原判据"恰好一个消费元素"过窄——体里加个
+        可空元素即被关掉，而可空元素不消费字符、不消解歧义：实测
+        (?:\d{1,4}\.?)+$ 对 60 字符输入 >25s 不返回（CPython re 在 C 层回溯不
+        释放 GIL → 整个采集进程冻结）。判据改为"**至多一个非可空消费元素**，
+        其余全可空"——可空元素（.? / []? / 可空分支）不参与歧义计算。"""
+        def _nonnull(seq) -> list:
+            """非可空消费元素（SUBPATTERN 透明展开，零宽断言不计）。"""
+            out = []
+            for op, av in seq:
+                o = str(op)
+                if o in ("ASSERT", "ASSERT_NOT"):
+                    continue
+                if o == "SUBPATTERN":
+                    out.extend(_nonnull(av[-1]))
+                elif not _nullable([(op, av)]):
+                    out.append((op, av))
+            return out
+
+        consuming = _nonnull(ops)
+        if not consuming:
+            return False            # 全体可空 → R2 已判
+        if len(consuming) > 1:
+            return False            # 多元素体：起点由首元素唯一确定（如 (ab{1,3})+）
+        op, av = consuming[0]
+        o = str(op)
+        if o in ("MAX_REPEAT", "MIN_REPEAT"):
+            lo, hi, _inner = av
+            return hi > lo
+        if o == "SUBPATTERN":
+            return _single_variable_repeat(av[-1])
+        return False
+
+    def _walk(ops, in_unb: bool) -> bool:
+        for op, av in ops:
+            o = str(op)
+            if o in ("MAX_REPEAT", "MIN_REPEAT"):
+                _lo, hi, inner = av
+                unb = (hi == _MAXREP)
+                if unb:
+                    if in_unb:
+                        return True           # R1：(a+)+ / ((a+)+)
+                    if _nullable(inner):
+                        return True           # R2：(a?)+ / (a*)+ / ()+
+                    if _branch_overlap(inner):
+                        return True           # R3：(a|ab)+
+                    if _has_nullable_branch(inner):
+                        return True           # R2b：(a|aa)+（sre 重写为 a(?:|a)+）
+                    if _seq_overlap(inner):
+                        return True           # F2：(a?\\w)+ 可空元素邻接相交
+                    if _single_variable_repeat(inner):
+                        return True           # R4：(a{1,3})+ 有界变长重复套无界重复
+                if _walk(inner, in_unb or unb):
+                    return True
+            elif o == "SUBPATTERN":
+                if _walk(av[-1], in_unb):
+                    return True
+            elif o in ("ASSERT", "ASSERT_NOT"):
+                # F1 新增：零宽断言体同样可藏嵌套无界回溯（(?=(a+)+b)）
+                if _walk(av[-1], in_unb):
+                    return True
+            elif o == "BRANCH":
+                for b in av[1]:
+                    if _walk(b, in_unb):
+                        return True
+        return False
+
+    return _walk(sub, False)
+
+
+def regex_is_dangerous(pattern: str, flags: int = 0) -> bool:
+    """静态 lint（R24 修复；R47 对抗加固）：CPython 的 re 在 C 层回溯不释放
+    GIL——事前拒绝灾难模式：嵌套无界量词、可空重复体、可空/相交分支、
+    零宽断言体内的同类形态。flags 必须与实际匹配一致（R47 F3：IGNORECASE
+    会让字面首集相交，parse 不折叠，lint 必须自己感知）。"""
+    try:
+        import sre_parse as _sre_parse
+    except ImportError:  # 3.13+ 弃用迁移兜底
+        import re._parser as _sre_parse
+    global _MAXREP
+    _MAXREP = _sre_parse.MAXREPEAT
+    try:
+        tree = _sre_parse.parse(pattern, flags=flags)
+    except Exception:
+        return False  # 非法正则交给 re.error 路径
+    _ic = bool(flags & re.IGNORECASE) or bool(
+        getattr(getattr(tree, "state", None), "flags", 0) & re.IGNORECASE)
+    return _regex_sub_conflicts(tree, _ic)
+
+
+def _regex_search_bounded(text: str, pattern: str, flags: int, cap: int = 0):
+    """R24 重构：lint 拒绝灾难模式 + 文本截断——两层事前防线取代无效的线程
+    超时。线性/温和模式不受影响；被拒模式进黑名单并按无匹配处理。cap=0 用
+    默认 64KB；内部可信固定模式（如 sitemap 解析）可显式给大 cap。
+    R47 F3：黑名单按 (pattern, flags) 键控——同一模式在不同 flags 下危险性
+    不同（IGNORECASE 让字面首集相交），不能跨 flags 共享。"""
+    key = (pattern, flags)
+    if key in _TIMED_OUT_PATTERNS:
+        return None
+    if regex_is_dangerous(pattern, flags):
+        # OCR R131（M）：黑名单无上界——超限清空重记（与 regex_extract_all 同口径）
+        if len(_TIMED_OUT_PATTERNS) >= 4096:
+            _TIMED_OUT_PATTERNS.clear()
+        _TIMED_OUT_PATTERNS.add(key)
+        return None
+    t = text or ""
+    _cap = cap or _REGEX_TEXT_CAP
+    if len(t) > _cap:
+        t = t[:_cap]
+    try:
+        return re.search(pattern, t, flags)
+    except re.error:
+        return None
+
+
+def regex_extract(text: str, pattern: str, group: int = 0, flags: int = re.S | re.I,
+                  cap: int = 0) -> str:
     if not pattern:
         return ""
-    try:
-        m = re.search(pattern, text or "", flags)
-    except re.error:
-        return ""  # 非法正则（AI 常生成）：不崩溃，按无匹配处理
+    m = _regex_search_bounded(text or "", pattern, flags, cap)
     if not m:
         return ""
     try:
@@ -183,13 +528,40 @@ def regex_extract(text: str, pattern: str, group: int = 0, flags: int = re.S | r
         return m.group(0)
 
 
-def regex_extract_all(text: str, pattern: str, group: int = 0) -> List[str]:
+def regex_extract_all(text: str, pattern: str, group: int = 0, cap: int = 0,
+                      flags: int = re.S | re.I) -> List[str]:
     if not pattern:
         return []
+    # R24 重构：与 regex_extract 同防线（lint + 截断）后同步 finditer——
+    # 旧的"本体也放有界线程"同样受 GIL 约束不可靠
+    # OCR R131（M）：flags 形参化——与 regex_extract 对齐（此前硬编码 S|I，
+    # 两个 API 的同 pattern 行为不一致）
+    _fl = flags
+    key = (pattern, _fl)
+    if key in _TIMED_OUT_PATTERNS:
+        return []
+    if regex_is_dangerous(pattern, _fl):
+        # OCR R131（M）：黑名单集合无上界——恶意/失控输入下线性膨胀。超限时
+        # 清空重记（lint 命中会重新加回，只损失部分短路）
+        if len(_TIMED_OUT_PATTERNS) >= 4096:
+            _TIMED_OUT_PATTERNS.clear()
+        _TIMED_OUT_PATTERNS.add(key)
+        return []
+    t = text or ""
+    _cap = cap or _REGEX_TEXT_CAP
+    if len(t) > _cap:
+        t = t[:_cap]
+    _out: List[str] = []
     try:
-        return [m.group(group) or "" for m in re.finditer(pattern, text or "", re.S | re.I)]
+        for mm in re.finditer(pattern, t, _fl):
+            # R15 审查（P2）：group 越界回退 group(0)
+            try:
+                _out.append(mm.group(group) or "")
+            except IndexError:
+                _out.append(mm.group(0))
     except re.error:
         return []
+    return _out
 
 
 # ---------------------------------------------------------------- 统一提取入口
@@ -215,6 +587,10 @@ def apply_extractor(spec: dict, ctx_text: str, ctx_html: str, ctx_obj: Any) -> A
         return regex_extract_all(ctx_text, spec.get("pattern", ""), spec.get("group", 0))
     if etype == "constant":
         return spec.get("value")
+    if etype == "text":
+        # OCR R131（M）：默认 type="text" 曾落到底部 jpath 分支——纯文本提取
+        # 语义下返回的是 JSON 对象查询结果（恒 default），静默错值
+        return ctx_text
     # 默认：从 JSON 对象取
     return jpath(ctx_obj, spec.get("path", ""), spec.get("default"))
 
@@ -242,9 +618,10 @@ def xpath_text(html: str, xpath: str, limit: int = 0, joiner: str = "\n") -> str
     parts = []
     for el in xpath_elements(html, xpath):
         if isinstance(el, str):
-            t = el
+            t = _strip_tags(el)
         else:
-            t = el.text_content() if hasattr(el, "text_content") else str(el)
+            # 收官十轮（审查）：与 css_text 同源问题——script/style 源码曾混入
+            t = _visible_text(el) if hasattr(el, "text_content") else _strip_tags(str(el))
         t = re.sub(r"\s+", " ", t).strip()
         if t:
             parts.append(t)
@@ -305,13 +682,53 @@ def extract_embedded_json_rows(html: str, spec: Any) -> List[Dict[str, Any]]:
         rf"(?:var|let|const)\s+{re.escape(name)}\s*(?<![=!<>])=(?!=)\s*",
         rf"(?<![\w$.]){re.escape(name)}\s*(?<![=!<>])=(?!=)\s*",
     )
+
+    def _usable(v: Any) -> bool:
+        """解析成功但结果为空壳（SSR 占位初始化）时不算数。
+        收官十轮（审查）：曾以"JSON 能解析"为唯一成功条件——真赋值之前出现的
+        `window.pageData = {}` / `{"list":[]}` 会顶掉后面的真数据，抽出 [{}] 或 []。"""
+        if not drill:
+            if isinstance(v, dict):
+                return bool(v)
+            if isinstance(v, list):
+                return any(isinstance(r, dict) for r in v)
+            return False
+        cur = v
+        for part in drill.split("."):
+            if isinstance(cur, dict):
+                cur = cur.get(part)
+            elif isinstance(cur, list):
+                try:
+                    cur = cur[int(part)]
+                except (ValueError, IndexError):
+                    return False
+            else:
+                return False
+            if cur is None:
+                return False
+        if isinstance(cur, dict):
+            return bool(cur)
+        if isinstance(cur, list):
+            return any(isinstance(r, dict) for r in cur)
+        return False
+
     for pat in pats:
         for m in re.finditer(pat, html):
-            val = _balanced_json(html, m.end(), _json)
-            if val is not None:
+            cand = _balanced_json(html, m.end(), _json)
+            if cand is not None and _usable(cand):
+                val = cand
                 break
         if val is not None:
             break
+    # 全部出现位置都是空壳：仍返回最后一个可解析值（保持"占位也算数据"的旧兜底）
+    if val is None:
+        for pat in pats:
+            for m in re.finditer(pat, html):
+                cand = _balanced_json(html, m.end(), _json)
+                if cand is not None:
+                    val = cand
+            if val is not None:
+                break
     if val is None:
         return []
 

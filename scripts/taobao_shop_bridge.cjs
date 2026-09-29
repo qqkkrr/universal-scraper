@@ -114,8 +114,11 @@ async function main() {
   const cdp = args.cdp || "http://127.0.0.1:9222";
   const shop = args.shop || "";
   const linksArg = (args.links || "").split(",").map(s => s.trim()).filter(Boolean);
-  const maxItems = parseInt(args.max || "200", 10);
-  const workers = Math.max(1, Math.min(parseInt(args.workers || "2", 10), 4));
+  // 审查修复（H）：parseInt(垃圾) = NaN 曾静默穿透——maxItems=NaN 使分页逻辑
+  // 全部短路（每次都"已达上限"或永不到上限），NaN workers 被 clamp 成 1
+  const _pint = (v, dft) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : dft; };
+  const maxItems = _pint(args.max, 200);
+  const workers = Math.max(1, Math.min(_pint(args.workers, 2), 4));
   if (!shop && linksArg.length === 0) { out({ type: "error", message: "缺少 --shop URL 或 --links 商品链接列表" }); process.exit(1); }
 
   let browser;
@@ -174,7 +177,9 @@ async function main() {
 
   await Promise.all(Array.from({ length: workers }, () => worker()));
   out({ type: "done", ok: done, fail });
-  await browser.close().catch(()=>{});
+  // 审查修复（CRITICAL）：connectOverCDP 连的是用户自己的 Chrome——close() 会
+  // 终结用户整个浏览器会话（所有窗口全关）。disconnect() 只断开自动化连接
+  await browser.disconnect().catch(()=>{});
   process.exit(0);
 }
 

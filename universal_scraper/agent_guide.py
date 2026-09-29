@@ -60,16 +60,13 @@ outputs/task_<编号>/
 证据存在性），verdict=ok 才交付；partial 说明缺什么。
 """
 
-TELEMETRY = """📖 AGENT_GUIDE 已生成：建议随任务分派发给每个并行子代理，
-并把此文件路径写进调度 prompt（"先读 AGENT_GUIDE.md 再开工"）。"""
-
 
 def render() -> str:
     return TEMPLATE
 
 
 def emit(out: str | Path = "AGENT_GUIDE.md") -> Path:
-    from pathlib import Path
-    p = Path(out).expanduser()
+    p = Path(out).expanduser()  # OCR R131（L）：Path 已在模块级导入，去掉局部重复
+    p.parent.mkdir(parents=True, exist_ok=True)  # 审查三轮（M）：自定义 out 带父目录曾 FileNotFoundError
     p.write_text(render(), encoding="utf-8")
     return p

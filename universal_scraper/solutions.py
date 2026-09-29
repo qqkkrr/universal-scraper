@@ -13,7 +13,8 @@ from typing import Any, Dict, Optional
 def classify_failure(error_text: str = "", messages: Optional[list] = None,
                      url: str = "") -> str:
     """把失败信息归类。返回 failure_type。"""
-    txt = (error_text or "") + " " + " ".join(messages or [])[:2000] + " " + (url or "")
+    # OCR R131（H）：messages 含非 str 元素时 join 抛 TypeError
+    txt = (error_text or "") + " " + " ".join(str(m) for m in (messages or []))[:2000] + " " + (url or "")
     t = txt.lower()
 
     # 0) 返回的是整页 HTML（异常页/错误页）：先看是否被 WAF/阻断
@@ -24,10 +25,15 @@ def classify_failure(error_text: str = "", messages: Optional[list] = None,
             return "entry_invalid"
     # 1) 入口/连接失效（404、连接拒绝、域名、入口）
     if re.search(r"404|not found|找不到|无法连接|connection refused|connectionerror|"
-                 r"err_connection|无法访问|入口|dns|解析.*失败|getaddrinfo", txt, re.I):
+                 r"err_connection|无法访问|入口|dns\s*解析失败|域名解析失败|getaddrinfo", txt, re.I):
         # 404 也可能是页面本身不存在；若同时提到登录/验证码则优先登录
         if not re.search(r"登录|验证码|滑块|登录墙", txt, re.I):
             return "entry_invalid"
+    # 1b) 收官十二轮（审查）：`解析失败`类文本归选择器失败（check 5 的信号曾被
+    # 上面的 `解析.*失败` 抢走——DNS 语义已收窄，这里把裸"解析失败"也接住）
+    if re.search(r"解析失败|解析到\s*0|解析 0", txt, re.I) and \
+            not re.search(r"登录|验证码|滑块|403|412|429|waf", txt, re.I):
+        return "selector_failed"
     # 2) IP 风控 / WAF（403/412/429、请求被阻断、阿里云）
     if re.search(r"403|412|429|请求被阻断|被阻断|forbidden|waf|antibot|安全防护|"
                  r"访问过于频繁|被拦截|请求被拒绝", txt, re.I):
@@ -187,9 +193,14 @@ def attach_solution(job: Dict[str, Any], error_text: str = "") -> None:
     """给 job 附加 solution（_job_error 调用），登录/反爬类失败带"一键打开调试Chrome"动作。"""
     try:
         msgs = job.get("messages") or []
-        sol = dict(get_solution("", error_text, msgs, job.get("description") or ""))
+        # 审查修复：曾把任务自由文本 description 当 url 喂进 classify_failure——
+        # 描述带"登录"等词会把 timeout/404 带偏成 login_required（sol["type"]
+        # 直接展示给用户）。与下方 _ft 一致传 ""，两处判型天然一致
+        sol = dict(get_solution("", error_text, msgs, ""))
         # 一键动作：需要人工参与的场景 → 打开调试 Chrome 登录目标站（体验优化）
-        _ft = classify_failure(error_text, msgs, job.get("task_dir") or "")
+        # OCR R131（H）：第三个参数是 url——曾把 task_dir 文件路径喂进去，路径
+        # 里的 "404"/"not_found" 等目录名会带偏正则判型
+        _ft = classify_failure(error_text, msgs, "")
         if _ft in ("login_required", "captcha_or_login", "ip_blocked", "captcha"):
             _url = ""
             try:
@@ -199,12 +210,14 @@ def attach_solution(job: Dict[str, Any], error_text: str = "") -> None:
                     from pathlib import Path as _P
                     _cfg = _json.loads((_P(_td) / "config.json").read_text(encoding="utf-8"))
                     _url = (_cfg.get("start_urls") or [""])[0]
-            except Exception:
-                pass
+            except Exception as _cfg_e:
+                # OCR R131（M）：config 读取失败曾静默——一键动作的 url 来源无从排查
+                import sys as _sys
+                print(f"⚠️ 读取任务 config 失败（{_cfg_e}），一键动作将退回 title 提取 URL",
+                      file=_sys.stderr)
             if not _url:
                 # paste 任务无 task_dir：title 就是 URL
-                import re as _re
-                _m = _re.search("https?://[^\\s'\"]+", str(job.get("title") or ""))
+                _m = re.search("https?://[^\\s'\"]+", str(job.get("title") or ""))
                 if _m:
                     _url = _m.group(0)
             sol["action"] = {"label": "🚀 打开调试 Chrome 并登录/过验证",
@@ -216,5 +229,8 @@ def attach_solution(job: Dict[str, Any], error_text: str = "") -> None:
                               "api": "/api/cookies/import",
                               "tip": "上一步完成后点这里导入登录会话；导入成功后回来点「↻ 重跑」即可"}
         job["solution"] = sol
-    except Exception:
-        pass
+    except Exception as _e:
+        # 审查修复：附加方案整体失败曾全静默——job 无 solution 且无任何诊断
+        import sys as _sys
+        print(f"⚠️ 附加解决方案失败（{type(_e).__name__}: {_e}）——本次无 solution",
+              file=_sys.stderr)

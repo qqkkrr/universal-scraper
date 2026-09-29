@@ -82,7 +82,22 @@ python3 -m universal_scraper.cli run --task {path}
 
 
 def scaffold_task(name: str, out: Path) -> Path:
-    root = out if out.suffix == "" else out.parent / out.stem
+    # OCR R131（H）：`suffix == ""` 曾把带点目录名（v1.0/my.project）误判成文件
+    # 路径——scaffold 建出错误嵌套。目录存在按目录；仅已知配置后缀按文件。
+    # 审查二轮（M）：out 是已存在的普通文件（非配置后缀）时 root=out，
+    # 下方 root/"config.json" 抛 NotADirectoryError——按目录的父级兜底
+    if out.is_file():
+        root = out.parent / out.stem
+    else:
+        root = out if (out.is_dir() or out.suffix not in (".json", ".md", ".txt")) else out.parent / out.stem
+    if (root / "config.json").exists():
+        # OCR R131（M）：已存在任务曾被静默整目录覆盖
+        raise FileExistsError(f"任务已存在，拒绝覆盖: {root}/config.json（换名字或先删除）")
+    # 审查修复：只查 config.json 曾漏掉 parser.py/README.md——out 指向一个恰好
+    # 有 README.md 的普通目录时，模板会静默覆盖用户文件。写入前全量检查
+    for _t in ("modules/parser.py", "README.md"):
+        if (root / _t).exists():
+            raise FileExistsError(f"拒绝覆盖已存在文件: {root}/{_t}（换名字或先删除）")
     (root / "modules").mkdir(parents=True, exist_ok=True)
     cfg = json.loads(json.dumps(TASK_CONFIG_TEMPLATE))
     cfg["name"] = name

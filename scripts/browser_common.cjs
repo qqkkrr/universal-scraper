@@ -10,7 +10,125 @@ const fs = require("node:fs");
 
 const os = require("node:os");
 const HOME = process.env.HOME || os.homedir() || "/tmp";
-const CHROMIUM_EXE = process.env.PW_EXECUTABLE || `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
+const path = require("node:path");
+
+// 浏览器可执行文件解析链（MediaCrawler browser_launcher 思路；2026-09 实证：
+// playwright 升级换缓存修订版后，硬编码路径让全部浏览器功能一起瘫）：
+//   1. PW_EXECUTABLE 环境变量
+//   2. ms-playwright 缓存扫描（任意修订版，headless-shell 与全量 chromium 都认）
+//   3. 系统 Chrome/Edge（macOS / Windows / Linux 全渠道，含 Beta/Dev/Canary）
+//   4. 兜底旧硬编码路径（保证错误信息仍然可读）
+function _isExe(p) {
+  // 审查修复（L）：`fs.accessSync() === undefined` 依赖未文档化的返回值——
+  // 改用 try/catch 异常语义（等价但意图明确）
+  try { fs.accessSync(p, fs.constants.X_OK); return fs.statSync(p).isFile(); }
+  catch { return false; }
+}
+
+function _scanPlaywrightCache() {
+  const roots = [
+    path.join(HOME, "Library", "Caches", "ms-playwright"),                 // macOS
+    path.join(HOME, ".cache", "ms-playwright"),                            // Linux
+    path.join(process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local"), "ms-playwright"), // Windows
+  ];
+  const exeNames = new Set(["chrome", "chrome.exe", "chromium", "chromium.exe",
+                            "chrome-headless-shell", "chrome-headless-shell.exe"]);
+  // 全量 chromium 优先于 headless-shell（审查修复：有头模式用 headless-shell
+  // 必挂——browser_single --headless 0 / captcha_bridge own 模式都是有头），
+  // 修订版按数字倒序（字典序会让 999 排在 1000 前面）
+  const groups = [["chromium-", true], ["chromium_headless_shell-", false]];
+  for (const root of roots) {
+    for (const [prefix] of groups) {
+      let dirs = [];
+      try { dirs = fs.readdirSync(root).filter((d) => d.startsWith(prefix)); } catch { continue; }
+      dirs.sort((a, b) => (parseInt(b.replace(/\D+/g, ""), 10) || 0) - (parseInt(a.replace(/\D+/g, ""), 10) || 0));
+      for (const d of dirs) {
+        const base = path.join(root, d);
+        // 常见布局直查（快路径）
+        const fast = prefix === "chromium-"
+          ? [
+              path.join(base, "chrome-mac-arm64", "Chromium.app", "Contents", "MacOS", "Chromium"),
+              path.join(base, "chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"),
+              path.join(base, "chrome-linux", "chrome"),
+              path.join(base, "chrome-win", "chrome.exe"),
+            ]
+          : [
+              path.join(base, "chrome-headless-shell-mac-arm64", "chrome-headless-shell"),
+              path.join(base, "chrome-headless-shell-mac", "chrome-headless-shell"),
+              path.join(base, "chrome-headless-shell-linux64", "chrome-headless-shell"),
+              path.join(base, "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
+            ];
+        for (const f of fast) { if (_isExe(f)) return f; }
+        // 未知布局：限深 3 层搜可执行名
+        const stack = [[base, 0]];
+        while (stack.length) {
+          const [dir, depth] = stack.pop();
+          let entries = [];
+          try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+          for (const e of entries) {
+            const f = path.join(dir, e.name);
+            if (e.isDirectory()) { if (depth < 3 && !e.name.startsWith(".")) stack.push([f, depth + 1]); }
+            else if (exeNames.has(e.name.toLowerCase()) && _isExe(f)) return f;
+          }
+        }
+      }
+    }
+  }
+  return "";
+}
+
+function _scanSystemBrowsers() {
+  const sys = process.platform;
+  let cands = [];
+  if (sys === "darwin") {
+    cands = [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta",
+      "/Applications/Google Chrome Dev.app/Contents/MacOS/Google Chrome Dev",
+      "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Microsoft Edge Beta.app/Contents/MacOS/Microsoft Edge Beta",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    ];
+  } else if (sys === "win32") {
+    const pf = process.env["ProgramFiles"] || "C:\\Program Files";
+    const pf86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+    const lap = process.env["LOCALAPPDATA"] || path.join(HOME, "AppData", "Local");
+    cands = [
+      path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
+      path.join(pf86, "Google", "Chrome", "Application", "chrome.exe"),
+      path.join(lap, "Google", "Chrome", "Application", "chrome.exe"),
+      path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
+      path.join(pf86, "Microsoft", "Edge", "Application", "msedge.exe"),
+      path.join(lap, "Chromium", "Application", "chrome.exe"),
+    ];
+  } else {
+    cands = ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable",
+             "/usr/bin/google-chrome-beta", "/usr/bin/chromium-browser",
+             "/usr/bin/chromium", "/snap/bin/chromium",
+             "/usr/bin/microsoft-edge", "/usr/bin/microsoft-edge-stable"];
+  }
+  for (const c of cands) { if (_isExe(c)) return c; }
+  return "";
+}
+
+function resolveChromiumExe() {
+  if (process.env.PW_EXECUTABLE) {
+    if (_isExe(process.env.PW_EXECUTABLE)) return process.env.PW_EXECUTABLE;
+    // 审查修复：用户显式指定的路径失效必须喊出来——静默改道会引发
+    // "指纹/行为莫名漂移"式的疑难杂症
+    console.error(`[browser_common] PW_EXECUTABLE 不存在或不可执行，已忽略: ${process.env.PW_EXECUTABLE}`);
+  }
+  const cached = _scanPlaywrightCache();
+  if (cached) return cached;
+  const sys = _scanSystemBrowsers();
+  if (sys) return sys;
+  // 兜底旧硬编码：不存在也让下游报错信息可读（playwright 自己的报错带处方）
+  return `${HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
+}
+
+const CHROMIUM_EXE = resolveChromiumExe();
 
 // 优先 NODE_PATH 的 playwright（本地 patchright 旧版可能被 WAF 识别），再回退本地 patchright
 function loadChromium() {
@@ -25,30 +143,91 @@ function loadChromium() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Firecrawl 风格动作链；失败默认抛错，action.optional=true 可跳过 */
+/** Firecrawl 风格动作链；失败默认抛错，action.optional=true 可跳过。
+ * epub 战训修复（2026-09）：
+ *   - fill/type/write 同时接受 text 与 value 键（文档曾只写一个，另一个静默填空）
+ *   - 新增 wait_for_url 动作：{type, url_pattern, timeout} —— js 触发跳转后
+ *     page.evaluate 会炸（Execution context destroyed），此动作用 waitForURL 容错
+ *   - 动作失败带序号+类型 loudly 抛出（不再静默沉在 diag 日志） */
 async function runActions(page, actions) {
   if (!Array.isArray(actions)) return;
   for (let i = 0; i < actions.length; i++) {
     const a = actions[i] || {};
     const t = String(a.type || "").toLowerCase();
+    // R2 复查修复（P2-4）：wait_ms/timeout_ms 是文档与 browser_generic 实际支持
+    // 的键——pool/single 路径此前静默丢弃（validate 通过但等待不发生）。
+    // 统一在此归一：a.timeout_ms 覆盖 a.timeout；动作尾部统一补 a.wait_ms 睡眠
+    const _to = (a) => parseInt(a.timeout_ms || a.timeout || 15000, 10);
+    const _postWait = async () => {
+      const w = parseInt(a.wait_ms || a.ms || 0, 10);
+      if (w > 0) await sleep(w);
+    };
     try {
       if (t === "wait" || t === "wait_time") {
-        await sleep(parseInt(a.ms || a.milliseconds || 1000, 10));
+        if (a.selector) {
+          // wait+selector 形态（fetchers 与 browser_generic 消费的同款契约）
+          await page.waitForSelector(a.selector, { timeout: _to(a) });
+        }
+        await sleep(parseInt(a.ms || a.milliseconds || a.wait_ms || 1000, 10));
       } else if (t === "wait_for_selector" || t === "waitfor") {
-        await page.waitForSelector(a.selector, { timeout: parseInt(a.timeout || 30000, 10) });
+        await page.waitForSelector(a.selector, { timeout: _to(a) === 15000 ? 30000 : _to(a) });
+      } else if (t === "wait_for_url" || t === "wait_for_navigation") {
+        // 导航容错（epub 战训）：js/click 触发整页跳转后，用 URL 模式等新页面就绪
+        const pat = a.url_pattern || a.urlPattern || a.url;
+        if (!pat) throw new Error("wait_for_url 需要 url_pattern（字符串子串或 /正则/）");
+        // OCR R131（M）：/regex/flags 解析曾用 lastIndexOf("/") 取 flags——
+        // 正则体内含 / 时截断错位。收紧：仅匹配尾部 /flags 段（flags 只含字母）
+        let isRe = false, reBody = "", reFlags = "";
+        if (typeof pat === "string" && pat.startsWith("/") && pat.length > 2) {
+          const m = pat.match(/^\/(.*)\/([a-z]*)$/s);
+          if (m) { reBody = m[1]; reFlags = m[2]; isRe = true; }
+        }
+        const re = isRe ? new RegExp(reBody, reFlags) : null;
+        const to = _to(a) === 15000 ? 30000 : _to(a);
+        const t0 = Date.now();
+        let matched = false;
+        while (Date.now() - t0 < to) {
+          const u = page.url();
+          // R98 修复（P2）：命中曾用 return 直接退出整条动作链——后续步骤
+          // 全部静默丢弃（epub 的 submit→wait→click 模式断在半路）。改 break
+          if (re ? re.test(u) : String(u).includes(pat)) { matched = true; break; }
+          await sleep(300);
+        }
+        if (!matched)
+          throw new Error(`等待 URL 匹配 ${pat} 超时（${to}ms，当前 ${page.url()}）`);
       } else if (t === "click") {
         const loc = a.index != null ? page.locator(a.selector).nth(parseInt(a.index, 10)) : page.locator(a.selector).first();
         await loc.click({ timeout: parseInt(a.timeout || 15000, 10) });
         await sleep(parseInt(a.ms || 300, 10));
       } else if (t === "type" || t === "write" || t === "fill") {
         const loc = a.index != null ? page.locator(a.selector).nth(parseInt(a.index, 10)) : page.locator(a.selector).first();
-        await loc.fill(a.text || "", { timeout: parseInt(a.timeout || 15000, 10) });
+        await loc.fill(a.value != null ? a.value : (a.text != null ? a.text : ""), { timeout: parseInt(a.timeout || 15000, 10) });
+      } else if (t === "type_real" || t === "fill_real") {
+        // 商标网战训（2026-09）：Angular/React 组件 fill() 合成事件不触发
+        // （自动补全下拉不展开、model 不更新）。降级第 2 阶：真实键盘事件——
+        // 先点击聚焦再逐键输入（每键触发完整 keydown/keypress/input/keyup）
+        const loc = a.index != null ? page.locator(a.selector).nth(parseInt(a.index, 10)) : page.locator(a.selector).first();
+        await loc.click({ timeout: parseInt(a.timeout || 15000, 10) });
+        await loc.fill("", { timeout: 5000 }).catch(() => {});  // 清已有值（失败容忍）
+        const val = String(a.value != null ? a.value : (a.text != null ? a.text : ""));
+        if (typeof loc.pressSequentially === "function") {
+          await loc.pressSequentially(val, { delay: parseInt(a.delay_ms || a.ms || 80, 10), timeout: parseInt(a.timeout || 20000, 10) });
+        } else {
+          await page.keyboard.type(val, { delay: parseInt(a.delay_ms || a.ms || 80, 10) });
+        }
+        await sleep(parseInt(a.ms || 300, 10));
       } else if (t === "press") {
         await page.keyboard.press(a.key || "Enter");
         await sleep(parseInt(a.ms || 200, 10));
       } else if (t === "select") {
-        const loc = a.index != null ? page.locator(a.selector).nth(parseInt(a.index, 10)) : page.locator(a.selector).first();
-        await loc.selectOption(a.value != null ? a.value : (a.label != null ? { label: a.label } : { index: parseInt(a.index || 0, 10) }));
+        // OCR R131（M）：a.value/a.label/a.index 全缺时曾静默选 index 0（第一项）——
+        // 三者全空说明配置错误，跳过该步骤并告警比瞎选安全
+        if (a.value == null && a.label == null && a.index == null) {
+          console.error(`[browser_common] select 步骤缺少 value/label/index，跳过: ${a.selector || "?"}`);
+        } else {
+          const loc = a.index != null ? page.locator(a.selector).nth(parseInt(a.index, 10)) : page.locator(a.selector).first();
+          await loc.selectOption(a.value != null ? a.value : (a.label != null ? { label: a.label } : { index: parseInt(a.index, 10) }));
+        }
       } else if (t === "scroll") {
         if (a.direction === "up") await page.evaluate((d) => window.scrollBy(0, -d), a.amount || 600);
         else if (a.direction === "down") await page.evaluate((d) => window.scrollBy(0, d), a.amount || 600);
@@ -56,12 +235,27 @@ async function runActions(page, actions) {
         await page.evaluate(() => window.dispatchEvent(new Event("scroll"))).catch(() => {});
         await sleep(parseInt(a.ms || 800, 10));
       } else if (t === "exec" || t === "js" || t === "execute_javascript") {
-        await page.evaluate(a.js || a.code || "");
+        try {
+          await page.evaluate(a.js || a.code || "");
+        } catch (e) {
+          // epub 战训：js 触发 form.submit()/location 跳转时 evaluate 必炸
+          // （执行上下文随导航销毁）——这不是脚本错误，等导航完成即可
+          const msg = String((e && e.message) || e);
+          if (/Execution context was destroyed|navigator is not defined|Target closed/i.test(msg)) {
+            await sleep(parseInt(a.ms || 800, 10));
+          } else {
+            throw e;
+          }
+        }
         await sleep(parseInt(a.ms || 300, 10));
       } else if (t === "screenshot") {
         await page.screenshot({ path: a.path || "/tmp/us_screenshot.png", fullPage: !!a.fullPage });
       } else if (t && t !== "noop") {
         throw new Error(`未知动作类型: ${a.type}`);
+      }
+      // R2（P2-4）：所有动作尾部统一尊重 wait_ms（此前仅部分动作读 ms）
+      if (t !== "wait" && t !== "wait_time" && a.wait_ms) {
+        await _postWait();
       }
     } catch (e) {
       if (!a.optional) throw new Error(`动作[${i}] ${t} 失败: ${(e && e.message) || e}`);
@@ -170,7 +364,35 @@ async function dismissOverlays(page) {
   } catch (e) { /* 静默 */ }
 }
 
-module.exports = { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy, waitCloudflare };
+/** 资源拦截（对标 Crawlee blockRequests）：默认阻断 font/media（零功能风险，
+ * 文本/DOM 采集不受影响；字体图标变方块不影响字段抽取），image 默认保留——
+ * 本插件有图片采集用例（xhs 图片直链等）。
+ * 环境变量：US_BLOCK_IMAGES=1 追加阻断图片（纯文本任务提速 2-5 倍）；
+ *          US_BLOCK_EXTRA="websocket,other" 追加任意 resourceType。
+ * 失败静默（route 注册失败不阻塞主流程）；abort/continue 均 catch（页面关闭竞态）。 */
+async function applyResourceBlocking(context, opts = {}) {
+  const env = (k) => process.env[k];
+  const types = new Set(["font", "media"]);
+  if (opts.blockImages === true || (opts.blockImages === undefined && env("US_BLOCK_IMAGES") === "1")) {
+    types.add("image");
+  }
+  if (typeof env("US_BLOCK_EXTRA") === "string" && env("US_BLOCK_EXTRA").trim()) {
+    for (const t of env("US_BLOCK_EXTRA").split(",")) {
+      if (t.trim()) types.add(t.trim());
+    }
+  }
+  if (!types.size) return;
+  try {
+    await context.route("**/*", (route) => {
+      let rt = null;
+      try { rt = route.request().resourceType(); } catch (e) { rt = null; }
+      if (rt && types.has(rt)) return route.abort("blockedbyclient").catch(() => {});
+      return route.continue().catch(() => {});
+    });
+  } catch (e) { /* 静默：老版本内核不支持 route 时退化为无拦截 */ }
+}
+
+module.exports = { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy, waitCloudflare, applyResourceBlocking };
 
 /** 解析代理串（http://user:pass@host:port / socks5://host:port / host:port）为 Playwright proxy 配置 */
 function parseProxy(proxy) {

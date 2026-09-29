@@ -19,6 +19,34 @@ from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------- 数据对象
 
+def _stable(obj: Any, _depth: int = 0) -> Any:
+    """递归归一键值：set/frozenset 排序、dict 按键排序、深嵌套截断。
+
+    收官九轮（审查）：`str(set)` 的顺序随 PYTHONHASHSEED 每进程变化（实测三次
+    运行三个不同键）——跨进程 resume 时旧键永不命中，已抓页被重复抓取。"""
+    if _depth > 10:                      # 循环引用/超深结构：截断为 repr，停止递归
+        return repr(obj)
+    if isinstance(obj, dict):
+        return {str(k): _stable(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (set, frozenset)):
+        return sorted((_stable(v, _depth + 1) for v in obj), key=repr)
+    if isinstance(obj, (list, tuple)):
+        return [_stable(v, _depth + 1) for v in obj]
+    return obj
+
+
+def _key_extra(params: Any) -> str:
+    """params 的键后缀（排序序列化）。独立成函数：queue.mark_seen 与 Request.key
+    必须共用同一实现，否则 resume 注入键与新请求键口径漂移（审查二轮 H）。"""
+    if not params:
+        return ""
+    try:
+        import json as _json
+        return "|" + _json.dumps(_stable(params), sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return "|" + str(_stable(params))
+
+
 @dataclass
 class Request:
     url: str
@@ -31,11 +59,14 @@ class Request:
 
     def key(self) -> str:
         # 分页请求（meta.params）与普通请求区分，避免同 URL 下一页被去重
-        extra = ""
-        if self.meta.get("params"):
-            import json as _json
-            extra = "|" + _json.dumps(self.meta["params"], sort_keys=True, ensure_ascii=False)
-        return f"{self.method}|{self.url}{extra}"
+        extra = _key_extra(self.meta.get("params"))
+        # OCR R131 二轮（H）：body 曾不参与键——POST 同 URL 不同体（翻页体/
+        # 查询体）被误判重复直接丢弃（数据丢失级）。排序保证同体不同序同键
+        if self.body:
+            extra += _key_extra(self.body)
+        # 审查五轮（LOW）：method 统一大写——mark_seen 侧已 .upper()，此处不同
+        # 大写会让小写 method 的 resume 注入键永不命中（两端必须真正同构）
+        return f"{self.method.upper()}|{self.url}{extra}"
 
 
 @dataclass
@@ -46,6 +77,10 @@ class Response:
     text: str = ""
     json: Any = None
     url: str = ""
+    # 收官十五轮（core 深审 H2）：响应是否被 max_size 截断。客户端层截断后
+    # 调用方必须能看见（此前 fetcher 只比 len(body) > max_size——客户端已截，
+    # 判据恒假、半截 JSON 被当完整数据）
+    truncated: bool = False
 
 
 @dataclass
@@ -169,3 +204,18 @@ class RateLimitedError(RuntimeError):
         if detail:
             _msg += f" | {detail}"
         super().__init__(_msg)
+
+
+class BlockDetectedError(RuntimeError):
+    """判定已被站点封禁/风控拦截（200 状态伪装的封禁页也算）。
+
+    裁判文书网战训（2026-09 DeepSeek 考核）：93 字符封禁页被判成
+    "页面太短→已下架"，继续抓了 1.3 万条全是封禁提示页。此类命中必须
+    硬停机——宁可不写，也不能把封禁页写进数据。与 RateLimitedError
+    （限流可冷却重试）语义不同：本异常 = 立即停止采集并落证据。"""
+
+    def __init__(self, url: str = "", kind: str = "", detail: str = ""):
+        self.url = url
+        self.kind = kind or "blocked"
+        self.detail = detail
+        super().__init__(f"检测到封禁/风控拦截[{self.kind}]: {url} | {detail}")

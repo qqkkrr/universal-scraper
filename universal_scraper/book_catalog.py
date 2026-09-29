@@ -89,8 +89,10 @@ def _find_info(doc: Any, label: str) -> str:
         text = clean_text(sp.text_content())
         if "pl" not in classes.split() and re.search(re.escape(label) + r"\s*[:：]", text):
             return clean_text(text.split(label, 1)[-1].lstrip(":： "))
+    # 收官十二轮（审查 L）：label 曾用无边界子串匹配——"出品出版社:" 会顶替
+    # "出版社:"（先出现者胜）。pl 标签文本即字段名，要求 label 锚定在开头
     for sp in doc.cssselect("#info span.pl"):
-        if label in clean_text(sp.text_content()):
+        if re.match(re.escape(label) + r"\s*[:：]", clean_text(sp.text_content())):
             parts = [sp.tail or ""]
             node = sp.getnext()
             while node is not None:
@@ -102,9 +104,13 @@ def _find_info(doc: Any, label: str) -> str:
                 parts.append(node.tail or "")
                 node = node.getnext()
             return clean_text(" ".join(parts))
-    info = _text(doc.cssselect("#info")[0]) if doc.cssselect("#info") else ""
-    for lab in (label, label + ":", label + "："):
-        m = re.search(re.escape(lab) + r"[:：]?\s*([^\n]+)", info)
+    # 收官十二轮（审查 M）：第三分支曾在 clean_text（已折叠换行）上用 [^\n]+
+    # 取值——永远吃到段尾，出版年/页数/定价/装帧互相污染。改为在原始文本上
+    # 逐物理行匹配（#info 无 span.pl 的页面变体是本分支唯一场景）
+    _info_el = doc.cssselect("#info")
+    _info_raw = _info_el[0].text_content() if _info_el else ""
+    for _line in _info_raw.splitlines():
+        m = re.search(re.escape(label) + r"\s*[:：]\s*(.+)", _line)
         if m:
             return clean_text(m.group(1))
     return ""
@@ -302,10 +308,18 @@ def parse_douban_book_buylinks(html: str, url: str = "") -> List[Dict[str, Any]]
         price = (q.get("price") or [""])[0]
         embedded = (q.get("url") or [""])[0]
         fields = BUYLINK_VENDOR_FIELDS.get(vendor)
-        if fields and (not row[fields[0]] or not row[fields[1]]):
-            row[fields[0]] = _cents_to_yuan(price)
-            row[fields[1]] = embedded
-            row[fields[2]] = href
+        # 收官十二轮（审查，实测）：命中"补缺"条件后曾整组覆写 3 字段——第二个
+        # 无价链接会把首个链接已抓到的价格清空（jd_price 4500 → ""），且
+        # 状态被误翻成 NO_VENDOR（诊断谎称"未列出商家"，实际有）。逐字段按
+        # "当前为空才填"补齐
+        if fields:
+            _changed = False
+            for f, v in zip(fields, (_cents_to_yuan(price), embedded, href)):
+                if not row[f] and v:
+                    row[f] = v
+                    _changed = True
+            if not _changed:
+                pass  # 该商家三字段已齐，无需处理
         elif vendor not in BUYLINK_VENDOR_FIELDS and vendor:
             others.append(vendor)
     row["other_vendors"] = "/".join(dict.fromkeys(others))
@@ -327,28 +341,46 @@ def parse_dangdang_search(html: str, url: str = "") -> List[Dict[str, Any]]:
     # 优先含 ISBN 的卡片；搜索页不显示 ISBN 时回退首个商品
     q = parse_qs(urlparse(url or "").query)
     isbn = norm_isbn((q.get("key") or [""])[0])
-    exact = [c for c in cards if isbn and isbn in clean_text(c.text_content())]
-    for card in (exact or cards):
+    # ISBN 须为独立数字串（两侧非数字）——裸子串会命中更长数字串（价格/数量拼接）误选卡片
+    exact = [c for c in cards
+             if isbn and re.search(r"(?<!\d)" + re.escape(isbn) + r"(?!\d)",
+                                   clean_text(c.text_content()))]
+    use_card = exact[0] if exact else (cards[0] if cards else None)
+    # 收官十二轮（审查，实测）：页面有卡但无一含该 ISBN = 当当返回**模糊匹配**
+    # （多为无关商品）——旧逻辑 `for card in (exact or cards)` 直接取首卡记
+    # OK 状态，把别家的价格/链接静默写到本书且零诊断。模糊命中不写价格，
+    # 状态记 UNMATCHED 留诊断
+    _unmatched = use_card is not None and not exact
+    if use_card is not None:
+        card = use_card
         links = card.cssselect("a[href*='product.dangdang.com'], a[href*='product.dangdang.com.cn']")
         if not links:
             links = card.cssselect("a[href]")
         if not links:
-            continue
+            return [{
+                "dangdang_title": "", "dangdang_price": "", "dangdang_list_price": "",
+                "dangdang_link": "", "dangdang_seller": "",
+                "dangdang_status": "NO_RESULT",
+            }]
         href = links[0].get("href") or ""
         href = _abs_url(href, "https://product.dangdang.com/")
         title = _first_attr(card, "h6.title, .name, a[title]", "title") or \
             _first_text(card, "h6.title, .name, a[title]")
         text = clean_text(card.text_content())
-        price_m = re.search(r"¥\s*(\d+(?:\.\d+)?)", text)
+        # 收官十二轮（审查 L）：售价优先取 span.price_n（标准 DOM 的售价节点），
+        # 首个 ¥ 兜底——定价/电子价排在售价前时曾把定价当售价
+        price_n = _first_text(card, "span.price_n")
+        price_m = (re.search(r"¥?\s*(\d+(?:\.\d+)?)", price_n) if price_n
+                   else None) or re.search(r"¥\s*(\d+(?:\.\d+)?)", text)
         list_m = re.search(r"定价[：:]?\s*¥\s*(\d+(?:\.\d+)?)", text)
-        sellers = card.cssselect("a[href*='shop.dangdang.com']")
         return [{
             "dangdang_title": title,
-            "dangdang_price": price_m.group(1) if price_m else "",
+            "dangdang_price": "" if _unmatched else (price_m.group(1) if price_m else ""),
             "dangdang_list_price": list_m.group(1) if list_m else "",
             "dangdang_link": href,
-            "dangdang_seller": _text(sellers[0]) if sellers else "",
-            "dangdang_status": "OK",
+            "dangdang_seller": _text(card.cssselect("a[href*='shop.dangdang.com']")[0])
+                               if card.cssselect("a[href*='shop.dangdang.com']") else "",
+            "dangdang_status": "UNMATCHED" if _unmatched else "OK",
         }]
     return [{
         "dangdang_title": "",
@@ -377,8 +409,7 @@ _IMAGE_MAGIC = (
     (b"\x89PNG\r\n\x1a\n", "png"),
     (b"GIF87a", "gif"),
     (b"GIF89a", "gif"),
-    (b"RIFF", "webp"),
-)
+)  # webp 走下方 RIFF????WEBP 双重校验（OCR R131：裸 RIFF 误纳 wav/avi）
 
 
 def _looks_like_image(path: Path) -> bool:
@@ -386,19 +417,44 @@ def _looks_like_image(path: Path) -> bool:
         head = path.read_bytes()[:16]
     except Exception:
         return False
-    return any(head.startswith(magic) for magic, _name in _IMAGE_MAGIC)
+    return any(head.startswith(magic) for magic, _name in _IMAGE_MAGIC) or (
+        # OCR R131（M）：裸 RIFF 前缀匹配一切 RIFF 容器（wav/avi 也命中）——
+        # webp 必须 RIFF????WEBP 双重校验
+        head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    )
 
 
 def _default_download_cover(url: str, path: Path) -> bool:
     if path.exists() and path.stat().st_size > 100 and _looks_like_image(path):
         return True
+    # OCR R131（H）：封面 URL 来自抓取页面——file:// 等协议经 curl 可读本地文件
+    # 并落进封面目录。仅放行 http/https（与全局 SSRF 口径一致）
+    from urllib.parse import urlsplit as _us
+    if _us(url or "").scheme not in ("http", "https"):
+        return False
+    # OCR R7（M）：curl 超时/--max-filesize 中断曾把半截文件直接写在 path 上——
+    # 魔数在前 16 字节，截断 JPEG 照样通过下轮缓存检查且永不重下。改写临时文件，
+    # 完整下载才原子替换，失败即清理
+    import os as _os
+    tmp = path.with_name(f"{path.name}.{_os.getpid()}.tmp")
     p = subprocess.run(
         ["curl", "-sS", "-L", "-A", "Mozilla/5.0", "-e", "https://book.douban.com/",
-         "--max-time", "30", "-o", str(path), url],
+         # 审查二轮（H）：-L 跟随曾不限协议（http→file/ftp 可读写本地）；
+         # --max-filesize 防异常大响应撑爆磁盘
+         "--proto", "=http,https", "--max-filesize", "52428800",
+         "--max-time", "30", "-o", str(tmp), url],
         capture_output=True, text=True,
     )
-    return (p.returncode == 0 and path.exists() and path.stat().st_size > 100
-            and _looks_like_image(path))
+    ok = (p.returncode == 0 and tmp.exists() and tmp.stat().st_size > 100
+          and _looks_like_image(tmp))
+    if ok:
+        _os.replace(tmp, path)
+        return True
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+    return False
 
 
 def _search_candidate(items: List[Dict[str, Any]], isbn: str, title: str) -> Optional[Dict[str, Any]]:
@@ -617,7 +673,15 @@ def _merge_book_row(book: Dict[str, Any], isbn: str, sources: Dict[str, Any], ro
 
     problem_codes = {"NO_RESULT", "NO_VENDOR", "LOGIN_WALL", "FETCH_ERROR",
                      "NO_DATA", "RATE_LIMITED", "MISMATCH", "COVER_DOWNLOAD_FAILED"}
-    has_problem = any(diag["code"] in problem_codes for diag in diag_entries)
+    # 审查八轮（MEDIUM）：JD 的 LOGIN_WALL 是**设计内**结果（本工具不抓京东登录墙，
+    # 只用豆瓣公开聚合数据；模块自述"电商价格/封面是可选数据源，允许 N/A"）。把它
+    # 计入 problem_codes 会让每本数据齐全的书都恒判 PARTIAL（质量信号失去区分度，
+    # webui 报"N 本未全字段成功（LOGIN_WALL×N）"误导用户）。只豁免这一组合，
+    # JD 的其它问题码（限流/抓取失败）照旧计入。
+    has_problem = any(
+        diag["code"] in problem_codes
+        and not (diag.get("source") == "JD" and diag["code"] == "LOGIN_WALL")
+        for diag in diag_entries)
     if has_bibliographic_data and has_retail_data and not has_problem:
         status = "OK"
     elif has_bibliographic_data or has_retail_data:
@@ -729,7 +793,28 @@ def build_catalog(
             cover_path = cover_dir / f"{isbn}.jpg"
             try:
                 if cover_dl(cover_url, cover_path):
-                    row["cover_file"] = f"covers/{isbn}.jpg"
+                    # 收官十二轮（审查 L）：下载成功后按魔数改扩展名——
+                    # png/webp 内容挂 .jpg 时下游按扩展名处理会错
+                    _head = b""
+                    try:
+                        _head = cover_path.read_bytes()[:4]
+                    except OSError:
+                        pass
+                    _ext = {b"\x89PNG": ".png", b"GIF8": ".gif",
+                            b"RIFF": ".webp"}.get(_head, ".jpg")
+                    if _head == b"RIFF":
+                        try:
+                            _head12 = cover_path.read_bytes()[8:12]
+                            if _head12 != b"WEBP":
+                                _ext = ".jpg"
+                        except OSError:
+                            pass
+                    if _ext != ".jpg":
+                        try:
+                            cover_path.rename(cover_dir / f"{isbn}{_ext}")
+                        except OSError:
+                            _ext = ".jpg"
+                    row["cover_file"] = f"covers/{isbn}{_ext}"
                 else:
                     row["diagnostic_fields"].append({
                         "source": "COVER", "code": "COVER_DOWNLOAD_FAILED", "field": "cover_file",
@@ -817,11 +902,16 @@ def _write_outputs(
         "| 序号 | 书名 | 出版社 | 出版年 | 评分 | 评价人数 | 京东价 | 当当价 | 状态 |",
         "| ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
+
+    def _cell(v) -> str:
+        # OCR R131（M）：书名/出版社含 "|" 或换行时曾撕裂 Markdown 表格结构
+        return str(v).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
     for r in rows:
         md_lines.append(
-            f"| {r['no']} | {r['book_title']} | {r['publisher']} | {r['publish_year']} | "
-            f"{r['douban_rating']} | {r['douban_rating_count']} | {r['jd_price']} | "
-            f"{r['dangdang_price']} | {r['status']} |"
+            f"| {_cell(r['no'])} | {_cell(r['book_title'])} | {_cell(r['publisher'])} | {_cell(r['publish_year'])} | "
+            f"{_cell(r['douban_rating'])} | {_cell(r['douban_rating_count'])} | {_cell(r['jd_price'])} | "
+            f"{_cell(r['dangdang_price'])} | {_cell(r['status'])} |"
         )
     md_lines += [
         "",
@@ -847,7 +937,9 @@ def _write_outputs(
         "| --- | --- | --- |",
     ]
     for r in rows:
-        log_lines.append(f"| {r['isbn']} | {r['status']} | {r['diagnostics']} |")
+        # OCR R131（M）：诊断文本里的 | 破坏 Markdown 表格列对齐——转义
+        _diag = str(r.get("diagnostics", "")).replace("|", "\\|")
+        log_lines.append(f"| {r['isbn']} | {r['status']} | {_diag} |")
     log_lines += [
         "",
         "## 字段级诊断",

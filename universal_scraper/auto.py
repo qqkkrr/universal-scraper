@@ -213,8 +213,12 @@ def _extract_json(raw: str) -> dict:
 
 def _llm_chat(messages: List[Dict[str, str]], timeout: int = 120) -> str:
     """LLM 调用带硬超时 + 空响应重试（模型偶尔返回空/纯空白，提高温度再补一次）。"""
-    from .llm import LLMClient
+    from .llm import LLMClient, _get_key
     import time as _t
+
+    # R95 修复（P2）：无 Key 曾仍发起 6 次空 Bearer 请求并把 401 误报成网络波动
+    if not _get_key():
+        raise RuntimeError("未配置 API Key——AI 功能需要先配置（webui 设置页或 `llm --key <key>`）")
 
     def _call(temp: float) -> str:
         box: Dict[str, Any] = {}
@@ -287,7 +291,10 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         if not r.get("parser") or r.get("parser") not in cfg.get("parsers", {}):
             r["parser"] = "default"
     # 分页/列表 allow 自动锚定：非锚定的 page 类正则改为 ^/...$（按路径匹配），
-    # 避免 /page/\\d+/ 把 /tag/xxx/page/1/ 这类同构 URL 全部入队导致队列爆炸
+    # 避免 /page/\\d+/ 把 /tag/xxx/page/1/ 这类同构 URL 全部入队导致队列爆炸。
+    # 收官十二轮（审查，实测）：**query 型** allow（如 page=\\d+，触发条件里的 `p=`
+    # 正说明预期它存在）一律不加 ^/ 锚——引擎按"path+query"做 re.search，
+    # `^/page=\d+` 对 /list?page=2 永不命中 → 翻页链接被滤光、任务只抓第 1 页报成功
     for pcfg in cfg.get("parsers", {}).values():
         if not isinstance(pcfg, dict):
             continue
@@ -296,13 +303,15 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         if isinstance(allow, str) and re.search(r"(page|p=)", allow, re.I) \
                 and re.search(r"\\d|\[0-9\]", allow):
             allow = allow.strip()
-            if not allow.startswith("^"):
+            _is_queryish = allow.startswith(("page=", "p=", "[?&]")) or \
+                re.match(r"^[^/\\^]*=", allow)          # 含 = 且不以 / 开头 → query 型
+            if not _is_queryish and not allow.startswith("^"):
                 # 非锚定 → 锚定为路径模式（^/...），防止 /tag/xxx/page/1/ 同构 URL 入队
                 if allow.startswith("/"):
                     lk["allow"] = f"^{allow.rstrip('/')}/?$"
                 else:
                     lk["allow"] = f"^/{allow.lstrip('/')}"
-            elif not allow.startswith(("^/", "^http", "^https", r"^\w+://")):
+            elif not _is_queryish and not allow.startswith(("^/", "^http", "^https", r"^\w+://")):
                 # 已锚定但缺路径开头 /（如 ^catalogue/page-\\d+.html$ → ^/catalogue/...）
                 lk["allow"] = "^/" + allow[1:]
             pcfg["extract_links"] = lk
@@ -329,7 +338,12 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
             elif rp.startswith("$."):
                 pcfg["records_path"] = rp[2:]
             elif rp.startswith("$["):
-                pcfg["records_path"] = ""
+                # 收官十二轮（审查）：`$[0].data` 型 JSONPath 曾被规范化为空串
+                # （路径信息丢失，引擎按顶层数组找记录 → 0 条空转）。映射为
+                # 引擎的 `0.data` 点分形态
+                _m = re.match(r"^\$\[(\d+)\](?:\.(.+))?$", rp)
+                pcfg["records_path"] = (f"{_m.group(1)}.{_m.group(2)}" if _m and _m.group(2)
+                                        else (_m.group(1) if _m else ""))
     # start_urls 过滤非 http(s)
     cfg["start_urls"] = [u for u in cfg.get("start_urls", []) if str(u).startswith(("http://", "https://"))]
     if not cfg["start_urls"]:
@@ -404,6 +418,16 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     for _ex in (_det.get("extract") or []):
         if isinstance(_ex, dict) and _ex.get("name"):
             _known.add(_ex["name"])
+    # 收官十二轮（审查，实测）：parse_date 的 out 产物（省略时默认 timestamp）是
+    # 合法的下游过滤字段——引擎 modules/pipelines.py 支持任意 out 名。原白名单不认
+    # 它们，导致 `parse_date(out=pub_ts) → filter(pub_ts, between)` 链条里的日期
+    # 过滤被**静默删除**，"只抓今天"的配置实际导出全部日期数据并报成功
+    for _pl in (cfg.get("pipelines") or []):
+        if isinstance(_pl, dict) and _pl.get("type") == "parse_date":
+            _known.add(str(_pl.get("out") or "timestamp"))
+    for _pl in (_det.get("filters") or []):
+        if isinstance(_pl, dict) and _pl.get("type") == "parse_date":
+            _known.add(str(_pl.get("out") or "timestamp"))
     _kept_pl = []
     for _pl in (cfg.get("pipelines") or []):
         if not isinstance(_pl, dict):
@@ -540,6 +564,10 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
                        "success_selector": "body"},
         }
         _src = cfg["source"]
+        # R31 修复：刷新类型标记——xiaohongshu/api.zhihu 同时在 _spa 名单里，
+        # _st 不刷新会让下面的 SPA 分支把刚建好的 browser+login 配置整个覆盖掉
+        # （headless 无登录态撞登录墙，且 verify 标记丢失导致确定性升级也不触发）
+        _st = "browser"
     # SPA/JS 单页应用入口：AI 常把这类配成 http 直抓（拿到的是空壳 HTML，0 条）。
     # 识别常见 SPA 入口 → 强制浏览器渲染
     _spa = any(k in _su0 for k in ("/problem-list/", "leetcode.cn", "/explore/", "xiaohongshu.com/explore",
@@ -562,7 +590,13 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     if (any(_host.endswith(d) for d in _http_ok_domains) \
             or ("/api/" in _su0 and not _is_login_host)
             or ("leetcode.cn" in _host and "/api/" in _su0)) and not _is_login_host:
-        cfg["source"] = {"type": "http"}
+        # 收官十二轮（审查，实测）：复用/已学路径会再次走进 _validate_and_fix——
+        # 整包替换曾把 source.headers 里的 Cookie/自定义 UA 静默抹掉，
+        # 带登录态的 API 任务复用时变成未授权请求空转。只规范化 type，保留其余
+        if not isinstance(cfg.get("source"), dict):
+            cfg["source"] = {"type": "http"}
+        else:
+            cfg["source"]["type"] = "http"
     # 强制 JSON 精配站点用 http + 不弹登录
     cfg.setdefault("anti_bot", {})
 
@@ -673,6 +707,16 @@ def _probe_summary(url: str, max_chars: int = 2500) -> str:
         data = {}
     summary = ""
     timeout = int(_os.environ.get("US_PROBE_TIMEOUT", "8"))
+    # 审查八轮（HIGH）：探测走裸 urllib（结构摘要 + 直连回退），此前不经过任何
+    # 出站守卫——auto/agent 流程的 URL 可被指向内网。与 core.assert_public_url 同口径
+    # （US_ALLOW_PRIVATE=1 放行内网场景）。
+    try:
+        from .core import assert_public_url as _apu_p
+        _apu_p(url, context="auto 页面探测")
+    except Exception as _e:
+        from .core import log as _lg
+        _lg(f"  ⛔ {_e}", "WARN")
+        return ""
     try:
         from .structure import build_structure_summary
         summary = build_structure_summary(url) or ""
@@ -690,7 +734,11 @@ def _probe_summary(url: str, max_chars: int = 2500) -> str:
             summary = md
             if links:
                 summary += "\n\n页面链接：\n" + "\n".join(links)
-            _cst = _class_stats_text(raw.decode("utf-8", "ignore"))
+            _cst = _class_stats_text(raw)   # 审查八轮（MEDIUM）：raw 已是 str，
+                                            # 再 .decode() 抛 AttributeError 被外层
+                                            # except 吞掉 → 整段探测摘要（markdown+
+                                            # 链接+类名统计）白拼一场，页面结构对
+                                            # _build_config/自修复提示恒为空。
             if _cst:
                 summary += _cst
         except Exception:
@@ -888,13 +936,25 @@ def _try_precise_first(description: str, cfg: dict, limit, log, out_name: str = 
         box: Dict[str, Any] = {}
 
         # 迟到的精配线程与通用引擎写同名导出会互相覆盖：用"可变 out_name 容器 +
-        # 超时到点改名"让线程在写盘时（run_site 结尾）拿到隔离名
+        # 超时到点改名"让线程在写盘时（run_site 结尾）拿到隔离名。
+        # 收官十二轮（审查，实测）：曾直接传 `_out_box["name"]`——实参在调用瞬间
+        # 求值，超时后再改容器对已在跑的线程无效，日志承诺的隔离名不成立。
+        # run_site 对 name 只做 f-string 插值（无方法调用），传懒对象即可在
+        # **写盘时刻**重新读取容器
+        class _LazyOutName:
+            def __init__(self, b: Dict[str, Any]):
+                self._b = b
+
+            def __str__(self) -> str:
+                return str(self._b.get("name"))
+
         _out_box = {"name": out_name or None}
 
         def _run():
             try:
                 box["r"] = run_site(su, cookie=_ch, proxy=_px or None,
-                                    limit=int(limit or 20), out_name=_out_box["name"])
+                                    limit=int(limit or 20),
+                                    out_name=_LazyOutName(_out_box))
             except Exception as e:
                 box["e"] = e
 
@@ -1035,7 +1095,10 @@ def _missing_key_field(description: str, sample: list) -> str:
             _y, _n = m.group(1), m.group(2)
             hay = " ".join(str(v) for it in sample for k, v in it.items() if not str(k).startswith("_"))
             # 兼容常见期号写法：2026年第1期 / 2026年,第1期 / 2026年1月 / 2026.43(1)（ajcass）
-            if not re.search(rf"{_y}年(?:,)?第{_n}期|{_y}年{_n}月|{_y}\.\d+\s*\(\s*{_n}\s*\)", hay):
+            # 收官十二轮（审查，实测）：真实抓取数据几乎总是 ISO 日期（2026-09-15）——
+            # 旧匹配只认中文形态，正确结果被判"缺字段"触发无意义自修复/否决
+            if not re.search(rf"{_y}年(?:,)?第{_n}期|{_y}年{_n}月|{_y}\.\d+\s*\(\s*{_n}\s*\)"
+                             rf"|{_y}-{int(_n):0>2}(?!\d)|{_y}-{_n}(?!\d)", hay):
                 missing.append(f"{_y}年第{_n}期")
     return "、".join(missing)
 
@@ -1439,9 +1502,12 @@ def _fix_dead_domains(cfg: dict, description: str = "", log=None) -> dict:
 
         scored.sort(key=lambda x: (-x[0], _path_pref(x[1]), len(x[1])))
         candidates = [u for _, u in scored[:1]]
-        with _DNS_FIX_LOCK:
-            _DNS_FIX_CACHE[cache_key] = candidates
-            _dns_cache_save()
+        # 收官十二轮（审查）：搜索空结果曾作为结论缓存（无 TTL 落盘）——
+        # 首次搜索遇网络抖动后，同描述的官方域名救援永久停用。空结果不写缓存
+        if candidates:
+            with _DNS_FIX_LOCK:
+                _DNS_FIX_CACHE[cache_key] = candidates
+                _dns_cache_save()
     if candidates:
         cfg["start_urls"] = candidates
         if log:
@@ -1475,6 +1541,18 @@ def _force_browser_waf(cfg: dict) -> dict:
     for k in ("headers", "cdp", "record_from", "capture_all"):
         if old.get(k):
             src[k] = old[k]
+    # 收官十二轮（审查，实测）：http→browser 升级曾整包替换 source，丢掉
+    # query（筛选/分页参数）与 actions——浏览器打开无参数裸入口，抓的是"另一页"
+    # 数据且无任何提示。query 是 fetchers 的一等参数（http 模式合并进请求），
+    # 升级时拼进各入口 URL 的查询串
+    _q = old.get("query") or {}
+    if _q:
+        from urllib.parse import urlencode as _ue
+        _qs = _ue(_q)
+        cfg["start_urls"] = [u + ("&" if "?" in u else "?") + _qs
+                             for u in (cfg.get("start_urls") or [])]
+    if old.get("actions"):
+        src["actions"] = old["actions"]
     if (old.get("login") or {}).get("enabled"):
         src["login"] = old["login"]
     cfg["source"] = src
@@ -1668,8 +1746,11 @@ def describe_route(cfg: dict, description: str = "") -> Dict[str, str]:
         if pl.get("type") == "filter" and pl.get("op") == "between":
             import datetime
             try:
-                t0 = datetime.datetime.fromtimestamp(int(pl["min"])).strftime("%Y-%m-%d")
-                t1 = datetime.datetime.fromtimestamp(int(pl["max"])).strftime("%Y-%m-%d")
+                # 收官十二轮（审查）：配置日期语义是北京时间——用本机时区曾让
+                # 非 CST 机器显示差一天，与注入给 AI 的口径不一致
+                _cst = datetime.timezone(datetime.timedelta(hours=8))
+                t0 = datetime.datetime.fromtimestamp(int(pl["min"]), _cst).strftime("%Y-%m-%d")
+                t1 = datetime.datetime.fromtimestamp(int(pl["max"]), _cst).strftime("%Y-%m-%d")
                 summary_parts.append(f"日期过滤: {t0} ~ {t1}")
             except Exception:
                 pass
@@ -1773,6 +1854,15 @@ def _try_desc_route_fast(description: str, limit, log, proxy="", cookie="") -> d
             return {}
         rows = dr["rows"]
         sample = rows[:5]
+        # R31 修复：快路径此前零质量检查——曾发生"精配抓到商品页冒充目标数据"
+        # 的同类事故在 _try_precise_first/_try_auto_precise 都有门，唯独这里没有。
+        # 关键字段缺失或意图不符 → 回退 AI 流程重新路由
+        _miss = _missing_key_field(description or "", sample)
+        _intent_bad = _intent_check(description or "", sample, log) if not _miss else ""
+        if _miss or _intent_bad:
+            _why = _miss or _intent_bad
+            log(f"⚠️ 精配[{site}]直接跑结果未过质量门（{_why}），回退 AI 流程")
+            return {}
         files = dr.get("files") or {}
         total = len(rows)
         cfg = {"name": name, "start_urls": [seed], "_force_run_site": site}
@@ -1874,15 +1964,23 @@ def _save_learned(cfg: dict, description: str, log=None) -> None:
 
 
 def _try_learned_config(description: str, log=None) -> Optional[Dict[str, Any]]:
-    """任务启动前：从描述里找已知域名 → 命中「已学精配」直接返回配置（跳过 AI 生成）。"""
+    """任务启动前：从描述里找已知域名 → 命中「已学精配」直接返回配置（跳过 AI 生成）。
+
+    收官十二轮（审查，实测）：描述里有**显式 URL** 时，已学配置的旧入口曾原样
+    覆盖用户本次给的 URL——"同站另一板块"的任务全部打到旧入口（选择器恰好能用
+    → 全流程报成功，实际抓的是旧页面）。现按域名保留映射：复用解析器的同时，
+    入口换成本次描述里的 URL。"""
     try:
-        # 1) 描述里显式 URL 的域名
+        # 1) 描述里显式 URL 的域名（顺带记录 URL 本身，复用时替换入口）
         hosts = set()
-        for m in re.finditer("https?://([^/\\s'\"]+)", description):
+        url_by_host: Dict[str, str] = {}
+        for m in re.finditer(r"https?://[^\s'\"]+", description):
             from .cookies import _norm_domain
-            h = _norm_domain(m.group(1))
+            u = m.group(0).rstrip(".,;，。）)；")
+            h = _norm_domain(re.match(r"https?://([^/\s'\"]+)", u).group(1))
             if h:
                 hosts.add(h)
+                url_by_host.setdefault(h, u)
         # 2) 描述关键词匹配已学域名（含 www. 前缀归一）
         if not hosts and LEARNED_DIR.exists():
             _d = description.lower()
@@ -1906,7 +2004,13 @@ def _try_learned_config(description: str, log=None) -> Optional[Dict[str, Any]]:
             cfg = d.get("config") or {}
             if not cfg.get("start_urls"):
                 continue
-            if log:
+            if h in url_by_host:
+                cfg = dict(cfg)
+                cfg["start_urls"] = [url_by_host[h]]
+                if log:
+                    log(f"🧠 命中已学精配[{h}]（复用解析器，入口已换成本次描述的 URL: "
+                        f"{url_by_host[h][:60]}）")
+            elif log:
                 log(f"🧠 命中已学精配[{h}]（跳过 AI 生成，直接复用上次成功配置）")
             return cfg
     except Exception:
@@ -1964,7 +2068,7 @@ def url_variants(url: str, max_n: int = 6) -> list:
     """入口 URL 变体（对标 Crawlee URL normalization）：小白常贴错协议/www/
     尾斜杠，或站点实际是移动版——按序生成可达性候选，预检失败时逐一尝试。
     顺序：原始（去 fragment）→ 剥跟踪参数 → 协议互换 → 加/去 www → m. 移动版。"""
-    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    from urllib.parse import urlsplit, urlunsplit
     try:
         sp = urlsplit(str(url or "").strip())
     except Exception:
@@ -1990,10 +2094,16 @@ def url_variants(url: str, max_n: int = 6) -> list:
     def _u(scheme, netloc, path, query):
         return urlunsplit((scheme, netloc, path or "/", query, ""))
 
-    # 剥 utm_*/fbclid 等跟踪参数（只影响分析统计，不影响资源寻址）
-    q = [(k, v) for k, v in parse_qsl(sp.query, keep_blank_values=True)
-         if not k.lower().startswith(("utm_", "fbclid", "gclid", "ref_"))]
-    qstr = urlencode(q)
+    # 剥 utm_*/fbclid 等跟踪参数（只影响分析统计，不影响资源寻址）。
+    # 收官十二轮（审查，实测）：parse_qsl 默认按 UTF-8 解——GBK 百分号编码（大量
+    # 老站/政企站）被解成 U+FFFD 再编码，base 变体即损坏（%C6%FB%B3%B5"汽车" →
+    # %EF%BF%BD…）。改为在**原始查询串**上按键前缀过滤、原样保留命中的参数
+    # （零解码零重编码，对任何编码都无损）
+    _track = ("utm_", "fbclid", "gclid", "ref_")
+    _qparts = [p for p in sp.query.split("&") if p]
+    _kept_q = [p for p in _qparts
+               if not p.split("=", 1)[0].lower().startswith(_track)]
+    qstr = "&".join(_kept_q)
     base = _u(sp.scheme, host, sp.path or "/", qstr)
     no_track = _u(sp.scheme, host, sp.path.rstrip("/") or "/", qstr) if sp.path not in ("", "/") else base
     alt_scheme = _u("http" if sp.scheme == "https" else "https", host, sp.path or "/", qstr)
@@ -2189,6 +2299,12 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
     _llm_ev_tried = False
     _entry_rescued = False
     _auto_precise_tried = False
+    _auto_precise_rejected = False  # 四轮审查：本轮被否决的精配，末尾不再无门禁覆盖
+    # R31 修复：把循环内的质量门判定带出来——循环耗尽时（每轮都 intent 失败/
+    # 关键字段缺失），循环后不能只看 total>0 就报"✅ 成功"，也不能把被自己
+    # 否决的配置再沉淀进 learned（每轮都否决却每轮都存 = 毒化学习库）
+    _final_intent_bad = ""
+    _final_miss = ""
     for round_i in range(1, _loop_rounds + 1):
         # 写任务包
         (task_dir / "modules").mkdir(parents=True, exist_ok=True)
@@ -2273,14 +2389,20 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         if result.get("total", 0) > 0 and real and not _miss:
             _intent_bad = _intent_check(description, sample, log)
             if not _intent_bad:
+                # R31b 修复：本轮通过质量门 → 清掉之前轮次的失败标志，
+                # 否则循环后误报"⚠️ 部分成功"（陈旧原因）
+                _final_intent_bad = ""
+                _final_miss = ""
                 log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
                 break
+            _final_intent_bad = _intent_bad
             log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
             # 已学配置产生的内容不是用户要的 → 该配置是坏的，立即删掉（防止每轮都复用坏配置空转）
             if _learned:
                 _drop_learned_by_start_url((cfg.get("start_urls") or [""])[0],
                                            reason=f"意图校验失败：{_intent_bad[:50]}", log=log)
         if _miss:
+            _final_miss = _miss
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
@@ -2294,11 +2416,14 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                                     round_timeout=round_timeout)
             if _ap is not None:
                 return _ap
+            _auto_precise_rejected = True  # 四轮审查：本轮否决的精配不让末尾 run_site 再覆盖
 
         # 🛡️ 反爬/验证拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
-        # 覆盖 waf/cloudflare/verify/captcha/anti_bot/rate_limit 等：http 硬刚只会一直 0 条
+        # 覆盖 waf/cloudflare/verify/captcha/anti_bot/rate_limit/session_flagged 等：
+        # http 硬刚只会一直 0 条。R21 修复：session_flagged（盒马系 RGV587/ERRCODE_NOT_LOGIN
+        # 风控标记）此前缺席——淘宝/盒马类任务不升级、空烧 http 重试与 LLM 自修轮
         _blk = (result or {}).get("block_stats") or {}
-        _BLOCK_UPGRADE_KINDS = ("waf", "cloudflare", "verify", "captcha", "anti_bot", "rate_limit")
+        _BLOCK_UPGRADE_KINDS = ("waf", "cloudflare", "verify", "captcha", "anti_bot", "rate_limit", "session_flagged")
         _any_block = any(_blk.get(k) for k in _BLOCK_UPGRADE_KINDS)
         if _any_block and ((cfg.get("source") or {}).get("type") == "http"):
             log("🛡️ 检测到反爬拦截（" + "、".join(f"{k}×{_blk[k]}" for k in _BLOCK_UPGRADE_KINDS if _blk.get(k))
@@ -2320,6 +2445,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                     last_result = dict(last_result or {})
                     last_result["total"] = fb["total"]
                     last_result["llm_extract"] = True
+                    _final_intent_bad = ""   # R31b：抽取出有效内容视为通过质量门
+                    _final_miss = ""
                     log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
                     break
 
@@ -2459,7 +2586,10 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
 
     # 🏆 精配解析器覆盖（高频网站注册表）：检测到命中即用精配解析器，字段干净
     # run 型直达精配已在首轮前跑过（_precise_attempted），末尾只兜底 fetch+parse 型精配
-    if not _precise_done and not _precise_attempted:
+    # 收官四轮（审查 H）：本轮 _try_auto_precise 刚否决过的精配（质量门未过），
+    # 末尾 run_site 无门禁重新采纳会把坏结果覆盖到已导出的好结果之上——
+    # 已有 LLM 兜底/引擎成功结果时不再用精配覆盖
+    if not _precise_done and not _precise_attempted and not _auto_precise_rejected and total <= 0:
         try:
             su = (cfg.get("start_urls") or [""])[0]
             from .sites import match_site, run_site
@@ -2499,6 +2629,24 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         verify = None
 
     if total > 0 and real:
+        # R31 修复：循环内质量门否决过最后结果时，不能报"✅ 成功"、也不能把
+        # 刚被否决的配置沉淀进 learned（毒化学习库）
+        if _final_intent_bad or _final_miss:
+            _why = _final_intent_bad or f"关键字段【{_final_miss}】为空"
+            log(f"⚠️ 部分成功：抓到 {total} 条，但质量门未通过（{_why}）——结果可能不是用户要的内容，建议人工核对或换入口重试")
+            return {
+                "name": name,
+                "config": cfg,
+                "task_dir": str(task_dir),
+                "result": last_result,
+                "log": last_log[-3000:],
+                "sample": sample,
+                "files": files,
+                "summary": f"⚠️ 部分成功：{total} 条，但质量门未通过（{_why}）",
+                "verify": verify,
+                "done": True,
+                "quality_gate_failed": True,
+            }
         # 🧠 自动学习：成功后沉淀为「已学精配」，下次同站直接复用
         # 🧠 质量下降检测：本次用了已学配置但字段完整率显著偏低（网站半改版）→ 删除 learned 重建
         if _learned and verify and verify.get("checks"):
@@ -2578,6 +2726,7 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     _precise = _try_precise_first(description or "", config, limit, log, out_name=name)
     _precise_done = bool(_precise and _precise.get("rows"))
     _precise_attempted = _precise is not None   # run 型已试过：末尾不再重复打站
+    _auto_precise_rejected = False  # 收官十二轮：与 auto_task 同款——本轮被否决的精配，末尾不再无门禁覆盖
     if _precise_done:
         sample = _precise["rows"][:5]
         files = _precise["files"]
@@ -2595,6 +2744,9 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     if os.environ.get("US_BATCH") != "1":
         if (_src0.get("verify") or {}).get("enabled") or (_src0.get("login") or {}).get("enabled"):
             round_timeout = max(round_timeout, 360)
+    # R31 修复：循环内质量门判定带出循环（同 auto_task）——耗尽时不能只看 total>0 报成功
+    _final_intent_bad = ""
+    _final_miss = ""
     for round_i in range(1, _loop_rounds + 1):
         # 每轮按当前配置重算超时（WAF 自动升级浏览器后要等人工滑块，需放宽到 10 分钟）
         _src0 = config.get("source", {}) or {}
@@ -2658,14 +2810,20 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         if result.get("total", 0) > 0 and real and not _miss:
             _intent_bad = _intent_check(description, sample, log)
             if not _intent_bad:
+                # R31b 修复：本轮通过质量门 → 清掉之前轮次的失败标志，
+                # 否则循环后误报"⚠️ 部分成功"（陈旧原因）
+                _final_intent_bad = ""
+                _final_miss = ""
                 log(f"✅ 第 {round_i} 轮成功：{result.get('total')} 条（抽样 {len(real)} 条有真实字段）")
                 break
+            _final_intent_bad = _intent_bad
             log(f"⚠️ 意图校验未通过：{_intent_bad}（抓到的不是用户要的内容，进入自修复换入口）")
             # 已学配置产生的内容不是用户要的 → 该配置是坏的，立即删掉（防止每轮都复用坏配置空转）
             if _learned:
                 _drop_learned_by_start_url((config.get("start_urls") or [""])[0],
                                            reason=f"意图校验失败：{_intent_bad[:50]}", log=log)
         if _miss:
+            _final_miss = _miss
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但用户关键字段【{_miss}】为空，视为失败，进入自修复（需要详情页补抓）...")
         elif result.get("total", 0) > 0 and not real:
             log(f"⚠️ 第 {round_i} 轮 total={result.get('total')} 但全是空壳字段，视为失败，进入自修复...")
@@ -2679,6 +2837,10 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                                     round_timeout=round_timeout)
             if _ap is not None:
                 return _ap
+            # 收官十二轮（审查，实测）：None 可能是"质量门否决"（自动精配结果不达
+            # 要求）而非"没试过"——末尾 run_site 覆盖缺这个标志时会把刚否决的坏
+            # 结果重新采纳入库并报成功（auto_task 同款守卫在 2569 行，此处曾漏拷）
+            _auto_precise_rejected = True
 
         # 🛡️ WAF 滑块拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
         # 注意：即使本轮有真实行，只要 WAF 拦截导致关键字段缺失/详情失败，也必须升级
@@ -2701,6 +2863,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                     last_result = dict(last_result or {})
                     last_result["total"] = fb["total"]
                     last_result["llm_extract"] = True
+                    _final_intent_bad = ""   # R31b：抽取出有效内容视为通过质量门
+                    _final_miss = ""
                     log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
                     break
 
@@ -2763,7 +2927,9 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
     total = (last_result or {}).get("total", 0)
     real = [it for it in sample if any(str(it.get(k) or "").strip() for k in it if k not in META)]
 
-    if not _precise_done and not _precise_attempted:
+    # 收官四轮（审查 H 同款）：run_with_config 的末尾精配覆盖加同款门禁——
+    # 已有成功结果（total>0）或本轮已否决过精配时不用精配覆盖
+    if not _precise_done and not _precise_attempted and not _auto_precise_rejected and total <= 0:
         try:
             su = (config.get("start_urls") or [""])[0]
             from .sites import match_site, run_site
@@ -2824,6 +2990,24 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         verify = None
 
     if total > 0 and real:
+        # R31 修复：循环内质量门否决过最后结果时，不能报"✅ 成功"、也不能把
+        # 刚被否决的配置沉淀进 learned（毒化学习库）
+        if _final_intent_bad or _final_miss:
+            _why = _final_intent_bad or f"关键字段【{_final_miss}】为空"
+            log(f"⚠️ 部分成功：抓到 {total} 条，但质量门未通过（{_why}）——结果可能不是用户要的内容，建议人工核对或换入口重试")
+            return {
+                "name": name,
+                "config": config,
+                "task_dir": str(task_dir),
+                "result": last_result,
+                "log": last_log[-3000:],
+                "sample": sample,
+                "files": files,
+                "summary": f"⚠️ 部分成功：{total} 条，但质量门未通过（{_why}）",
+                "verify": verify,
+                "done": True,
+                "quality_gate_failed": True,
+            }
         # 🧠 自动学习：成功后沉淀为「已学精配」，下次同站直接复用
         # 🧠 质量下降检测：本次用了已学配置但字段完整率显著偏低（网站半改版）→ 删除 learned 重建
         if _learned and verify and verify.get("checks"):

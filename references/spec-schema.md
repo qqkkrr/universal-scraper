@@ -163,7 +163,9 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 
 ## pagination（外层，http 类）
 
-四种合法策略：`page_param` / `offset` / `next_url` / `none`。
+合法策略：`page_param` / `offset` / `none` / `template`（`template` 仅 http_json，
+见上文）。路径式/按钮式翻页不设 strategy，直接配 `next_selector`（或
+`next_xpath`）键——见下。
 
 ```json
 {"strategy": "page_param", "page_param": "page", "start": 1, "max_pages": 10,
@@ -177,10 +179,9 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
   （URL 本身指向起始页），桥从该页号开始计数。
 - `offset`：`{"strategy":"offset","offset_param":"offset","limit":20,"max_pages":50}`，
   按 `(页-1)*limit` 递增。
-- `next_url`：路径式翻页（`/page/2/`）用这个——解析每页"下一页"链接并跟随，
-  相对链接自动补全：
-  `{"strategy":"next_url","next_selector":"li.next a","max_pages":50}`
-  （也可用 `next_xpath`）。
+- **下一页选择器**（不设 strategy）：路径式翻页（`/page/2/`）或"下一页"按钮
+  ——解析每页"下一页"链接并跟随，相对链接自动补全：
+  `{"next_selector": "li.next a", "max_pages": 50}`（也可用 `next_xpath`）。
 - `none`：只抓一页。
 - browser 型翻页写在 `source.pagination`：
   `{"type": "click"|"js"|"none", "selector": "...", "js": "...", "wait_ms": 1500}`，
@@ -195,6 +196,28 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 ## pipeline（记录清洗与过滤——按日期/条件筛选就在这里）
 
 `pipeline` 是记录级处理步骤数组，抓完每页就执行。五种步骤：
+
+> ⚠️ **执行顺序（KLEKT 实战 2026-09 实测 + v2.0.18 修复）**：
+> `pipeline` 在 **`fetch_details` 之前**执行（见 `engine.py`：`run_pipeline` @993 行，
+> `fetch_details` @1049 行）。因此 **`pipeline` 处理不到 `detail.extract` 产出的任何字段**——
+> 在 pipeline 里对详情字段做 `regex_extract` / `cast` / `transform` 会静默拿到空值、
+> 派生列恒为 None，**且没有任何报错**（实测：raw 文本字段有值
+> `Lowest Listing Price€ 104.52...`，派生的 `lowest_ask_eur` 仍为 None）。
+>
+> ✅ **正确做法：详情字段的清洗放 `detail.post_pipeline`**（v2.0.18 新增，详情合并后执行，
+> 步骤写法与 `pipeline` 完全一致；v3 任务包用 `detail.filters` 或 `detail.post_pipeline` 均可）：
+> ```json
+> "detail": {
+>   "enabled": true, "url_field": "url",
+>   "extract": [{"name": "raw_lowest", "type": "xpath_text", "xpath": "//div[@class='price']"}],
+>   "post_pipeline": [
+>     {"type": "regex_extract", "field": "raw_lowest", "to": "lowest_ask_eur",
+>      "pattern": "€\\s*([\\d.]+)", "group": 1}
+>   ]
+> }
+> ```
+> **`validate` 会拦截这个坑**：pipeline 引用了仅在 detail 阶段产出的字段时打 WARN 并指路
+> `post_pipeline`。
 
 ```json
 [
@@ -218,11 +241,15 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
   `{"type":"transform","field":"pubdate","op":"unix_to_datetime"}`。
 - `template`：用已有字段拼新字段，`tmpl` 里 `{字段名}` 占位：
   `{"type":"template","field":"视频链接","tmpl":"https://www.bilibili.com/video/{bvid}"}`。
-- `regex_extract`：正则 capture group 从既有字段派生新字段：
+- `regex_extract`：正则 capture group 从既有字段派生新字段（v2/v3 均支持，v2.0.18 起 v3 补齐）：
   `{"type":"regex_extract","field":"描述","pattern":"使用(\\d+)次","group":1,"to":"使用次数"}`。
+  输出键写 `to`（`out` 亦可）；`field` 取不到值/正则不匹配时该步静默跳过该行（不产空列）。
+- `transform`：`{"type":"transform","field":"时间戳","op":"unix_to_datetime","fmt":"%Y-%m-%d %H:%M:%S"}`
+  （`op` 还可选 `upper` / `lower`；秒/毫秒时间戳自适应）。同样 v2/v3 均支持。
 - **仅 v3 任务包（`run --task`）支持的类型**：`parse_date`、`split`、`default`、
   `download`、`validate`、`dedup_content`——这些在 `run --config` 执行器中未实现，
   validate 会给出警告且运行时跳过。词表唯一来源见 `universal_scraper/contract.py`。
+- 详情字段清洗用 `detail.post_pipeline` / `detail.filters`（见上方执行顺序警告）。
 
 ## detail（列表 → 详情两级）
 
@@ -230,7 +257,8 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 {
   "enabled": true,
   "url_field": "url",
-  "extract": [{"name": "正文", "css": "div.content"}],
+  "extract": [{"name": "正文", "type": "css_text", "selector": "div.content"}],
+  "_注": "启用 detail 后每行自动带 detail_status（状态）与 detail_body（正文前 500 字符哨兵字段——--resume 用它跳过已完成详情）",
   "max_pages": 0,
   "concurrency": 2,
   "interval": 0.5,
@@ -262,7 +290,9 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 
 单次桥进程顺序导航全部详情 URL（同一 CDP 连接），不逐页起浏览器。
 
-`extract` 每项支持五种 `type`（配 `limit` 可抓列表字段，多条换行连接）：
+`extract` 每项支持五种 `type`。**`limit` 的语义是「字符数上限」**（结果按 `text[:limit]`
+截断——审查八轮更正：旧文档写成"匹配条数/多条换行连接"，与实现相反，照文档写
+`limit: 10` 会得到被砍断的 10 个字符）：
 
 ```json
 [
@@ -274,7 +304,7 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 ]
 ```
 
-`limit: 0`（默认）表示全部匹配；注意选择器口径——列表选择器太宽会把无关元素
+`limit: 0`（默认）表示**不截断**（返回全部匹配文本）；注意选择器口径——列表选择器太宽会把无关元素
 （如 upvoter/评论者）混进来。
 
 ## anti_bot 常用键
@@ -291,6 +321,45 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 | `cookies` / `cookie_mode` / `cookie_domain` | Cookie 直抓。**dict 或串均可**：`{"SESSID": "x"}` 或 `"SESSID=x; OTHER=y"`（`cookies` 命令导出的串可直接粘贴） |
 | `respect_robots` | 尊重 robots.txt |
 | `captcha` / `session_dir` / `session_name` | 验证码与登录态存放 |
+| `verify` | TLS 证书校验，默认 `true`（登录 Cookie 也走校验通道）。仅当目标站证书链确有损坏（罕见的政府站/老旧内网站）才显式写 `false` 豁免 |
+
+## middleware（四个时机，v2 `run --config`；2026-09 起已全部接线）
+
+```json
+"middleware": [
+  {"on": "request",  "action": "mypkg:hook_req"},
+  {"on": "response", "action": "mypkg:hook_resp"},
+  {"on": "data",     "action": "log"},
+  {"on": "error",    "action": "mypkg:hook_err"}
+]
+```
+
+`action` 支持 `log`（只打日志）或 `module:function`（自写钩子，需可被 PYTHONPATH 导入）。
+钩子接收一个 ctx dict 并**原地修改**；抛异常由中间件框架捕获，不影响主流程。
+
+| 时机 | 触发点 | ctx 键（可改） |
+|---|---|---|
+| `request` | 每个 HTTP 请求发出**前**（列表/分页、详情、下载三条链都覆盖） | `url` `method` `headers` `body` |
+| `response` | 每个响应返回后 | `url` `status` `ok` `text` `body` `json` `headers` |
+| `data` | 每条记录产出时 | `record` `title` `url` |
+| `error` | 传输异常，或响应 `ok=False`（403/超时/被守卫拒绝等） | `url` `method` `status` `error` |
+
+示例（注入请求头 + 给正文打标 + 记录失败）：
+
+```python
+# mypkg.py
+def hook_req(ctx):
+    h = dict(ctx.get("headers") or {}); h["Authorization"] = "Bearer xxx"
+    ctx["headers"] = h
+def hook_resp(ctx):
+    if ctx.get("status") == 403:
+        ctx["ok"] = False          # 把"假成功"改成明确失败
+def hook_err(ctx):
+    print("失败:", ctx.get("url"), ctx.get("status") or ctx.get("error"))
+```
+
+注意：v3 任务包（`run --task`）用的是另一套 middleware（内置 `log`/`captcha`/`notify`
+action 类 + 任务自带 `modules/middleware.py`），本配置式写法在 v3 不适用。
 
 ## output
 

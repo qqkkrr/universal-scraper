@@ -35,7 +35,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "webui" / "index.html"
-PY = None  # 延迟到 serve 里注入 sys.executable
 
 JOBS: dict = {}
 JOBS_LOCK = threading.Lock()
@@ -64,12 +63,27 @@ def _load_settings() -> dict:
     return {}
 
 
-def _save_settings(st: dict) -> None:
+def _xl_safe(v):
+    """导出单元格公式注入防护（OCR R131 H）：=+-@ 开头的抓取文本前加 '。
+    与 storages.py 的 CsvStorage 同口径——batch/PDF 表格导出曾漏用。"""
+    s = "" if v is None else str(v)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
+
+def _save_settings(st: dict) -> bool:
+    """持久化 AI 配置。R29 审查修复（P2）：返回写入是否成功——曾静默吞掉
+    OSError，界面报"已保存"但重启即丢。"""
     try:
+        import tempfile as _tf, os as _os
         SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        SETTINGS_FILE.write_text(json.dumps(st, ensure_ascii=False, indent=2), encoding="utf-8")
+        # OCR R131（M）：非原子写在中断下留半截 JSON——临时文件+原子替换
+        _fd, _tmp = _tf.mkstemp(dir=str(SETTINGS_FILE.parent), suffix=".tmp")
+        with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
+            _f.write(json.dumps(st, ensure_ascii=False, indent=2))
+        _os.replace(_tmp, SETTINGS_FILE)
+        return True
     except Exception:
-        pass
+        return False
 
 
 def _apply_settings_to_env(st: dict) -> None:
@@ -120,7 +134,11 @@ def _load_schedules() -> list:
 def _save_schedules(scheds: list) -> None:
     try:
         SCHEDULES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        SCHEDULES_FILE.write_text(json.dumps(scheds, ensure_ascii=False, indent=1), encoding="utf-8")
+        # R93 修复（P2）：write_text 非原子——中途崩溃留截断 JSON，重启全部
+        # 定时任务静默丢失。改 tmp+replace（与 _persist_jobs 同口径）
+        _tmp = SCHEDULES_FILE.with_suffix(".json.tmp")
+        _tmp.write_text(json.dumps(scheds, ensure_ascii=False, indent=1), encoding="utf-8")
+        _tmp.replace(SCHEDULES_FILE)
     except Exception:
         pass
 
@@ -131,35 +149,49 @@ def _scheduler_loop() -> None:
         time.sleep(60)
         try:
             now = time.time()
+            # R93 修复（P2）：到点改写 + 落盘曾不持 SCHED_LOCK（旧注释错误声称
+            # 仍持锁）——与 /api/schedule/add 并发时互相覆盖。整段入锁
             with SCHED_LOCK:
                 scheds = _load_schedules()
-            for sc in scheds:
-                if not sc.get("enabled", True):
-                    continue
-                if float(sc.get("next_run") or 0) <= now:
-                    sc["next_run"] = now + float(sc.get("interval_hours") or 24) * 3600
-                    sc["last_run"] = now
-                    _save_schedules(scheds)  # 仍持 SCHED_LOCK（save 内部无锁）
-                    desc = sc.get("description", "")
-                    if desc:
-                        job = _new_job("auto", "⏰ 定时任务：" + desc[:40], description=desc)
-                        threading.Thread(target=run_auto_job,
-                                         args=(job, desc, None, 2, None, "", ""),
-                                         daemon=True).start()
+                _due = False
+                for sc in scheds:
+                    if not sc.get("enabled", True):
+                        continue
+                    if float(sc.get("next_run") or 0) <= now:
+                        sc["next_run"] = now + float(sc.get("interval_hours") or 24) * 3600
+                        sc["last_run"] = now
+                        _due = True
+                        desc = sc.get("description", "")
+                        if desc:
+                            job = _new_job("auto", "⏰ 定时任务：" + desc[:40], description=desc)
+                            threading.Thread(target=run_auto_job,
+                                             args=(job, desc, None, 2, None, "", ""),
+                                             daemon=True).start()
+                if _due:
+                    _save_schedules(scheds)
         except Exception:
             pass
 
 
 def _persist_jobs():
     try:
-        slim = {jid: {"id": j.get("id"), "kind": j.get("kind"), "title": j.get("title"),
-                      "description": j.get("description", ""), "status": j.get("status"),
-                      "summary": j.get("summary"), "error": j.get("error"), "url": j.get("url", ""),
-                      "created": j.get("created"), "messages": (j.get("messages") or [])[-30:]}
-                for jid, j in JOBS.items()}
-        tmp = HISTORY_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(slim, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-        tmp.replace(HISTORY_FILE)
+        # 审查修复（P2，R8）：迭代 JOBS 曾不持锁——并发建任务时
+        # "dictionary changed size during iteration" 异常被吞，历史静默丢失
+        with JOBS_LOCK:
+            slim = {jid: {"id": j.get("id"), "kind": j.get("kind"), "title": j.get("title"),
+                          "description": j.get("description", ""), "status": j.get("status"),
+                          "summary": j.get("summary"), "error": j.get("error"), "url": j.get("url", ""),
+                          "created": j.get("created"), "messages": (j.get("messages") or [])[-30:]}
+                    for jid, j in JOBS.items()}
+        # 审查二轮（H）：固定 .tmp 路径——两线程并发持久化互踩出半截 JSON。
+        # 线程 id 后缀隔离 + finally 清理
+        import threading as _th
+        tmp = HISTORY_FILE.with_suffix(f".tmp{_th.get_ident()}")
+        try:
+            tmp.write_text(json.dumps(slim, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+            tmp.replace(HISTORY_FILE)
+        finally:
+            tmp.unlink(missing_ok=True)
     except Exception:
         pass
 
@@ -299,7 +331,8 @@ def _job_heartbeat(job: dict, key: str = "配置生成中"):
 
 def run_auto_job(job: dict, desc: str, limit, rounds, timeout, proxy="", cookie="",
                   config=None, name="", task_dir=""):
-    job["task_dir"] = task_dir or ""
+    with JOBS_LOCK:
+        job["task_dir"] = task_dir or ""
     threading.Thread(target=_job_heartbeat, args=(job, "AI 生成配置/执行中"), daemon=True).start()
     try:
         if config:
@@ -370,19 +403,30 @@ def _export_rows(rows: list, base: str) -> Dict[str, str]:
         fp = out_dir / f"{base}.json"
         fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         files["json"] = f"outputs/{base}.json"
-        keys = [k for k in rows[0].keys() if k != "_url"]
+        # R77 修复（P2）：表头取全行并集（曾只看首行——异构行 DictWriter 抛错
+        # 被 except 吞掉后 CSV 静默缺失），并做公式注入防护
+        keys = []
+        for r in rows:
+            for k in r.keys():
+                if k != "_url" and k not in keys:
+                    keys.append(k)
+
+        def _safe(v):
+            s = "" if v is None else str(v)
+            return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
         with open(out_dir / f"{base}.csv", "w", newline="", encoding="utf-8-sig") as f:
             import csv as _csv
             w = _csv.DictWriter(f, fieldnames=keys)
             w.writeheader()
-            w.writerows([{k: v for k, v in r.items() if k != "_url"} for r in rows])
+            w.writerows([{k: _safe(v) for k, v in r.items() if k != "_url"} for r in rows])
         files["csv"] = f"outputs/{base}.csv"
         try:
             from openpyxl import Workbook
             wb = Workbook(); ws = wb.active
             ws.append(keys)
             for r in rows:
-                ws.append([r.get(k, "") for k in keys])
+                ws.append([_safe(r.get(k, "")) for k in keys])
             wb.save(out_dir / f"{base}.xlsx")
             files["xlsx"] = f"outputs/{base}.xlsx"
         except Exception:
@@ -490,8 +534,12 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
                                 rows_all.append({"_pdf": _pu, "content": _t[:20000]})
                         elif res.get("error"):
                             _pdf_errors.append(f"{_pu}: {res['error'][:120]}")
-                    if _pdf_errors and not rows_all:
-                        _job_log(job, "⚠️ " + "；".join(_pdf_errors[:3]))
+                    if _pdf_errors:
+                        # 审查八轮（MEDIUM）：此前只在"全部附件都失败"时记日志——
+                        # 部分失败（如 2 个里 1 个 404）被静默吞掉，完成摘要仍写
+                        # "✅ 附件解析 N 条 / errors: 0"，用户以为附件已全部解析。
+                        _job_log(job, ("⚠️ 部分附件失败：" if rows_all else "⚠️ ")
+                                 + "；".join(_pdf_errors[:3]))
                     if rows_all:
                         import hashlib as _hl
                         _host = re.sub(r"[^0-9A-Za-z_-]", "_", urllib.parse.urlparse(_pdfs[0]).netloc)
@@ -502,26 +550,44 @@ def run_paste_job(job: dict, url: str, mode: str, browser: bool, depth: int,
                         fp.write_text(json.dumps(rows_all, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
                         try:
                             import csv
-                            keys = [k for k in rows_all[0] if k not in _meta]
+                            # 审查修复：列集曾只取首行键——多个附件各列不齐时后续
+                            # 行新增的列被整列静默丢失。改为全行字段并集（同 batch 导出口径）
+                            keys = []
+                            for r in rows_all:
+                                for k in r:
+                                    if k not in _meta and k not in keys:
+                                        keys.append(k)
                             with open(ROOT / "outputs" / f"{base}.csv", "w", newline="", encoding="utf-8-sig") as f:
                                 w = csv.DictWriter(f, fieldnames=keys)
                                 w.writeheader()
-                                w.writerows([{k: v for k, v in r.items() if k not in _meta} for r in rows_all])
+                                w.writerows([{k: _xl_safe(v) for k, v in r.items() if k not in _meta} for r in rows_all])
                         except Exception:
                             pass
                         try:
                             from openpyxl import Workbook
                             wb = Workbook(); ws = wb.active
-                            keys = [k for k in rows_all[0] if k not in _meta]
+                            keys = []
+                            for r in rows_all:
+                                for k in r:
+                                    if k not in _meta and k not in keys:
+                                        keys.append(k)
                             ws.append(keys)
                             for r in rows_all:
-                                ws.append([r.get(k, "") for k in keys])
+                                ws.append([_xl_safe(r.get(k, "")) for k in keys])
                             wb.save(ROOT / "outputs" / f"{base}.xlsx")
                         except Exception:
                             pass
-                        files = {"json": f"outputs/{base}.json", "csv": f"outputs/{base}.csv", "xlsx": f"outputs/{base}.xlsx"}
-                        summary = f"✅ 任务结束：附件解析 {len(rows_all)} 条，导出 {list(files.values())}"
-                        _job_done(job, {"total": len(rows_all), "fetched": len(_pdfs), "errors": 0, "files": files},
+                        # R77 修复（P2）：只登记真实写成功的导出文件（曾无条件
+                        # 列出三种——DictWriter 抛错/openpyxl 缺失时 UI 引用幻影文件）
+                        files = {"json": f"outputs/{base}.json"}
+                        if (ROOT / "outputs" / f"{base}.csv").exists():
+                            files["csv"] = f"outputs/{base}.csv"
+                        if (ROOT / "outputs" / f"{base}.xlsx").exists():
+                            files["xlsx"] = f"outputs/{base}.xlsx"
+                        summary = (f"✅ 任务结束：附件解析 {len(rows_all)} 条，导出 {list(files.values())}"
+                                   + (f"（{len(_pdf_errors)} 个附件失败）" if _pdf_errors else ""))
+                        _job_done(job, {"total": len(rows_all), "fetched": len(_pdfs),
+                                        "errors": len(_pdf_errors), "files": files},
                                   summary, _auto_verify(rows_all, None))
                         return
             except Exception as e:
@@ -582,19 +648,31 @@ def run_books_job(job: dict, spec_src: str, out_dir: str, download_covers: bool,
             _job_error(job, "请先粘贴书籍清单 spec JSON（可在「📚 图书目录」点「填入示例」快速开始）")
             return
         spec = None
-        # 也接受本地 .json 文件路径：先按输入路径找，找不到再按项目根重试
+        # 也接受本地 .json 文件路径（限 ROOT 内，见下）
         if text.endswith(".json"):
             p = Path(text).expanduser()
             if not p.is_absolute() and not p.exists():
                 p2 = ROOT / p
                 if p2.exists():
                     p = p2
+            # 收官十五轮（安全审计 M1，实测）：spec 是本文件唯一没做 containment 的
+            # 路径参数（out/task_dir/file 均有）——可传 /etc/... 或任意绝对路径读
+            # 服务器上的 .json 并把绝对路径回显进任务日志（目录结构泄露 + 存在性
+            # oracle）。与非 outputs 路径同口径：resolve 后必须落在 ROOT 内
+            try:
+                _rp = p.resolve()
+                _rp.relative_to(ROOT.resolve())
+                p = _rp
+            except Exception:
+                _job_error(job, "非法 spec 路径（仅允许工具目录内的 .json 文件；"
+                                "也可直接粘贴 JSON 内容）")
+                return
             try:
                 spec = json.loads(p.read_text(encoding="utf-8"))
-                _job_log(job, f"📖 已从文件读取 spec：{p}")
+                _job_log(job, f"📖 已从文件读取 spec：{p.relative_to(ROOT.resolve())}")
             except Exception as e:
                 _job_error(job, f"spec 文件读取/解析失败：{type(e).__name__}: {e}"
-                                f"（文件：{p}；可改为直接粘贴 JSON 内容）")
+                                f"（可改为直接粘贴 JSON 内容）")
                 return
         if spec is None:
             try:
@@ -693,7 +771,9 @@ def run_books_job(job: dict, spec_src: str, out_dir: str, download_covers: bool,
             _job_error(job, f"{type(e).__name__}: {e}")
     finally:
         # cancel_event 是 threading.Event，不可 JSON 序列化，不能进持久化历史
-        job.pop("cancel_event", None)
+        # 审查修复（P2，R8）：pop 曾不持锁——与 /api/job 的加锁快照竞态
+        with JOBS_LOCK:
+            job.pop("cancel_event", None)
 
 
 def run_batch_job(job: dict, urls: list, mode: str = "auto", browser: bool = False):
@@ -753,21 +833,46 @@ def run_batch_job(job: dict, urls: list, mode: str = "auto", browser: bool = Fal
             with open(ROOT / "outputs" / f"{base}.csv", "w", newline="", encoding="utf-8-sig") as f:
                 w = _csv.DictWriter(f, fieldnames=keys)
                 w.writeheader()
-                w.writerows([{k: r.get(k, "") for k in keys} for r in rows_all])
+                w.writerows([{k: _xl_safe(r.get(k, "")) for k in keys} for r in rows_all])
         except Exception:
             pass
         try:
             from openpyxl import Workbook
             wb = Workbook(); ws = wb.active
-            keys = list(rows_all[0].keys()) if rows_all else ["_url"]
+            # OCR R131（M）：列集曾只取首行键——后续行新增的列被整列静默丢失。
+            # 改为全行字段并集（保持首现顺序）
+            keys = []
+            _seen = set()
+            for r in rows_all:
+                for k in r.keys():
+                    if k not in _seen:
+                        _seen.add(k)
+                        keys.append(k)
+            if not keys:
+                keys = ["_url"]
             ws.append(keys)
             for r in rows_all:
-                ws.append([r.get(k, "") for k in keys])
+                ws.append([_xl_safe(r.get(k, "")) for k in keys])
             wb.save(ROOT / "outputs" / f"{base}.xlsx")
         except Exception:
             pass
-        files = {"json": f"outputs/{base}.json", "csv": f"outputs/{base}.csv", "xlsx": f"outputs/{base}.xlsx"}
+        # R108 对齐（P2）：只登记真实写成功的导出文件（Lite 同款 exists 守卫——
+        # DictWriter 抛错/openpyxl 缺失时 UI 曾引用幻影文件）
+        files = {"json": f"outputs/{base}.json"}
+        if (ROOT / "outputs" / f"{base}.csv").exists():
+            files["csv"] = f"outputs/{base}.csv"
+        if (ROOT / "outputs" / f"{base}.xlsx").exists():
+            files["xlsx"] = f"outputs/{base}.xlsx"
+        # 收官十五轮（安全审计 L3）：全部 URL 失败（errors==len(urls) 且 0 条）时曾
+        # 仍置 status=done + "✅" 摘要——按 /api/job.status 判定成败的自动化消费方
+        # 拿到假绿灯（books 分支对 0 行是硬失败，口径不一致）。改为显式失败
+        if urls and errs == len(urls) and not rows_all:
+            _job_error(job, f"批量抓取全部失败：{len(urls)} 个网址均未取到数据"
+                            f"（逐 URL 错误见任务消息）——请先 `us diagnose` 判型再重试")
+            return
         summary = f"✅ 批量完成：{len(urls)} 个网址，成功 {len(urls)-errs}，共 {len(rows_all)} 条，导出 {list(files.values())}"
+        if errs:
+            summary = f"⚠️ 批量完成（{errs}/{len(urls)} 个网址失败）：成功 {len(urls)-errs}，共 {len(rows_all)} 条，导出 {list(files.values())}"
         _job_done(job, {"total": len(rows_all), "fetched": len(urls), "errors": errs, "files": files}, summary,
                   _auto_verify(rows_all, None))
     except BaseException as e:
@@ -799,7 +904,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Access-Control-Allow-Origin", "*")
+            # 审查修复（P2，R25）：ACAO:* 曾让任意网页可读本地 API 结果
+            # （本地模式无令牌）——仅同源前端需要访问，不再发 CORS 头
             self.end_headers()
             self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -815,9 +921,13 @@ class Handler(BaseHTTPRequestHandler):
     MAX_BODY = 5 * 1024 * 1024
 
     def _read_body(self) -> dict:
-        n = int(self.headers.get("Content-Length", 0))
-        if n > self.MAX_BODY:
-            raise ValueError("请求体过大（>5MB），已拒绝")
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            raise ValueError("Content-Length 非法")
+        # R113 修复（P3）：负长度曾通过上限检查、read(-1) 挂死线程
+        if n < 0 or n > self.MAX_BODY:
+            raise ValueError("请求体大小非法（<0 或 >5MB），已拒绝")
         return json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
 
     def _auth_ok(self, headers) -> bool:
@@ -838,22 +948,60 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return False
 
+    def _host_ok(self) -> bool:
+        """Host 校验（审查 P1，R8）：本地部署下拒绝 DNS rebinding——rebind 后
+        Origin==Host 的 CSRF 检查形同虚设，唯一可靠锚点是 Host 头本身。
+        仅放行 127.0.0.1/localhost 的任意端口；共享令牌模式（AUTH_TOKEN）下
+        远端访问本就有令牌门槛，交由 _auth_ok 把关。"""
+        host = (self.headers.get("Host", "") or "").strip().lower()
+        # OCR R131（H）：IPv6 形态 [::1]:8642 曾被 split(":")[0] 切成 "["——
+        # 本机 IPv6 访问被永久拒绝。bracket 形态取 ] 前；多冒号裸 IPv6 原样；
+        # 其余剥掉端口
+        if host.startswith("["):
+            host = host.split("]", 1)[0].lstrip("[")
+        elif host.count(":") > 1:
+            pass  # 裸 IPv6（无端口）
+        else:
+            host = host.rsplit(":", 1)[0] if ":" in host else host
+        if not AUTH_TOKEN:
+            return host in ("127.0.0.1", "localhost", "::1")
+        return True
+
     def do_GET(self):
-        # 页面/静态资源不鉴权（否则用户连输入令牌的页面都打不开）；仅 /api/* 需要
-        if self.path.startswith("/api/") and not self._auth_ok(self.headers):
-            self._send(403, "Forbidden: 需要 X-Auth-Token")
-            return
+        # 收官十五轮（安全审计 H1，实测）：鉴权/Host 守卫曾用 `self.path.startswith`
+        # 判断——absolute-form 请求行（`GET http://host:port/api/status HTTP/1.1`，
+        # 裸 socket / curl --request-target 即可构造）不以 "/api/" 开头，两个守卫
+        # 双双跳过，而下方路由用 urlparse(...).path 仍命中 → 零令牌读全部 GET 接口
+        # （含 /api/status 回传的令牌本体与 /api/preview 的数据下载）。
+        # 修法：路由判定与安全判定统一用解析后的 u.path
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
+        _gp = u.path
+        # 页面/静态资源不鉴权（否则用户连输入令牌的页面都打不开）；API 与报告需鉴权。
+        # 收官十五轮（M3）：/reports/ 曾跳过 Host 校验（R8 的 DNS-rebinding 防线
+        # 只覆盖 /api/*），而它正是唯一直接吐爬取数据的静态通道——统一到同一道闸
+        if (_gp.startswith("/api/") or _gp.startswith("/reports/")) and not self._host_ok():
+            # 审查修复（P1，R8）：DNS rebinding 下 Origin==Host 皆受攻击者控制，
+            # 唯一可靠锚点是 Host 头
+            self._send(403, "Forbidden: Host 不受信任（本地部署仅允许 127.0.0.1/localhost）")
+            return
+        if _gp.startswith("/api/") and not self._auth_ok(self.headers):
+            self._send(403, "Forbidden: 需要 X-Auth-Token")
+            return
         try:
-            if u.path.startswith("/reports/"):
+            if _gp.startswith("/reports/"):
                 # 路径穿越防护：只允许 outputs/reports 目录内（resolve 后校验前缀，拒绝绝对路径/..）
                 try:
                     _rp_root = (ROOT / "outputs" / "reports").resolve()
-                    fp = (_rp_root / u.path[len("/reports/"):]).resolve()
+                    fp = (_rp_root / _gp[len("/reports/"):]).resolve()
                     fp.relative_to(_rp_root)
                 except Exception:
                     self._send(403, "非法路径")
+                    return
+                # 审查修复（P1，R16）：报告含爬取数据，share 模式下曾无令牌即可
+                # 读取——绕过 /api/* 的令牌门。报告链接支持 ?token= 传参
+                if AUTH_TOKEN and (q.get("token", [""])[0] != AUTH_TOKEN):
+                    self._send(403, "Forbidden: 需要 ?token=<X-Auth-Token>")
                     return
                 if fp.is_file() and fp.exists():
                     data = fp.read_bytes()
@@ -924,6 +1072,24 @@ class Handler(BaseHTTPRequestHandler):
                     "llm_model": os.environ.get("LLM_MODEL", "qwen3.7-plus"),
                     "llm_base_url": os.environ.get("OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
                 })
+            elif u.path == "/api/metrics":
+                # R101 新能力：run 时序指标（engine_v3 落 <out>/.metrics.json）
+                _task = q.get("task", [""])[0]
+                _mf = (ROOT / "outputs" / _task / ".metrics.json") if _task else None
+                if not _task:
+                    self._json({"error": "需要 ?task=<输出子目录名>"})
+                    return
+                try:
+                    _mf = (_mf or Path()).resolve()
+                    _mf.relative_to((ROOT / "outputs").resolve())
+                except Exception:
+                    self._json({"error": "非法任务目录"})
+                    return
+                try:
+                    data = json.loads(_mf.read_text(encoding="utf-8")) if _mf.exists() else []
+                except Exception:
+                    data = []
+                self._json({"task": _task, "points": data if isinstance(data, list) else []})
             elif u.path == "/api/verify":
                 name = q.get("file", [""])[0]
                 # 路径穿越防护：只允许 outputs 目录内（resolve 后校验前缀，拒绝绝对路径/..）
@@ -935,6 +1101,15 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if not fp.exists():
                     self._json({"error": f"文件不存在: {name}"})
+                    return
+                # 审查修复（P2，R29）：整文件读入曾无大小上限——超大导出会占住
+                # 请求线程（与 /api/preview 同一 20MB 护栏）
+                try:
+                    if fp.stat().st_size > 20 * 1024 * 1024:
+                        self._json({"error": "文件太大（>20MB），verify 只支持小文件"})
+                        return
+                except OSError as e:
+                    self._json({"error": f"读取文件信息失败: {e}"})
                     return
                 from .verify import verify_rows
                 rows = json.loads(fp.read_text(encoding="utf-8"))
@@ -1031,6 +1206,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self._origin_ok():
             self._send(403, "跨域请求被拒绝（CSRF 防护）")
             return
+        if not self._host_ok():
+            # 审查修复（P1，R8）：DNS rebinding 防线（Origin==Host 皆可被攻击者控制）
+            self._send(403, "Forbidden: Host 不受信任（本地部署仅允许 127.0.0.1/localhost）")
+            return
         u = urllib.parse.urlparse(self.path)
         try:
             body = self._read_body()
@@ -1090,22 +1269,43 @@ class Handler(BaseHTTPRequestHandler):
                 from .report import generate as _report_gen
                 try:
                     r = _report_gen(str(csv_path), group_col=group, out=str(rdir / f"{name}.html"))
-                    self._json({"ok": True, "report": f"/reports/{name}.html", "stats": r})
+                    # 审查修复（P1，R17）：share 模式下 /reports/ 需要令牌，
+                    # 链接必须带 ?token= 才能被浏览器直接打开。R19 修正：token
+                    # 需 URL 编码（自定义令牌含 &/+/# 时会被 parse_qs 错拆）
+                    _link = f"/reports/{name}.html" + (f"?token={urllib.parse.quote(AUTH_TOKEN)}" if AUTH_TOKEN else "")
+                    self._json({"ok": True, "report": _link, "stats": r})
                 except Exception as e:
                     self._json({"error": f"生成失败: {e}"})
                 return
             if u.path == "/api/settings":
                 if body.get("reset"):
                     # 恢复默认：清空持久化配置 + 从 env 移除（回落 QWEN_API_KEY 等默认）
-                    _save_settings({})
+                    _ok = _save_settings({})
                     for _env in _LLM_ENV_KEYS.values():
                         os.environ.pop(_env, None)
-                    self._json({"ok": True, "message": "已恢复默认（清空保存的 AI 配置）"})
+                    if _ok:
+                        self._json({"ok": True, "message": "已恢复默认（清空保存的 AI 配置）"})
+                    else:
+                        self._json({"ok": False, "error": "配置写入失败（目录只读？）——env 已清但持久化未生效"})
                     return
-                allowed = {k: str(body.get(k) or "").strip() for k in _LLM_ENV_KEYS}
-                _save_settings(allowed)
+                # 审查八轮（HIGH）：留空 = 沿用已存值（界面 index.html:1469 的承诺）。
+                # 此前把 6 个键整体写入（缺省 ""）——用户只改模型就会把 api_key/base_url
+                # 清成空串，接口却回 ok:true「已保存并生效」，重启后配置永久丢失
+                # （实测复现：settings.json 的 api_key 由 sk-… 变 ""）。
+                _prev_cfg = _load_settings()
+                allowed = {}
+                for k in _LLM_ENV_KEYS:
+                    _v = str(body.get(k) or "").strip()
+                    allowed[k] = _v if _v else str(_prev_cfg.get(k) or "").strip()
+                _save_ok = _save_settings(allowed)
                 _apply_settings_to_env(allowed)
-                self._json({"ok": True, "message": "AI 配置已保存并生效"})
+                if _save_ok:
+                    self._json({"ok": True, "message": "AI 配置已保存并生效"})
+                else:
+                    # R29 审查修复（P2）：写盘失败曾谎报成功——env 本轮生效但
+                    # 重启即丢，必须告知用户"仅会话内生效"
+                    self._json({"ok": False,
+                                "error": "配置已在本进程生效，但写入 configs/settings.json 失败（目录只读或磁盘满）——重启后将丢失"})
                 return
             if u.path == "/api/settings/test":
                 model = str(body.get("model") or os.environ.get("LLM_MODEL", "qwen3.7-plus")).strip()
@@ -1198,15 +1398,15 @@ class Handler(BaseHTTPRequestHandler):
                 config = body.get("config")
                 name = str(body.get("name", "") or "").strip()
                 task_dir = str(body.get("task_dir", "") or "").strip()
-                if config:
-                    # 安全：task_dir 只允许 tasks/ 下（防路径穿越写任意文件，分享模式=远程RCE风险）
+                if task_dir:
+                    # 审查修复（P1，R8）：task_dir 校验曾只在 config 分支内——
+                    # 攻击者可传任意 task_dir 再用 /api/job/stop 在任意位置
+                    # mkdir + 落 .stop 文件。只要 task_dir 非空就必须 containment
                     import re as _re
                     import hashlib as _hl
                     if not name or not _re.fullmatch(r"[A-Za-z0-9_\-]+", name):
-                        # 缺 name / 非法 name：用描述哈希安全推导（绝不落到 CWD/根目录）
                         name = f"auto_{_hl.md5(desc.encode(), usedforsecurity=False).hexdigest()[:10]}"
                     if not task_dir:
-                        # 缺 task_dir：安全推导到 tasks/auto_<md5>，防止 run_with_config 写到 CWD
                         task_dir = str((ROOT / "tasks" / name).resolve())
                     _td = Path(task_dir)
                     if not _td.is_absolute():
@@ -1216,6 +1416,15 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         self._json({"error": "非法任务目录（仅允许 tasks/ 内）"})
                         return
+                if config:
+                    import re as _re
+                    import hashlib as _hl
+                    if not name or not _re.fullmatch(r"[A-Za-z0-9_\-]+", name):
+                        # 缺 name / 非法 name：用描述哈希安全推导（绝不落到 CWD/根目录）
+                        name = f"auto_{_hl.md5(desc.encode(), usedforsecurity=False).hexdigest()[:10]}"
+                    if not task_dir:
+                        # 缺 task_dir：安全推导到 tasks/auto_<md5>，防止 run_with_config 写到 CWD
+                        task_dir = str((ROOT / "tasks" / name).resolve())
                     desc = body.get("description", "") or desc
                 job = _new_job("auto", desc[:60], description=desc)
                 limit = body.get("limit") or None
@@ -1246,6 +1455,10 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/schedule/add":
                 desc = str(body.get("description", "")).strip()
                 interval = float(body.get("interval_hours") or 0)
+                # R19 复查修正：NaN 之外 Infinity 也绕过 <=0 门——统一 isfinite
+                import math as _math
+                if not _math.isfinite(interval) or interval <= 0:
+                    interval = 24
                 if not desc:
                     self._json({"error": "请提供任务描述"})
                     return
@@ -1266,10 +1479,28 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/chrome/start":
                 # 启动调试 Chrome 并打开目标 URL（一键登录/过盾入口）
                 url = str(body.get("url", "")).strip()
+                # 审查修复（P2，R8）：以 -- 开头的 url 会被 Chrome 当开关解析
+                #（如 --gpu-launcher=...），必须强制 http(s) 页面
+                if url and not url.startswith(("http://", "https://")):
+                    self._json({"error": "url 必须以 http:// 或 https:// 开头"})
+                    return
                 port = int(body.get("port") or 9222)
                 try:
                     import subprocess as _sp
-                    _chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+                    import sys as _sys, shutil as _sh
+                    # 审查修复：Chrome 路径与 open -a 曾硬编码 macOS——Windows/Linux
+                    # 上一键登录动作必挂。按平台解析（对齐 /api/reveal 的三平台处理）
+                    if _sys.platform.startswith("win"):
+                        _chrome = os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe")
+                        if not os.path.exists(_chrome):
+                            _chrome = os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe")
+                        if not os.path.exists(_chrome):
+                            _chrome = os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
+                    elif _sys.platform == "darwin":
+                        _chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+                    else:
+                        _chrome = (_sh.which("google-chrome") or _sh.which("chromium")
+                                   or _sh.which("chromium-browser") or "google-chrome")
                     _profile = os.path.expanduser(f"~/.codex/cdp_profile_{port}")
                     os.makedirs(_profile, exist_ok=True)
                     # 端口被占 → 直接打开新标签
@@ -1281,13 +1512,22 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         _occupied = False
                     if _occupied:
-                        _sp.Popen(["open", "-a", "Google Chrome", url or "https://www.baidu.com"])
+                        if _sys.platform.startswith("win"):
+                            _sp.Popen(["cmd", "/c", "start", "chrome", url or "https://www.baidu.com"],
+                                      stdout=_sp.DEVNULL, stderr=_sp.STDOUT)
+                        elif _sys.platform == "darwin":
+                            _sp.Popen(["open", "-a", "Google Chrome", url or "https://www.baidu.com"])
+                        else:
+                            _sp.Popen([_chrome, url or "https://www.baidu.com"],
+                                      stdout=_sp.DEVNULL, stderr=_sp.STDOUT)
                     else:
                         _cmd = [_chrome, f"--remote-debugging-port={port}",
                                 f"--user-data-dir={_profile}", "--no-first-run",
                                 "--no-default-browser-check", url or "about:blank"]
+                        # OCR R131（M）：曾 open(os.devnull) 匿名句柄无人认领——
+                        # 改用 Popen 原生 DEVNULL，无句柄遗留
                         _sp.Popen(_cmd, start_new_session=True,
-                                  stdout=open(os.devnull, "w"), stderr=_sp.STDOUT)
+                                  stdout=_sp.DEVNULL, stderr=_sp.STDOUT)
                     self._json({"ok": True, "message": f"调试 Chrome 已启动（端口 {port}）并打开目标站，请登录/过验证后回到工具重跑任务",
                                 "port": port, "url": url})
                 except Exception as e:
@@ -1310,8 +1550,10 @@ class Handler(BaseHTTPRequestHandler):
                     _sp.Popen(_cmd, cwd=str(ROOT), start_new_session=True,
                               stdout=open(ROOT / "outputs" / "webui_restart.log", "a"),
                               stderr=_sp.STDOUT)
-                    self._json({"ok": True, "message": "重启中，3 秒后自动恢复…"})
-                    threading.Timer(0.5, os._exit, args=(0,)).start()
+                    self._json({"ok": True, "message": "重启中，新进程绑定后旧进程自动退出…"})
+                    # 审查修复（P2，R25/R26）：旧进程 0.15s 后退出释放端口，
+                    # 新进程 serve() 自带 20 次绑定重试——彻底消除重启竞态
+                    threading.Timer(0.15, os._exit, args=(0,)).start()
                 except Exception as e:
                     self._json({"ok": False, "message": f"重启失败：{type(e).__name__}: {e}"})
                 return
@@ -1332,14 +1574,20 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         self._json({"ok": False, "message": "❌ 页面未包含商家列表（Cookie 可能失效），请重新复制"})
                 else:
-                    import urllib.request as _urlreq
-                    from .core import assert_http_url
+                    # 收官十五轮（安全审计 M2，实测）：原实现是裸 urlopen + 仅 scheme
+                    # 校验——share 模式下可当内网/回环端口探测器（开放 200 / 关闭
+                    # URLError 可区分）。改走 quick.fetch_url：与引擎同一套出站守卫
+                    # （拒私网/环回/保留地址、支持 US_ALLOW_PRIVATE 白名单）与指纹伪装
+                    from .quick import fetch_url as _fetch_url
                     try:
-                        assert_http_url(url or "https://www.baidu.com/")
-                        req = _urlreq.Request(url or "https://www.baidu.com/",
-                                              headers={"User-Agent": "Mozilla/5.0", "Cookie": cookie})
-                        rr = _urlreq.urlopen(req, timeout=15)
-                        self._json({"ok": True, "message": f"✅ Cookie 已随请求发送（HTTP {rr.status}）"})
+                        _r = _fetch_url(url or "https://www.baidu.com/",
+                                        cookie=cookie, timeout=20)
+                        if _r.get("error"):
+                            self._json({"ok": False,
+                                        "message": f"❌ 测试失败：{str(_r['error'])[:100]}"})
+                        else:
+                            self._json({"ok": True,
+                                        "message": f"✅ Cookie 已随请求发送（HTTP {_r.get('status')}）"})
                     except Exception as e:
                         self._json({"ok": False, "message": f"❌ 测试失败：{type(e).__name__}"})
 
@@ -1391,6 +1639,18 @@ class Handler(BaseHTTPRequestHandler):
                 site = str(body.get("site", "sytyxb")).strip() or "sytyxb"
                 since = int(body.get("since") or 2024)
                 out = str(body.get("out", "")).strip()
+                # 审查修复（P2，R16）：out 曾未验证——分享模式可远程投递文件到
+                # 任意可写路径。与 books/start 同一 containment 口径
+                if out:
+                    try:
+                        _od = Path(os.path.expandvars(os.path.expanduser(out)))
+                        if not _od.is_absolute():
+                            _od = ROOT / _od
+                        _od.resolve().relative_to((ROOT / "outputs").resolve())
+                        out = str(_od)
+                    except Exception:
+                        self._json({"error": "非法输出目录（仅允许 outputs/ 内）"})
+                        return
                 workers = max(1, min(int(body.get("workers") or 6), 32))
                 with_meta = bool(body.get("with_meta", True))
                 job = _new_job("journal", f"期刊下载：{site}（{since} 起）")
@@ -1505,9 +1765,19 @@ def _lan_urls(port: int):
 
 def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
           share: bool = False, token: str = "") -> int:
-    global PY, AUTH_TOKEN
-    import sys, secrets
+    global AUTH_TOKEN
+    import secrets  # OCR R131（L）：原 import sys 随 PY 死全局一并清理
     global _CODE_FP_START
+    # 收官十五轮（安全审计 M5，实测）：crawl 分支读 `ROOT/outputs/<base>.json` 算行数，
+    # 而引擎/quick 按 **CWD 相对**写 `outputs/`——以 PYTHONPATH/软链方式从别处启动时
+    # 两者错位：任务摘要仍"✅ 0 条"成功、/api/preview 永远打不开这些文件。
+    # 与 /api/restart（Popen cwd=ROOT）对齐：启动即把 CWD 归到工具根，
+    # 使"outputs"在读取与写入两侧指同一目录
+    try:
+        if Path.cwd().resolve() != ROOT.resolve():
+            os.chdir(ROOT)
+    except OSError:
+        pass
     # ⚙️ 启动时加载持久化 AI 配置（用户上次在界面里配置的模型/接口/Key 自动生效）
     try:
         _apply_settings_to_env(_load_settings())
@@ -1518,7 +1788,7 @@ def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
     _load_jobs()
     threading.Thread(target=_scheduler_loop, daemon=True).start()  # ⏰ 定时任务调度
     _CODE_FP_START = _code_fingerprint()
-    PY = sys.executable
+    # OCR R131（L）：原 PY 全局只写不读（子进程一律现取 sys.executable）——删除
     AUTH_TOKEN = token or os.environ.get("US_WEBUI_TOKEN", "")
     print("🕷️ 万能爬虫工具 · 可视化版 v3", flush=True)
     if share:
@@ -1537,7 +1807,21 @@ def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
     elif AUTH_TOKEN:
         print(f"   🔑 访问令牌: {AUTH_TOKEN}（所有 /api/* 需带 X-Auth-Token）", flush=True)
     try:
-        srv = ThreadingHTTPServer((host, port), Handler)
+        # 审查修复（P2，R25）：/api/restart 重启链路是"新进程 Popen → 旧进程
+        # 延迟退出"——新进程绑定时机可能早于旧进程释放端口。绑定加有界重试，
+        # 彻底消除重启竞态
+        _srv = None
+        for _attempt in range(20):
+            try:
+                _srv = ThreadingHTTPServer((host, port), Handler)
+                break
+            except OSError as e:
+                if _attempt == 19:
+                    raise
+                print(f"   端口被占用（{e}），0.5s 后重试（{_attempt + 1}/20）…", flush=True)
+                import time as _t
+                _t.sleep(0.5)
+        srv = _srv
     except OSError as e:
         print(f"❌ 启动失败: {e}", flush=True)
         print("   可能端口被占用。换端口：python3 -m universal_scraper.cli webui --port 8643", flush=True)
