@@ -345,6 +345,10 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
    审查八轮更正：文档里旧写法 `us xxx` 在本仓库并不存在——没有 console_scripts/alias，
    必须用 `python3 -m universal_scraper.cli` 调用）——这些是用户
    已信任的入口，且输出落盘规范。
+4. **后台/长时间跑一律加 `-u`**（2026-09 网易云战训，R34 配方同条）：
+   `nohup python3 -u 脚本.py > run.log 2>&1 &`——不加 `-u` 时 Python 缓冲 stdout，
+   日志长时间为空，会误判"卡死"并重复启动（两个采集器抢同一出口/同一队列）。
+   查看进度：`tail -f run.log`；确认只跑一个：`pgrep -fl 脚本名`。
 
 工作区可放 `.claude/settings.json`（permissions.allow 白名单）预批准常用
 命令——用户授权一次，后续任务零弹窗。会话中途改的配置对当前会话不生效，
