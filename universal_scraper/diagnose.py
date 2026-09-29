@@ -165,18 +165,23 @@ def classify_block(status: int, body_text: str, headers: Optional[Dict[str, str]
                 "burns_budget": True,
             }
 
-    # 通用 JS 壳：仅 200 + 极短 body 时判（避免正常页含 location 赋值误报）
-    if status == 200 and len(body) < 4096:
+    # 通用 JS 壳：仅 200 [且短 body] 时判（避免正常页含 location 赋值误报）。
+    # 收官十二轮（审查 M，实测）：强指纹（stoken/__js_challenge）曾与弱特征一起被
+    # 4096B 门槛挡住——>4KB 的挑战壳直接落到"正常响应"，同一指纹因体积跨线而
+    # 变脸（实测 7288B 的 stoken 页判 ok）。强指纹不受体积门控，弱特征保持短页限定
+    if status == 200:
         for pat in STRONG_SHELL_PATTERNS:
             if re.search(pat, body, re.I):
                 return {
                     "is_block": True,
                     "type": "js_shell",
                     "name": "JS 挑战壳",
-                    "evidence": f"200 但 body 仅 {len(body)}B，命中 {pat}",
+                    "evidence": f"200 命中强指纹 {pat}（body {len(body)}B）",
                     "prescription": "L1 curl_cffi 重试 → 不通升 L2 无头浏览器渲染",
                     "burns_budget": True,
-                }        # 弱特征（location 赋值/meta refresh）= 普通跳转页：非阻断，只给路由提示
+                }
+    if status == 200 and len(body) < 4096:
+        # 弱特征（location 赋值/meta refresh）= 普通跳转页：非阻断，只给路由提示
         for pat in WEAK_SHELL_PATTERNS:
             if re.search(pat, body, re.I):
                 return {
@@ -193,8 +198,18 @@ def classify_block(status: int, body_text: str, headers: Optional[Dict[str, str]
         # 审查修复：曾只扫前 8000 字符——重 <head> 的 SPA 页拦截词落在 8000 字符
         # 之外被漏掉，WAF 拦截页误判成 spa_hint。body 已在 _decode_body 截到
         # 64KB，全量扫描成本可忽略（口径同"宁可误报拦截不可漏报"）
-        _blk_words = re.search(r"访问被拒|拒绝访问|请求被拦截|Access Denied|blocked|"
-                               r"安全验证|请完成验证", body or "", re.I)
+        # 收官十二轮（审查 M，实测）：`blocked`/`Access Denied`/`安全验证` 等词在
+        # 真实 Vue 站的**正文**里很常见（教程/登录提示），含 data-v-* 特征即被判
+        # WAF 拦截并烧预算台账。改为只认**结构化显著位置**（<title>/<h1>）——
+        # 拦截页把拦截语放标题/大标题，正常内容页放在段落里
+        _prom = ""
+        _mt = re.search(r"<title[^>]*>(.*?)</title>", body or "", re.S | re.I)
+        if _mt:
+            _prom += re.sub(r"<[^>]+>", " ", _mt.group(1)) + " "
+        for _mh in re.finditer(r"<h1[^>]*>(.*?)</h1>", body or "", re.S | re.I):
+            _prom += re.sub(r"<[^>]+>", " ", _mh.group(1)) + " "
+        _blk_words = re.search(r"访问被拒|拒绝访问|请求被拦截|Access Denied|安全验证|"
+                               r"请完成验证|已被拦截|访问受限|Forbidden", _prom, re.I)
         for pat in SPA_PATTERNS:
             if re.search(pat, body, re.I):
                 if _blk_words:

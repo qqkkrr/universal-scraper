@@ -92,14 +92,22 @@ def _merge_header_rows(trs) -> List[str]:
         labels.append(" ".join(parts))
     out: List[str] = []
     seen: Dict[str, int] = {}
+    used: set = set()
     for lb in labels:
+        # 收官十二轮（审查 M 配套）：空标签曾算好 "col" 兜底却 append 原值 ""——
+        # CsvStorage 恢复表头时过滤空列名 → 追加行左移错列。这里真正落 "col"
         key = lb or "col"
-        if key in seen:
-            seen[key] += 1
-            out.append(f"{key}{seen[key]}")
-        else:
-            seen[key] = 1
-            out.append(lb)
+        # 收官十二轮（审查 M，实测）：后缀只与"已出现过的标签"去重，不检查是否与
+        # 后面的真实列名相撞——["价格","价格","价格2"] 生成 价格/价格2/价格2 三个
+        # 键，dict 建行时后者覆盖前者（第 2 列的值整列消失）。落名前对照全集
+        cand = key
+        n = seen.get(key, 0)
+        while cand in used:
+            n += 1
+            cand = f"{key}{n}" if n > 1 else f"{key}2"
+        seen[key] = n
+        used.add(cand)
+        out.append(cand)
     return out
 
 
@@ -137,6 +145,14 @@ def extract_tables(html_text: str) -> List[List[Dict[str, str]]]:
             else:
                 row = {f"col{i}": v for i, v in enumerate(cells)}
             rows.append(row)
+        # 收官十二轮（审查 H，实测）：整表全 th（键值表 / 全列用 th 渲染的数据表）
+        # 曾永远产生不了数据行 → rows 为空 → 整表从结果里静默消失。无数据行时
+        # 无法判定哪行是表头，全部按数据行输出（colN 键）——不臆测表头也不丢内容
+        if not rows and _hdr_pending:
+            for tr in _hdr_pending:
+                cells = [re.sub(r"\s+", " ", (c.text_content() or "")).strip()
+                         for c in tr.xpath("./th | ./td")]
+                rows.append({f"col{i}": v for i, v in enumerate(cells)})
         if rows:
             out.append(rows)
     return out
@@ -250,19 +266,29 @@ def _table_md(el) -> list:
         rows.append(cells)
     if not rows and header is None:
         return []
+    # 收官十二轮（审查 M，实测）：表头/分隔行曾按 len(header) 写死——数据行更宽时
+    # GFM 以分隔行定列数，多出的单元格被渲染器丢弃（markdown_it/markdown 实测
+    # "额外"列消失）。先算最大列数 n，表头行与分隔行都补到 n 列
+    _n = max([len(header)] if header is not None else []) if header is not None else 0
+    _n = max([_n] + [len(r) for r in rows]) if (rows or header is not None) else 0
+    # <caption> 表题曾整段丢弃——另起一行输出
+    _cap = el.xpath("./caption")
+    if _cap:
+        _ct = _inline_text(_cap[0]).strip()
+        if _ct:
+            lines.append(_ct)
     if header is not None:
-        lines.append("| " + " | ".join(_escape_cell(c) for c in header) + " |")
-        lines.append("| " + " | ".join(["---"] * len(header)) + " |")
+        _h = header + [""] * (_n - len(header))
+        lines.append("| " + " | ".join(_escape_cell(c) for c in _h) + " |")
+        lines.append("| " + " | ".join(["---"] * _n) + " |")
     elif rows:
         # 审查八轮（MEDIUM）：无 <th> 表头（td 当表头 / thead 里用 td）的表此前只输出
         # 数据行、缺 GFM 分隔行 → 渲染器当成普通段落，表格语义整块丢失。补一个空表头
         # + 分隔行（不丢任何数据行，与 pandas.to_markdown 对无表头表的口径一致）。
-        _n0 = max(len(r) for r in rows)
-        lines.append("| " + " | ".join([""] * _n0) + " |")
-        lines.append("| " + " | ".join(["---"] * _n0) + " |")
+        lines.append("| " + " | ".join([""] * _n) + " |")
+        lines.append("| " + " | ".join(["---"] * _n) + " |")
     # 列宽取最大（表头/数据行取宽），不做 [:n] 截断——超出表头宽度的数据单元格保留
-    n = max([len(header)] if header is not None else []) + 0 if header is not None else 0
-    n = max([n] + [len(r) for r in rows]) if (rows or header is not None) else 0
+    n = _n
     for r in rows:
         cells = r + [""] * (n - len(r))
         lines.append("| " + " | ".join(_escape_cell(c) for c in cells) + " |")
@@ -422,7 +448,9 @@ def discover_forms(html_text: str, base_url: str = "") -> List[Dict[str, Any]]:
         fields: List[Dict[str, Any]] = []
         for inp in form_el.iter("input", "select", "textarea"):
             tag = inp.tag.lower() if isinstance(inp.tag, str) else ""
-            it = inp.get("type", tag)
+            # 收官十二轮（审查 L）：无 type 的 <input> 是合法 HTML（默认 text）——
+            # 曾返回不存在的类型名 "input"；docstring 也承诺 "text"
+            it = inp.get("type") or ("text" if tag == "input" else tag)
             nm = inp.get("name") or inp.get("id") or ""
             if not nm:
                 continue
@@ -434,8 +462,14 @@ def discover_forms(html_text: str, base_url: str = "") -> List[Dict[str, Any]]:
             if label:
                 f["label"] = label
             if tag == "select":
-                opts = [o.get("value") or (o.text_content() or "").strip()
-                        for o in inp.iter("option") if o.get("value") is not None or o.text_content()]
+                # 收官十二轮（审查 L）：`value=""` 是合法空值（"请选择"占位项）——
+                # 曾回退成可见文本，value/label 混在一起。仅 value 缺失（None）才用文本
+                opts = []
+                for o in inp.iter("option"):
+                    _v = o.get("value")
+                    if _v is None:
+                        _v = (o.text_content() or "").strip()
+                    opts.append(_v)
                 f["options"] = opts[:20]
             elif it in ("hidden",):
                 f["value"] = inp.get("value", "")

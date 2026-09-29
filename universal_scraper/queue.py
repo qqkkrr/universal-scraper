@@ -151,8 +151,11 @@ def extract_links(html: str, base_url: str, allow: Optional[str] = None,
     links = set()
     # 忽略 <script>/<style> 内容里的 href（JS 模板字符串误匹配）
     _clean = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S | re.I)
-    for m in re.finditer(r'href=["\']([^"\']+)["\']', _clean, re.I):
-        u = m.group(1).strip()
+    # 收官十二轮（审查 L，实测）：只认带引号 href——HTML5 无引号属性（minify 后的
+    # 现代站点大量如此，如 example.com 的 <a href=https://…>）全部漏检，
+    # quick.fetch_url(links=True)/MCP scrape(links) 静默返回空。引号改可选
+    for m in re.finditer(r'href=\s*(?:"([^"]+)"|\'([^\']+)\'|([^"\'\s>]+))', _clean, re.I):
+        u = (m.group(1) or m.group(2) or m.group(3) or "").strip()
         if not u or u.startswith(("javascript:", "#", "mailto:", "tel:")):
             continue
         # 审查二轮（M）：HTML 实体曾不解码——href="a?x=1&amp;y=2" 入键后与

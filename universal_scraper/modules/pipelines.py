@@ -33,7 +33,11 @@ def _parse_zh_datetime(text: str, base) -> Optional[Any]:
         if re.fullmatch(r"(刚刚|现在|刚刚发布|just now)", v, re.I):
             return base
         # 2) 绝对日期 2026-8-7 11:08 / 2026年8月7日11:08 / 2026-08-07
-        m = re.search(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})[日]?(?:[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?", v)
+        # 收官十二轮（审查 L）：日期与时间之间的 `[ T]+` 要求至少一个分隔符——
+        # 中文站常见的"2026年8月7日11:08"（无空格）只取到日期，时间静默归零。
+        # 改 `[\s T]*`，并支持 "11时08分" 中文时间形态
+        m = re.search(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})[日号]?\s*"
+                      r"(?:[ T]*(\d{1,2})[:时点](\d{1,2})(?:[:分]?(\d{1,2}))?)?", v)
         if m:
             try:
                 return _dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
@@ -96,7 +100,13 @@ def _parse_zh_datetime(text: str, base) -> Optional[Any]:
 
 def content_hash(item: Dict[str, Any], fields: Optional[list] = None) -> str:
     """对条目算 SHA-256 内容指纹（对标 browsertrix-crawler-deduplication 内容哈希去重）。
-    fields 指定时只对这几个字段；否则对所有非元字段。"""
+    fields 指定时只对这几个字段；否则对所有非元字段。
+
+    收官十二轮（审查，实测）：fields 传字符串（配置写 "fields": "title"，或按
+    contract 文档写单数 "field"）曾按**单个字符**建 payload——所有记录哈希相同，
+    整批被压成 1 条（静默丢 99%）。此处归一为列表，并由调用侧接受 field/fields 两名。"""
+    if isinstance(fields, str):
+        fields = [fields]
     if fields:
         payload = {k: item.get(k) for k in fields}
     else:
@@ -163,6 +173,13 @@ class Pipeline(BasePipeline):
                 if op == "regex":
                     # 兼容 AI 生成写法：value 或 pattern 都认（历史上 AI 常写 value）
                     _pat = step.get("pattern", "") or step.get("value", "")
+                    # 收官十二轮（审查 L）：非字符串 pattern（AI 常写数值 2025）会让
+                    # re.search 抛 TypeError 冒泡到引擎的 except → 该条被静默丢弃。
+                    # 按"非法正则"同口径处理（跳过该步、保留行）
+                    if _pat and not isinstance(_pat, str):
+                        self._bump(self.skipped, f"filter:{field}:正则非字符串")
+                        self._warn_once(f"filter 字段 {field} 的正则不是字符串（{_pat!r}），已跳过该步")
+                        continue
                     if _pat:
                         # R24 修复：用户正则必须有 ReDoS 防线——与 selectors 同一
                         # lint + 截断（此前 filter 的正则完全裸奔，一个灾难模式
@@ -202,16 +219,17 @@ class Pipeline(BasePipeline):
             elif t == "dedup":
                 key = step.get("key", "id")
                 if key == "content_hash":
-                    k = content_hash(item, step.get("fields"))
+                    k = content_hash(item, step.get("fields") or step.get("field"))
                     with self._state_lock:
                         if k in self.vars.get("_seen_hash", set()):
                             return None
                         self.vars.setdefault("_seen_hash", set()).add(k)
                     continue
                 keys = key if isinstance(key, list) else [key]
-                k = tuple(str(item.get(kk) or "") for kk in keys)
-                # OCR R131（M）：字面量 "None" 曾被当缺失跳过——业务数据里的
-                # 合法 "None" 字符串全部绕过去重。None→"" 已由 or "" 处理
+                # 收官十二轮（审查 M，实测）：`or ""` 曾把 0/0.0/False 归一成空串，
+                # 整条跳过去重——数值型 key（从 0 起的序号/楼层）的重复行全放行。
+                # 缺失只认 None
+                k = tuple("" if item.get(kk) is None else str(item.get(kk)) for kk in keys)
                 if any(x == "" for x in k):
                     continue
                 with self._state_lock:
@@ -224,7 +242,9 @@ class Pipeline(BasePipeline):
                     _prev.add(k)
             elif t == "dedup_content":
                 # 便捷别名：{"type":"dedup_content","fields":["title","body"]}
-                k = content_hash(item, step.get("fields"))
+                # 收官十二轮（审查）：contract 文档写的单数 field 曾静默忽略——
+                # 退化成全字段去重（正文相同、他列不同的两条都保留）。两名都收
+                k = content_hash(item, step.get("fields") or step.get("field"))
                 with self._state_lock:  # OCR R131 终审：曾漏锁——并发下双条通过
                     if k in self.vars.get("_seen_hash", set()):
                         return None
@@ -234,7 +254,14 @@ class Pipeline(BasePipeline):
                 v = item.get(field)
                 try:
                     if ctype == "int" and v not in (None, ""):
-                        item[field] = int(float(str(v).replace(",", "")))
+                        # 收官十二轮（审查 M）：曾一律 int(float(...))——19 位雪花
+                        # ID/订单号经 float 丢精度静默改值（…789 → …768）。
+                        # 纯整数字符串直接 int，失败再回退 float 路径
+                        _s = str(v).replace(",", "").strip()
+                        try:
+                            item[field] = int(_s)
+                        except ValueError:
+                            item[field] = int(float(_s))
                     elif ctype == "float" and v not in (None, ""):
                         item[field] = float(str(v).replace(",", ""))
                     elif ctype == "str":
@@ -363,6 +390,12 @@ class Pipeline(BasePipeline):
                         raw = fetch_bytes(u, headers=step.get("headers"), proxy=step.get("proxy"), timeout=int(step.get("timeout", 60)))
                         if raw:
                             fp.write_bytes(raw)
+                        else:
+                            # 收官十二轮（审查 M）：fetch_bytes 按契约"失败返回 None
+                            # 并写 last_error"（404/超限/出站守卫/网络失败）走正常
+                            # 返回路径——曾静默置空零告警。此处补明确诊断
+                            _err = getattr(fetch_bytes, "last_error", "") or "未知原因"
+                            self._warn_once(f"download 未取到内容（{_err}）: {u[:80]}")
                     if fp.exists() and fp.stat().st_size >= min_size:
                         item[out_field] = str(fp)
                     else:

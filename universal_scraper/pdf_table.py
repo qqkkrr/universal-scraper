@@ -117,6 +117,25 @@ def download_pdf(url: str, proxy: Optional[str] = None, timeout: int = 60,
     return Path(tmp)
 
 
+def _dedup_names(names: List[str]) -> List[str]:
+    """重名列名去重（加递增数字后缀）。
+
+    收官十二轮（审查 H/L）：重名表头在建 row dict 时互相覆盖（前一列数据永久
+    丢失）——PDF 与 xlsx 两条路径统一走本函数。"""
+    _seen: Dict[str, int] = {}
+    out: List[str] = []
+    for nm in names:
+        base = nm
+        if base in _seen:
+            _n = _seen[base] + 1
+            while f"{base}{_n}" in _seen:
+                _n += 1
+            nm = f"{base}{_n}"
+        _seen[nm] = 1
+        out.append(nm)
+    return out
+
+
 def _clean_cell(cell: str, col_name: str = "", header: bool = False) -> str:
     """单元格清理：去空白、按列类型智能拼接换行。"""
     c = (cell or "").replace("\u3000", " ")
@@ -133,6 +152,10 @@ def _clean_cell(cell: str, col_name: str = "", header: bool = False) -> str:
     # 部门/单位类：顿号拼接（多单位并列）
     if any(k in (col_name or "") for k in _JOIN_BY_COL["、"]):
         return "、".join(lines)
+    # 收官十二轮（审查 L）：依据/法规类的分号拼接是**_JOIN_BY_COL 里定义了却从未
+    # 消费的死配置**——多行依据被无分隔直接连成一句
+    if any(k in (col_name or "") for k in _JOIN_BY_COL["；"]):
+        return "；".join(lines)
     # 其余：下一行以《【（( 开头视为新条目加分号，否则是续行直接拼接
     out = lines[0]
     for ln in lines[1:]:
@@ -193,8 +216,11 @@ def _looks_like_header(row: List[str]) -> bool:
     cells = [(c or "").strip() for c in row if (c or "").strip()]
     if len(cells) < 2:
         return False
-    # 表头是短词：任何单元格都不该是长句/带书名号
-    if any(len(c) > 12 or "《" in c or "。" in c for c in cells):
+    # 表头是短词：任何单元格都不该是长句/带书名号。
+    # 收官十二轮（审查 M）：12 字上限过严——"统一社会信用代码/纳税人识别号"（15 字）
+    # 的合法表头判不出，表头行被当数据行发出、列名退化成 列1..列N。放宽到 24 字
+    # 并保留长句判据（带句号/书名号/超长才否决）
+    if any(len(c) > 24 or "《" in c or "。" in c for c in cells):
         return False
     strong = sum(1 for c in cells if any(k in c for k in STRONG_HEADER_KWS))
     weak = sum(1 for c in cells if any(k in c for k in HEADER_KEYWORDS))
@@ -244,21 +270,27 @@ def extract_tables_from_pdf(path: str) -> List[Dict[str, Any]]:
                         hdr = []
                         inherit_pos: List[int] = []
                         _seen_h: Dict[str, int] = {}
+                        _last_base = ""      # 左邻**基名**（未加后缀），连续空继承用
                         for j, c in enumerate(cells):
                             name = re.sub(r"\s+", "", c or "").strip()
                             if not name and hdr:
-                                name = hdr[-1]  # 合并单元格：继承左邻
+                                name = _last_base or hdr[-1]  # 合并单元格：继承左邻基名
                                 inherit_pos.append(j)
                             elif not name:
                                 name = f"列{j + 1}"
+                            _last_base = name
                             # 审查八轮（MEDIUM）：同名表头（两列都叫「数量」/合并单元格
                             # 继承出同名）在建 row dict 时互相覆盖 → 前者数据永久丢失。
                             # 同名列加数字后缀（colspan 展开后两列都能保留）。
+                            # 收官十二轮（审查 H，实测）：继承名与后缀名曾不登记——
+                            # 连续多空（colspan 合并）时第 2、3 列同名，两列数值被空
+                            # 格拼成一格（列边界丢失）。后缀名生成后立即登记
                             if name in _seen_h:
-                                _seen_h[name] += 1
-                                name = f"{name}{_seen_h[name]}"
-                            else:
-                                _seen_h[name] = 1
+                                _n = _seen_h[name] + 1
+                                while f"{name}{_n}" in _seen_h:
+                                    _n += 1
+                                name = f"{name}{_n}"
+                            _seen_h[name] = 1
                             hdr.append(name)
                         last_header = hdr
                         last_inherit = inherit_pos
@@ -336,10 +368,17 @@ def normalize_field_names(rows: List[Dict[str, Any]], fields: List[str]) -> List
         return rows
     mapping: Dict[str, str] = {}
     used: set = set()
+    # 收官十二轮（审查 L）：映射曾只基于 rows[0] 的键——后续行才出现的列名
+    # 不参与匹配（列名不统一）。改为所有行键的并集
+    _all_cols: List[str] = []
+    for _r in rows:
+        for _k in _r.keys():
+            if _k not in _all_cols:
+                _all_cols.append(_k)
     for f in fields:
         fk = re.sub(r"[（(].*?[)）]", "", f or "")
         best_col, best_score = "", 0
-        for col in rows[0].keys():
+        for col in _all_cols:
             if col.startswith("_") or col in used:
                 continue
             ck = re.sub(r"[（(].*?[)）]", "", col)
@@ -430,7 +469,7 @@ def parse_xlsx(path: str, fields: Optional[List[str]] = None) -> Dict[str, Any]:
                 continue
             if header is None:
                 # 第一行非空即表头（含关键词更好，但不强求）
-                header = [v or f"列{i + 1}" for i, v in enumerate(vals)]
+                header = _dedup_names([v or f"列{i + 1}" for i, v in enumerate(vals)])
                 continue
             rec: Dict[str, Any] = {}
             for i, v in enumerate(vals):

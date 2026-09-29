@@ -327,6 +327,7 @@ def user_videos(client, mid: Any, wbi: Dict[str, str],
             "dm_img_inter": dm_img_inter or '{"ds":[],"wh":[0,0,0],"of":[0,0,0]}'}
     out: List[Dict[str, Any]] = []
     _seen_bvid: set = set()
+    _scanned = 0               # 已扫描条数（含被 year 过滤掉的）——耗尽判定用
     boundary_crossed = False   # 已见到早于目标年份的视频（下界越过分明，结果完整）
     reached_end = False        # 短页/空页（自然耗尽）
     total_known: Optional[int] = None  # arc/search 响应携带的投稿总数
@@ -342,6 +343,7 @@ def user_videos(client, mid: Any, wbi: Dict[str, str],
         if not arcs:
             reached_end = True
             break
+        _scanned += len(arcs)
         stop = False
         for a in arcs:
             bv = a.get("bvid", "")
@@ -367,7 +369,12 @@ def user_videos(client, mid: Any, wbi: Dict[str, str],
                         "时长秒": a.get("length", ""), "播放量": a.get("play", 0),
                         "弹幕总数": a.get("video_review", 0), "aid": a.get("aid", "")})
         # R122/R123：total 耗尽判定在处理之后——len(out) >= total = 自然耗尽
-        if (total_known is not None and len(out) >= total_known):
+        # 收官十二轮（审查 H，实测）：total_known 是接口声明的**全部年份**投稿数，
+        # 而 len(out) 是 year 过滤后的行数——year 模式下 `len(out) >= total_known`
+        # 几乎不可能成立（60 条投稿里筛出 30 条），恰好扫满整页且 total 为 30 倍数
+        # 时明明全量已到仍抛"未扫描完"，CLI 直接丢弃正确的整年数据。改按**已扫描
+        # 条数**（含被过滤掉的）与 total 比较
+        if total_known is not None and _scanned >= total_known:
             reached_end = True
             break
         if stop:

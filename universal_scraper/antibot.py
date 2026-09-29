@@ -182,10 +182,18 @@ def human_solve(image_path: Path, answer_file: Path, prompt: str = "") -> str:
     if ans.lower() == "q":
         # OCR R131（H）：'q' 是退出指令而非验证码——曾把 "q" 写进答案文件并被
         # 桥提交为验证码解答。审查二轮（H）：改写空串后 wait_for_answer_file 的
-        # `if ans:` 会当"还没答"继续挂满 300s——用显式退出哨兵，wait 侧识别
-        ans = _QUIT_SENTINEL
+        # `if ans:` 会当"还没答"继续挂满 300s——用显式退出哨兵，wait 侧识别。
+        # 收官十二轮（审查 L，实测）：哨兵写进 answer 文件后，唯一的实际消费者是
+        # JS 桥——它会 fill("__quit__") 并提交（滑块拖到 x=0），"退出"被变成
+        # "提交垃圾答案"。改为写独立的 .abort 标记 + 不碰答案文件，桥端未见答案
+        # 只会等到自身超时；Python 侧调用方据 abort 标记中止
+        try:
+            answer_file.with_name(answer_file.name + ".abort").write_text("q", encoding="utf-8")
+        except Exception:
+            pass
+        return ""
     answer_file.write_text(ans, encoding="utf-8")
-    return "" if ans == _QUIT_SENTINEL else ans
+    return ans
 
 
 # ---------------------------------------------------------------- 统一入口（solve-file 协议）
@@ -274,9 +282,16 @@ _QUIT_SENTINEL = "__quit__"  # 人工应答的退出指令哨兵（空串与"尚
 def wait_for_answer_file(answer_file: Path, timeout: int = 300) -> Optional[str]:
     """轮询等待答案文件出现（人机/外部进程）。"""
     deadline = time.time() + timeout
+    _abort = answer_file.with_name(answer_file.name + ".abort")
     while time.time() < deadline:
-        # OCR R131（M）：exists→read 的 TOCTOU——文件在两步间被外部进程替换/删除
-        # 时 read 抛异常曾炸掉等待循环。读取失败按"还没写好"继续轮询
+        # 收官十二轮（审查 L）：用户按 q 退出时 human_solve 写的是 .abort 标记
+        # （不再把哨兵写进答案文件，防桥把它当答案提交）——这里同样识别
+        # 历史哨兵值（旧版本写进答案文件的路径）
+        try:
+            if _abort.exists():
+                return ""
+        except OSError:
+            pass
         try:
             ans = answer_file.read_text(encoding="utf-8").strip()
         except OSError:
@@ -426,7 +441,20 @@ def detect_block(status: int = 200, text: str = "", headers: Optional[Dict[str, 
     _ct = h.get("content-type", "")
     _is_json = "json" in _ct.lower()
     # 1) 状态码直接判
+    # 收官十二轮（审查 M，实测）：CF 挑战页正是以 403/503 返回（diagnose 自己把
+    # cloudflare 的状态码列为 403/503/429/200），但这里先短路返回 kind='403'/'503'
+    # → body 里的 "Just a moment"/"cf-chl" 永远看不到；调用方（api_session）把
+    # 403/503 归入硬停机并写"封禁"证据，而 cloudflare/verify 才走可恢复的冷却重试
+    # → 一个可过的挑战站被判成封禁、整轮作废。命中状态码时先跑一遍挑战类结构指纹
     if status in STATUS_BLOCK:
+        _t_body = (text or "")[:20000].lower()
+        if _t_body and not _looks_like_data(text or ""):
+            for _kind, _pat in STRUCTURAL_BLOCK_PATTERNS:
+                if _kind in ("cloudflare", "verify"):
+                    _m = _pat.search(_t_body)
+                    if _m:
+                        return {"kind": _kind, "status": status,
+                                "detail": f"HTTP {status} 且含挑战页结构指纹：{_m.group(0)[:60]}"}
         return {"kind": STATUS_BLOCK[status], "detail": f"HTTP {status}", "status": status}
     if status >= 400:
         return {"kind": "http_error", "detail": f"HTTP {status}", "status": status}

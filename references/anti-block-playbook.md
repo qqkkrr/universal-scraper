@@ -42,6 +42,16 @@
 | **采集中途页面突然跳转 `website-login/error?...error_code=300013&error_msg=访问频繁，请稍后再试`** | **小红书频率限流（300013）：短期高频打开笔记页/评论翻页累积触发** | 立即收手冷却 5-10 分钟，勿重试硬闯；后续会话导航间隔 ≥3-5s、评论区滚动轮次按需收敛；数据已捕获部分照常解析交付，缺的等冷却后补（小红书 2026-09 实测） |
 | **采集能拿到 `window.__INITIAL_STATE__` 的站，运行时 `Object.getOwnPropertyNames(window)` 里却没有它（SSR HTML `<script>` 里有）** | **水合后删除全局状态（React/Vue SSR 消费即删）** | 别读运行时全局——直接从捕获的 SSR HTML 正文提取 `window.__INITIAL_STATE__=` 后面的字面量；注意它不是纯 JSON：`\bundefined\b`→null、`NaN`→null、`new Set(X)`/`new Map(X)`→X（配平括号替换），`</script>` 查找边界会被 JSON 内嵌 script 字符串截断，用花括号配平法取完整 blob（小红书 2026-09 实测） |
 | **拼多多 H5：搜索接口 POST `/proxy/api/search` 回 `error_code 54001`+verify_auth_token（页面弹滑块/拼图）；新号继续自动化导航后升级为全站跳 `psnl_identify.html?scene=COMMON_VERIFY`（"请前往APP完成人脸认证"，**连商品详情页都拦**）；分类页滚动静默触发 `/proxy/api/api/phantom/obtain_captcha`；但**首页信息流/分类浏览/登录后的商品评论页长期正常** | **拼多多账号级行为风控：搜索面最敏感，新设备+程序化节奏从滑块逐级升到人脸墙（升级不可逆，小号即废）** | 换有历史的账号 + **用户手工暖号**（搜索→进商品页→翻评论全程真人节奏）；自动化阶段只做页内滚动与响应捕获，**不发新导航风暴**（商品页一次探测即可暴露墙）；评论采集走 `goods_comments.html?goods_id=X`（拼多多 2026-09 实战，动线见 R43） |
+| **直连 403 Cloudflare 盾；换真浏览器渲染后 HTTP 200，但整页正文只剩一句 "Please login to continue / Please log in to verify you are not a bot / If you are looking to access data through our API, please visit our developer portal"；官方 API 门户（developer.stockx.com）只提供 Seller / Catalog / Order 类接口，面向卖家与企业** | **商业行情平台闭源化：CF 盾 + 登录墙双闸 + 官方 API 指向企业侧（StockX / GOAT 实测 2026-09；GOAT 连 robots.txt 都返回 CF 挑战页，商品页探测 404）** | **别升 ladder——登录墙是红线，升到 L3/L4 同样过不了，纯粹浪费用户时间**。直接换源三选一：①**已发表二手数据集**（学术首选，如 IEEE DataPort DOI `10.21227/mdj8-4y59`「StockX Sneaker Size-Day Dataset」，136,980 条 / 50 款鞋 / 2025-05~09 日频，颗粒度 鞋×尺码×天，含 lowest ask / highest bid / last sale + Google Trends score，DOI 可直接引用）②**平台官方 API 或数据合作邮件申请**（说明学术用途 + 承诺不公开原始数据、只发表聚合统计量）③商业托管数据服务（Apify / WebScrapingAPI 等，**外包爬取不转移法律风险，慎作论文主数据源**） |
+| **Web 端 SPA 壳可通（200），但 `jsrecon` 扫完全部 JS 包后**零数据端点**（只剩备案 PDF 之类的静态链接）；真实数据接口在 App 端且带 native 层签名** | **App 端闭源站（得物 dewu.com 实测 2026-09）：Web 侧根本没有接口可抓，取数必须逆向 App 签名 + 伪造设备指纹 + 自动过滑块 + 解密混淆字体** | **四项全部落在合规红线内（不逆向签名 / 不伪造指纹 / 不程序过滑块），直接拒单，一次都别试**。换源或改研究设计；学术场景优先已发表数据集或官方数据合作申请 |
+
+⚠️ **接单前先确认字段在目标站是否真的存在**（得物/StockX 战训 2026-09 双踩）：
+球鞋转售类平台（StockX / GOAT）**非 UGC 平台，没有买家评论系统、没有用户主页 /
+粉丝数 / IP 属地**。任务书若含「评论 N 条 + 用户主页 N 个」，换任何合规源都拿不到，
+**必须在开工前告知用户并砍需求**，不要抓完行情才发现两块数据为零。
+另：StockX 只有聚合统计（salesLast72Hours / salesCount90Days / averagePrice90Days），
+**没有逐笔成交明细**，也没有「卖家数量」「最近成交时间」的等价字段——
+别把「近 30 天成交记录」当成可抓的逐笔流。
 
 **数据型任务 API 优先（batch1700 实测：400 项中约 60% 的关键数据在 JSON API 里，
 HTML 抓取反而是简单情况）**：凡目标是"数值/行情/名单/统计"类数据，侦察第一步

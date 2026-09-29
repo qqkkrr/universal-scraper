@@ -28,10 +28,17 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 
 
 def _guard_url(url: str) -> str:
-    """安全边界：仅 http/https；host 解析到私网/环回/保留地址即拒绝。"""
+    """安全边界：仅 http/https；host 解析到私网/环回/保留地址即拒绝。
+
+    收官十二轮（审查 L）：与 core.assert_public_url / rangedl 同口径——支持
+    US_ALLOW_PRIVATE=1 白名单（内网附件服务器/本地 mock），此前不生效。
+    """
+    import os as _os
     sp = urlsplit(url)
     if sp.scheme not in ("http", "https") or not sp.hostname:
         raise ValueError(f"仅允许 http/https 绝对地址: {url}")
+    if _os.environ.get("US_ALLOW_PRIVATE") == "1":
+        return url
     try:
         for info in socket.getaddrinfo(sp.hostname, None):
             ip = ipaddress.ip_address(info[4][0])
@@ -144,12 +151,27 @@ def table_quality_report(tables: List[Dict[str, Any]]) -> Dict[str, Any]:
                 empty += 1
     empty_rate = (empty / cells) if cells else 1.0
     fallback_rate = (fallback / n_rows) if n_rows else 0.0
+    # 收官十二轮（审查 M，实测）：判据只有"全部键都是 列N"——首行是数据、被当
+    # 表头的表（列名成了数据值）判不出，CLI 照报 ✅。补两条：表头键里数字占比
+    # 过半（"甲/计算机/50/45/40"）、或键长超限（长句当列名）都算退化
+    _datakey_rows = 0
+    for r in rows:
+        keys = [str(k) for k in r.keys() if not str(k).startswith("_")]
+        if not keys:
+            continue
+        _numish = sum(1 for k in keys if _re.fullmatch(r"[-+]?\d[\d,]*\.?\d*%?", k.strip()))
+        _long = sum(1 for k in keys if len(k.strip()) > 24)
+        if _numish * 2 >= len(keys) or _long:
+            _datakey_rows += 1
+    _datakey_rate = (_datakey_rows / n_rows) if n_rows else 0.0
     # 审查修复 P2：0 表格同样是假成功（扫描件/图片型 PDF 常见）——归入退化
-    degraded = (bool(rows) and (fallback_rate >= 0.5 or empty_rate >= 0.6)) or n_rows == 0
+    degraded = (bool(rows) and (fallback_rate >= 0.5 or empty_rate >= 0.6
+                                or _datakey_rate >= 0.5)) or n_rows == 0
     return {"rows": n_rows, "fallback_col_rows": fallback,
             "fallback_rate": round(fallback_rate, 2),
+            "datakey_rate": round(_datakey_rate, 2),
             "empty_rate": round(empty_rate, 2), "degraded": degraded,
-            "hint": ("表格疑似无框线/版式型——pdfplumber 几何还原失效，"
+            "hint": ("表格疑似无框线/版式型或首行数据被当表头——"
                      "当前输出可能是垃圾列。建议改用文本版式解析（按词坐标聚类）或人工核对"
                      if degraded else "")}
 
@@ -164,7 +186,11 @@ def extract_tables(pdf_path: str | Path, pages: Optional[List[int]] = None) -> L
     fp = Path(pdf_path).expanduser()
     if not fp.exists():
         raise FileNotFoundError(f"PDF 不存在: {fp}")
-    if fp.read_bytes()[:4] != b"%PDF":
+    # 收官十二轮（审查 L）：整文件读盘 + 严格首 4 字节——BOM 前缀（规范允许）的
+    # 合法 PDF 被拒（实测 pdfplumber 能正常打开）。只读头部 1KB 并在其中定位 %PDF
+    with open(fp, "rb") as _f:
+        _head = _f.read(1024)
+    if b"%PDF" not in _head:
         raise ValueError(f"不是有效 PDF: {fp}")
     # 审查修复：0/负页码曾静默读成最后一页
     # OCR R131 终审（H）：调用方显式给了 pages 但过滤后为空（全是 0/负数）——

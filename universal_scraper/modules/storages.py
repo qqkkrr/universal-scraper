@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sys
 import threading
 from pathlib import Path
@@ -100,7 +101,9 @@ class CsvStorage(JsonLinesStorage):
             except Exception:
                 rows = []
         tmp = path.with_name(path.name + ".rewrite.tmp")
-        with open(tmp, "w", newline="", encoding="utf-8") as ft:
+        # 收官十二轮（审查 M）：重写曾用 utf-8（无 BOM）——同一文件是否有 BOM
+        # 取决于中途是否扩过列，Excel 打开中文乱码。与新建路径同用 utf-8-sig
+        with open(tmp, "w", newline="", encoding="utf-8-sig") as ft:
             w = csv.DictWriter(ft, fieldnames=list(self.fields), extrasaction="ignore")
             w.writeheader()
             for r in rows:
@@ -131,6 +134,12 @@ class CsvStorage(JsonLinesStorage):
             self.writer = csv.DictWriter(self.f, fieldnames=list(self.fields), extrasaction="ignore")
             if not self._existed_at_open:
                 self.writer.writeheader()
+            elif grew:
+                # 收官十二轮（审查 H，实测）：跨运行追加时本轮首条即带新列，曾只建
+                # writer 不扩表头 → 磁盘表头 2 列、该行 3 列，整文件不可解析
+                # （pandas: Expected 2 fields in line 4, saw 3）。与下文"中途扩列"
+                # 同口径：整表重写为并集表头
+                self._rewrite_with_new_header()
         elif grew:
             # 追加模式中途出现新列：**重写整表**（读回已写行 + 并集表头，原子替换）。
             # 审查八轮（MEDIUM）：此前只重建 DictWriter 不扩表头——新行比表头多列，
@@ -140,9 +149,13 @@ class CsvStorage(JsonLinesStorage):
             self._rewrite_with_new_header()
         row = {}
         for k, v in item.items():
-            # CSV 公式注入（审查 P1）：抓取文本以 =+-@ 开头时 Excel 会当公式执行
+            # CSV 公式注入（审查 P1）：抓取文本以 =+-@ 开头时 Excel 会当公式执行。
+            # 收官十二轮（审查 L）：`-3.5`/`+8613...` 是合法数值/电话而非公式——
+            # 加前缀会让 pandas 读到字符串 "'-3.5"，数值列全变文本。纯数字形态
+            # （含百分比/千分位）不做前缀
             s = "" if v is None else str(v)
-            if s[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            if s[:1] in ("=", "+", "-", "@", "\t", "\r") and \
+                    not re.fullmatch(r"[-+]\d[\d,]*\.?\d*%?", s):
                 s = "'" + s
             row[k] = s
         self.writer.writerow(row)

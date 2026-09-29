@@ -32,10 +32,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 def _assert_http_url(url: str) -> str:
-    """SSRF 边界：仅 http/https；host 解析到私网/环回/保留地址即拒绝。"""
+    """SSRF 边界：仅 http/https；host 解析到私网/环回/保留地址即拒绝。
+
+    收官十二轮（审查 L）：与 core.assert_public_url / rangedl 同口径——支持
+    US_ALLOW_PRIVATE=1 白名单（内网期刊镜像/本地 mock 场景），此前文档承诺的
+    开关在这里不生效。
+    """
+    import os as _os
     sp = urllib.parse.urlsplit(url)
     if sp.scheme not in ("http", "https"):
         raise ValueError(f"仅允许 http/https URL: {url}")
+    if _os.environ.get("US_ALLOW_PRIVATE") == "1":
+        return url
     for info in socket.getaddrinfo(sp.hostname, None):
         ip = ipaddress.ip_address(info[4][0])
         if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
@@ -236,8 +244,17 @@ def parse_issue_html(text: str, issue: Dict[str, str],
             author_m = re.search(r'class="j-author"[^>]*>(.*?)</div>', block, re.S)
             author = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", author_m.group(1))).strip() if author_m else ""
             doi_m = re.search(r'doi:\s*(10\.19571/j\.cnki\.1000-2995\.\d{4}\.\d{2}\.\d+)', block)
-            vol_m = re.search(r'class="j-volumn"[^>]*>(.*?)</span>', block, re.S)
-            vol_txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", vol_m.group(1))).strip() if vol_m else ""
+            # 收官十二轮（审查 M，实测真实站点）：`class="j-volumn"[^>]*>(.*?)</span>`
+            # 非贪婪停在**内层** </span>——真实结构 `…47(3): </span> 1-12.</span>`
+            # 的页码在内层之后被截断丢弃，交付 CSV 的 pages 列全部为空页范围。
+            # 改为非贪婪跨过内层标签、抓到外层 </span>（或补捉 `</span>\s*(\d+-\d+)`）
+            vol_m = re.search(r'class="j-volumn"[^>]*>(.*?)</span>\s*(\d+\s*[-–—]\s*\d+)?\s*\.?\s*</span>', block, re.S) \
+                or re.search(r'class="j-volumn"[^>]*>(.*?)</span>', block, re.S)
+            if vol_m and vol_m.lastindex and vol_m.lastindex >= 2 and vol_m.group(2):
+                vol_txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", vol_m.group(1))).strip()
+                vol_txt = f"{vol_txt} {vol_m.group(2).replace(' ', '')}"
+            else:
+                vol_txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", vol_m.group(1))).strip() if vol_m else ""
             arts.append({
                 "id": art_id, "title": title, "authors": author,
                 "doi": doi_m.group(1) if doi_m else "",
@@ -302,6 +319,12 @@ def fetch_article_meta(art: Dict[str, Any], site: Dict[str, str]) -> Dict[str, A
         en_title = mget("citation_title_en") or mget("dc.title.alternative")
         meta = {"abstract": abstract[:3000], "keywords": keywords,
                 "pub_date": pub_date, "en_title": en_title}
+        # 收官十二轮（审查 L）：CAST 文章页无 citation_* meta 时四字段全空仍按成功
+        # 处理并进缓存（知识库摘要/关键词整列为空且无提示）。关键字段全空 = 解析
+        # 失败，置 _meta_error 让调用方与缓存逻辑都能看见
+        if not (abstract or keywords or pub_date):
+            meta["_meta_error"] = ("页面未含 citation_* / description 元数据"
+                                   "（CAST 路径需从期次页取摘要）")
     except Exception as e:
         meta = {"abstract": "", "keywords": "", "pub_date": "", "en_title": "",
                 "_meta_error": f"{type(e).__name__}: {e}"}

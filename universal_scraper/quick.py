@@ -68,8 +68,11 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
         # 审查修复（P1，R5）：set_request_budget(0) 会清掉并发 engine 任务的
         # 进程级预算（WebUI 多线程实证）——持引擎串行锁 + 限值/计数还原。
         from .engine_v3 import _ENGINE_RUN_LOCK
-        _saved = request_budget()
+        # 收官十二轮（审查 M，实测）：快照曾在**取锁之前**读——并发第二个 fetch_url
+        # 读到的是被第一个调用清零后的 {used:0, limit:0}，退出时还原成 limit=0
+        # （=不限），引擎的 max_requests 硬闸从此失效。锁内读快照
         _ENGINE_RUN_LOCK.acquire()
+        _saved = request_budget()
         try:
             set_request_budget(0)
             _anti = {"min_interval": 0.2, "timeout": timeout,
@@ -479,7 +482,10 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
             return (junk, not biz)  # False 排前：业务非 vendor 最先
         urls = sorted(urls, key=_rank)
     api_pat = re.compile(
-        r'(?:["\'])(/[A-Za-z0-9_\-]*/(?:api|service|gateway|rest|query|search|inquiry)[/\w\-./]*'
+        # 收官十二轮（审查 M，实测）：首分支要求关键字前**先有一个路径段**——
+        # "/api/user/info"、"/service/x" 这类关键字作首段的路径全漏（api_candidates
+        # 静默为空，而 path_fragments 里明明有）。关键字段可选前缀
+        r'(?:["\'])(/(?:[A-Za-z0-9_\-]+/)*(?:api|service|gateway|rest|query|search|inquiry)[/\w\-./]*'
         r'|https?://[\w.\-]+/(?:api|gateway|service)[/\w\-./]*'
         r'|baseURL[:\s]*["\']([^"\']{4,120})["\'])')
     # batch1401 战训：webpack 压缩包会吐 "baseURL\"),E=i(\" 这类拼接噪声。

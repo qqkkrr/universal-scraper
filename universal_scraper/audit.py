@@ -32,10 +32,13 @@ def _norm(s) -> str:
 
 
 def _safe_int(v, default):
-    """残缺单元格/浮点串安全转 int：失败返回 default（审计器输入恰是可能残缺的交付物）。"""
+    """残缺单元格/浮点串安全转 int：失败返回 default（审计器输入恰是可能残缺的交付物）。
+
+    收官十二轮（审查 L）：`float("inf")` 过 float() 但 int() 抛 OverflowError——
+    契约是"失败返回 default"，未捕获会让整个审计崩溃。"""
     try:
         return int(float(str(v)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -105,11 +108,21 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
             universe_rows = []
             issues.append(f"清单 CSV 读取失败（窗口检查跳过）: {type(e).__name__}: {e}")
         for r in universe_rows:
-            code = "".join(ch for ch in str(r.get("stkcd", "")) if ch.isdigit()).zfill(6)
+            # 收官十二轮（审查 H，实测）：pandas 导出的 stkcd 常带浮点尾——
+            # "1.0" 曾得 "000010"（**另一家公司**的窗口挂到这里）、"600519.0"
+            # 得 7 位永不匹配（全表误报违例）。与 research.load_universe 同款修复
+            _raw = str(r.get("stkcd", "")).strip()
+            if _raw.endswith(".0"):
+                _raw = _raw[:-2]
+            code = "".join(ch for ch in _raw if ch.isdigit()).zfill(6)
             win[code] = (_safe_int(r.get("first_year"), year_from), _safe_int(r.get("last_year"), year_to))
         viol = []
         for r in t:
-            code6 = str(r[H["stkcd"]] or "").zfill(6)
+            # 面板侧同样规范化（原值直接 zfill 时 "1.0"→"00001.0" 恒不匹配）
+            _rawp = str(r[H["stkcd"]] or "").strip()
+            if _rawp.endswith(".0"):
+                _rawp = _rawp[:-2]
+            code6 = "".join(ch for ch in _rawp if ch.isdigit()).zfill(6)
             if code6 not in win:
                 viol.append((r[H["stkcd"]], r[H["year"]]))
                 continue
@@ -173,11 +186,32 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
     if texts_dir:
         td = Path(texts_dir)
         have = {m.group(0) for m in (re.match(r"\d{6}_\d{4}", f.name) for f in td.glob("*.txt.gz")) if m}
-        uncovered = [k for k in ((str(r[H['stkcd']]), str(r[H['year']])) for r in real)
-                     if f"{k[0]}_{k[1]}" not in have]
-        flagged = sum(1 for r in real if "不可复现" in str(r[H.get("备注", -1)] or ""))
-        if len(uncovered) > flagged:
-            issues.append(f"文本源缺失 {len(uncovered)} > 已标注不可复现 {flagged}（有未标注的缺口）")
+        # 收官十二轮（审查 M）：覆盖检查曾用原字符串拼文件名、抽验用 _safe_int——
+        # year 为文本 "2015.0"（CSV→Excel 常见）时一边报缺档、一边抽验命中，结论
+        # 自相矛盾。覆盖检查同样走 _safe_int 后再拼名
+        uncovered = []
+        for r in real:
+            _stk = str(r[H['stkcd']])
+            _yy = _safe_int(r[H["year"]], None)
+            _key = f"{_stk}_{_yy}" if _yy is not None else f"{_stk}_{r[H['year']]}"
+            if _key not in have:
+                uncovered.append((_stk, r[H['year']]))
+        # 收官十二轮（审查 H/M）：`H.get("备注", -1)` 在缺列时取**最后一列**——
+        # 用无关列内容决定豁免（title 同款 bug 已修，这两处漏改）。缺列时不允许
+        # 用备注豁免（保守：缺口照报）；且未标注缺口改为集合差而非数量比较
+        # （任意行写"不可复现"曾能等量掩盖真缺口）
+        _note_col = H.get("备注")
+        if _note_col is None:
+            flagged = 0
+            _unflag = uncovered
+        else:
+            _flagged_keys = {(str(r.get(H["stkcd"])), str(r.get(H["year"])))
+                             for r in real if "不可复现" in str(r.get(_note_col) or "")}
+            flagged = len(_flagged_keys)
+            _unflag = [k for k in uncovered if k not in _flagged_keys]
+        if _unflag:
+            issues.append(f"文本源缺失 {len(uncovered)} > 已标注不可复现 {flagged}"
+                          f"（未标注缺口 {len(_unflag)}: {_unflag[:3]}）")
         random.seed(7)
         samp = random.sample(real, min(sample, len(real)))
         okl = 0
@@ -227,7 +261,9 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
                 jian = sum(head.count(c) for c in "国关于这时总运网发后来区员会务东车语")
                 if fan > jian * 2 and fan > 10:
                     n_trad += 1
-                    if "繁体" not in str(r[H.get("备注", -1)] or ""):
+                    # 收官十二轮（审查 H）：备注列缺失时曾用 -1 取末列决定豁免
+                    _nc = H.get("备注")
+                    if _nc is None or "繁体" not in str(r.get(_nc) or ""):
                         n_unflagged += 1
             if n_trad:
                 log(f"繁体披露版 {n_trad} 行（未标注 {n_unflagged}）")
@@ -367,7 +403,10 @@ def audit_verbatim(json_path: str, sources: dict, text_field: str = "clause_text
     if missing_src:
         issues.append(f"条款引用的 doc_id 无对应源文件 {len(missing_src)} 个: {sorted(missing_src)[:5]}")
         return issues
-    miss = sum(1 for c in cls if _norm(c[text_field]) not in texts[c[doc_field]])
+    # 收官十二轮（审查 L）：空/空白条款的 _norm("") 为空串，`"" in 任何文本` 恒真
+    # 被算作命中——空条款至少应报未中
+    miss = sum(1 for c in cls
+               if not _norm(c[text_field]) or _norm(c[text_field]) not in texts[c[doc_field]])
     if miss:
         issues.append(f"逐字回源未中 {miss}/{len(cls)}")
     if unique:

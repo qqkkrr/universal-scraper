@@ -462,6 +462,11 @@ def handle_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return _error(mid, -32602, f"未知工具: {name}", {"available": list(TOOL_IMPLS)})
         try:
             out = TOOL_IMPLS[name](args)
+        except (TypeError, ValueError) as e:
+            # 收官十二轮（审查 L）：客户端参数类型错（depth="abc" 等）曾是 -32603
+            # "内部错误"——按 JSON-RPC 口径应是 -32602 Invalid params，否则被当
+            # 服务端 bug 而非调用方错误
+            return _error(mid, -32602, f"{name} 参数非法: {type(e).__name__}: {e}")
         except Exception as e:
             return _error(mid, -32603, f"{name} 执行失败: {type(e).__name__}: {e}")
         text = json.dumps(out, ensure_ascii=False, default=str)
