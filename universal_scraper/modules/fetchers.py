@@ -499,6 +499,15 @@ class ScraplingFetcher(BaseFetcher):
             proxies = {"http": _px, "https": _px}
         kwargs = dict(impersonate=self.impersonate, timeout=30, headers=headers or None,
                       proxies=proxies, follow_redirects=True)
+        # 收官十三轮（审查 L，实测）：scrapling 只发 GET——req.method/body 既不
+        # 使用也不告警，自定义 parser 发 POST 时静默降级成 GET 且返回值照常被
+        # 解析计成功。明确不支持（永久错误），别让调用方拿到错数据
+        if str(req.method or "GET").upper() != "GET" or req.body:
+            from ..protocols import PermanentFetchError
+            raise PermanentFetchError(
+                url=req.url, status=0,
+                detail=f"scrapling 取数器仅支持 GET（收到 {req.method}"
+                       f"{' 带 body' if req.body else ''}）——请改用 http 后端或浏览器模式")
         try:
             if self.stealthy:
                 try:
@@ -511,8 +520,18 @@ class ScraplingFetcher(BaseFetcher):
             else:
                 r = Fetcher.get(req.url, **kwargs)
         except Exception as e:  # noqa: BLE001
+            # 收官十三轮（审查 M，实测）：曾把一切失败（连接重置/超时/DNS）包成
+            # PermanentFetchError——引擎对永久错误"跳过不重试不计错误"，一次网络
+            # 抖动就永久放弃该 URL，max_retries 完全失效，最终以 0 条收场并给出
+            # 误导性诊断。暂态网络错误按普通异常抛出交给引擎退避重试
+            _msg = f"{type(e).__name__}: {e}"
+            if any(k in _msg.lower() for k in (
+                    "connection", "timeout", "timed out", "reset", "refused",
+                    "resolve", "unreachable", "ssl", "temporarily")):
+                raise RuntimeError(f"scrapling 网络错误（可重试）: {_msg}") from e
             from ..protocols import PermanentFetchError
-            raise PermanentFetchError(url=req.url, status=0, detail=f"scrapling 抓取失败: {e}") from e
+            raise PermanentFetchError(url=req.url, status=0,
+                                      detail=f"scrapling 抓取失败（非暂态）: {_msg}") from e
         # scrapling 0.4.x 的 Response：正文在 .body(bytes)，.text 属性可能为空，优先 .body
         _body = getattr(r, "body", None)
         if not _body:

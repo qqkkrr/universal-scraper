@@ -258,17 +258,35 @@ class EngineV3:
         self.pending_file = out_dir / f".pending_{safe_fname(task.name)}.json"
         self._latencies: deque = deque(maxlen=20)
         # R101 新能力：run 时序指标（对标 Crawlee Platform run 统计）——
-        # 每页完成追加一个采样点，落 <out>/.metrics.json 供 webui /api/metrics 画图
+        # 每页完成追加一个采样点，落 <out>/.metrics.json 供 webui /api/metrics 画图。
+        # 收官十三轮（审查 L）：曾用 list 无界累积（落盘只裁 5000）——max_requests=0
+        # 的不限任务跑百万页时内存线性涨（实测约 190B/页）。deque(maxlen) 同口径封顶
+        import collections as _collections
         self._metrics_t0 = time.time()
-        self._metrics: List[Dict[str, Any]] = [{"t": 0, "fetched": 0, "items": 0,
-                                                "errors": 0, "qps": 0.0}]
+        self._metrics = _collections.deque(
+            [{"t": 0, "fetched": 0, "items": 0, "errors": 0, "qps": 0.0}], maxlen=5000)
         self._metrics_last_flush = 0.0
+        # 收官十三轮（审查 M）：本run已完成的请求键（method|url|params|body），
+        # 供 _save_state / --resume 与 Request.key() 同口径对齐
+        self._done_req_keys: set = set()
+        # 本轮产生的 _url 集合（详情+spool 回写后按归属过滤导出用，见 _finalize）
+        self._run_urls: set = set()
+        self._spool_rewritten = False
         self._lock = threading.Lock()
         self._stop = False
         self._all_items: List[Dict[str, Any]] = []
         # 内存 spool：大任务不把全部条目驻留内存（默认 5 万条后自动切磁盘读）
         out_cfg = self.config.get("output", {}) or {}
         self._spool_threshold = int(out_cfg.get("spool_threshold", 50000))
+        # 收官十三轮（审查 M2，实测）：spool 模式的回退导出依赖 <out>/items/<name>.jsonl
+        # ——storage 用 sqlite/csv/自定义后端时不产生该文件，一旦条目超过阈值，
+        # _all_items 只剩前 threshold 条，json/csv/xlsx **导出被静默截断**（100 万条
+        # 任务只导出 5 万条）而 run() 报全量 total。非 jsonl 后端禁用 spool 截断
+        _stype = str(store_cfg.get("type") or "jsonl").lower()
+        if _stype != "jsonl" and self._spool_threshold < 10 ** 12:
+            self.logger.warn("storage 非 jsonl 后端——spool 截断会导致导出不全，"
+                             "已禁用截断（内存按 delta 全量保存）；超大任务建议改 jsonl 后端")
+            self._spool_threshold = 10 ** 12
         self._spooling = False
         self._last_page_saved = False
         self._last_page_2_saved = False
@@ -479,11 +497,15 @@ class EngineV3:
                             self.logger.info(f"跳过（分布式已见）: {new_req.url}")
                             continue
                         # R101 修复（P1）：完整序列化请求（method/params/page）——
-                        # 曾只存 url/depth，分页请求弹回后退化成第 1 页死循环
+                        # 曾只存 url/depth，分页请求弹回后退化成第 1 页死循环。
+                        # 收官十三轮（审查 M）：body 也曾漏序列化——Request.key 含
+                        # body（queue.snapshot_urls 已补），dist 路径丢了 body，
+                        # worker 还原出 body=None 的 POST（实际发无体请求且计成功）
                         self.dist.push({"url": new_req.url, "depth": new_req.depth,
                                         "method": new_req.method,
                                         "params": new_req.meta.get("params"),
-                                        "page": new_req.meta.get("page")})
+                                        "page": new_req.meta.get("page"),
+                                        "body": new_req.body})
                         continue  # 共享队列持有该 URL——本机 pop 空时会取回
                     except Exception as e:
                         # Redis 抖动不丢数据：退回本地入队
@@ -595,8 +617,19 @@ class EngineV3:
                         elif not self._spooling:
                             self._spooling = True
                             self.logger.info(f"条目超过 {self._spool_threshold}，已切换为磁盘 spool（内存不再累计）")
+                        # 收官十三轮（审查 M）：登记本轮 _url（spool 回写后过滤历史行用）
+                        _ru = str(item.get("_url") or "")
+                        if _ru:
+                            with self._lock:
+                                self._run_urls.add(_ru)
             # R102：整页处理成功后统一标记分布式已见（一次，页级口径）——
             # 曾挂在 per-item/增量键上的两种写法分别漏"0 条幸存页"和默认配置
+            # 收官十三轮（审查 M，实测）：本地 resume 也按**请求键**记账。
+            # state 曾存响应 URL（_url）→ 带 params/重定向的请求键永不命中，
+            # --resume 变全量重抓（日志却打"已跳过 N 个历史 URL"）；dist 路径
+            # 早已用 req.key()，本地路径漏改
+            with self._lock:
+                self._done_req_keys.add(req.key())
             if self.dist is not None:
                 try:
                     self.dist.mark(self.storage_name, req.key())
@@ -772,9 +805,18 @@ class EngineV3:
         if self.resume and self.state_file.exists():
             try:
                 state = json.loads(self.state_file.read_text(encoding="utf-8"))
+                _n_key = _n_legacy = 0
                 for u in state.get("urls", []):
-                    self.queue.mark_seen(u)
-                self.logger.info(f"断点续跑：已跳过 {state.get('urls', []) and len(state['urls'])} 个历史 URL")
+                    # 收官十三轮（审查 M）：新格式存的是请求键（含 "|"，与
+                    # Request.key() 同口径）；旧格式是裸响应 URL——两条路都支持
+                    if "|" in str(u):
+                        self.queue.mark_key(str(u))
+                        _n_key += 1
+                    else:
+                        self.queue.mark_seen(str(u))
+                        _n_legacy += 1
+                self.logger.info(f"断点续跑：已跳过 {_n_key + _n_legacy} 个历史 URL"
+                                 f"（请求键 {_n_key} / 旧格式 {_n_legacy}）")
             except Exception as e:
                 self.logger.warn(f"断点状态加载失败: {e}")
 
@@ -1218,6 +1260,15 @@ class EngineV3:
                 except Exception:
                     old_urls = set()
             urls = sorted(old_urls | {str(r.get("_url", "")) for r in self._all_items if r.get("_url")})
+            # 收官十三轮（审查 M）：并入本轮已完成的**请求键**——resume 侧据此
+            # 精确还原（mark_key），带 params/body 的请求才不会再抓一遍
+            with self._lock:
+                _keys = set(self._done_req_keys)
+            try:
+                _keys |= {str(r.get("_req_key", "")) for r in self._all_items if r.get("_req_key")}
+            except Exception:
+                pass
+            urls = sorted(set(urls) | {k for k in _keys if k})
             # spool 模式下 _all_items 只有内存子集——已落盘的记录 URL 必须从
             # jsonl 补齐（审查 P2：否则 resume 对 3 万条已抓记录一无所知）
             if self._spooling and self._spool_path is not None and self._spool_path.exists():
@@ -1284,8 +1335,11 @@ class EngineV3:
                             # R116 at-least-once：随行原文入 meta——页成功后 ack 释放；
                             # 不 ack 则 visibility_timeout 后自动重投
                             _meta["dist_member"] = _d.get("dist_member")
+                            # 收官十三轮（审查 M）：body 回填——缺了它 POST 请求
+                            # 还原成无体请求（Request.key 含 body，两边口径必须一致）
                             req = Request(url=_d["url"], depth=int(_d.get("depth") or 1),
                                           method=str(_d.get("method") or "GET"),
+                                          body=_d.get("body"),
                                           meta=_meta)
                     except Exception:
                         pass  # Redis 抖动：按本地空处理，走既有 idle 逻辑
@@ -1367,7 +1421,8 @@ class EngineV3:
         """时序指标落 <out>/.metrics.json（失败静默——指标绝不拖垮抓取）。"""
         try:
             p = self.out_dir / ".metrics.json"
-            p.write_text(json.dumps(self._metrics[-5000:], ensure_ascii=False), encoding="utf-8")
+            # deque 不支持切片（曾写 [-5000:]）——maxlen 已封顶，直接整体序列化
+            p.write_text(json.dumps(list(self._metrics), ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
 
@@ -1600,6 +1655,8 @@ class EngineV3:
                                               for r in rows) + "\n", encoding="utf-8")
                     _tmp.replace(_sp)
                     self._spool_start = 0
+                    # 标记"整文件已被回写"——_finalize 需按本轮归属过滤历史行
+                    self._spool_rewritten = True
                     self.logger.info(f"详情：合并结果已写回 spool（{len(rows)} 条）")
                 else:
                     _sd = (store_cfg.get("dir") or "items")
@@ -1673,6 +1730,17 @@ class EngineV3:
                             loaded.append(json.loads(line))
                         except Exception:
                             continue
+                    # 收官十三轮（审查 M1，实测）：详情+spool 路径会把**整个追加式
+                    # jsonl（含上一轮历史行）**读回、回写并把 _spool_start 重置为 0
+                    # ——导出混入历史行（本轮 10 条却导出 20 条）。回写过后按
+                    # "本轮产生的 _url"过滤，与偏移无关地保证只导出本轮数据
+                    if getattr(self, "_spool_rewritten", False) and self._run_urls:
+                        _before = len(loaded)
+                        loaded = [r for r in loaded
+                                  if str(r.get("_url") or r.get("url") or "") in self._run_urls]
+                        if _before != len(loaded):
+                            self.logger.info(f"spool：回写后按本轮归属过滤历史行 "
+                                             f"{_before} -> {len(loaded)}")
                     rows = loaded
                     self.logger.info(f"spool：从 {_sp} 读回本次 {len(loaded)} 条用于导出")
                 else:

@@ -442,6 +442,9 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
     concurrency = int(detail.get("concurrency", 1))
     interval = float(detail.get("interval", 0.5))
     timeout = float(anti.get("timeout", 15))
+    # 收官十三轮（审查 L）：checkpoint_every=0（"不落检查点"的自然写法，config
+    # 不拦）曾让 `i % 0` 抛 ZeroDivisionError，整个任务在导出前崩掉
+    _ck_every = int(detail.get("checkpoint_every") or 20)
     todo = [r for r in rows if not (r.get("detail_body") or "").strip()]
     # R90 修复（P2）：opt-in respect_robots 时详情请求也曾绕过 robots——
     # 与 fetch_list 同闸
@@ -572,7 +575,7 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
                 _work(r)
             except Exception as e:
                 r["detail_status"] = f"ERR:{type(e).__name__}"
-            if checkpoint and i % detail.get("checkpoint_every", 20) == 0:
+            if checkpoint and _ck_every > 0 and i % _ck_every == 0:
                 checkpoint.save(rows, done + i, len(rows))
             time.sleep(interval)
     else:
@@ -587,7 +590,7 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
                     fut.result()
                 except Exception as e:
                     r["detail_status"] = f"ERR:{type(e).__name__}"
-                if checkpoint and i % detail.get("checkpoint_every", 20) == 0:
+                if checkpoint and _ck_every > 0 and i % _ck_every == 0:
                     checkpoint.save(rows, done + i, len(rows))
                 time.sleep(interval / concurrency)
         except BaseException:
@@ -790,7 +793,19 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
     # try/finally 缩进风险大，用 atexit 兜底（正常路径 954 仍先行删除；残留场景
     # 下次运行另有 PID 判死接管双保险）
     import atexit as _atexit
-    _atexit.register(lambda: _run_lock.unlink(missing_ok=True))
+
+    def _cleanup_lock():
+        """收官十三轮（审查 M，实测）：atexit 回调绑定整个进程寿命——长驻进程
+        （webui/mcp）退出时会删掉**此刻另一位持有者（另一个进程）的活锁**，
+        随后第三个进程可同时进入同一 out_dir（导出/checkpoint/seen 互踩）。
+        删前确认锁文件里的 PID 仍是自己"""
+        try:
+            if _run_lock.exists() and _run_lock.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                _run_lock.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    _atexit.register(_cleanup_lock)
     cap_dir = out_dir / ".captcha"
     cap_dir.mkdir(parents=True, exist_ok=True)
     anti["captcha_dir"] = str(cap_dir)
@@ -984,7 +999,17 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             kept = []
             _pending_keys = []  # 审查修复 P1：延后到导出成功再标记（镜像 v3 契约）
             for r in rows:
-                key = record_key(r, inc.get("key", "id"))
+                # 收官十三轮（审查 H，实测）：去重键为空曾整条静默丢弃（不入 kept
+                # 也不告警，日志还报"跳过已见"）；复合键各项全缺时 record_key 返回
+                # 真值 "|"，本轮全保留但导出后 mark("|") 落盘——**下一轮这批记录
+                # 全被当已见丢弃**。与 engine_v3 同口径：键不完整 = 无键，照常保留、
+                # 不判重也不标记
+                _rk = inc.get("key", "id")
+                _parts = _rk if isinstance(_rk, list) else [_rk]
+                if any(r.get(_p) in (None, "") for _p in _parts):
+                    kept.append(r)
+                    continue
+                key = record_key(r, _rk)
                 if key and not seen.is_seen(key):
                     _pending_keys.append(key)
                     kept.append(r)
