@@ -226,6 +226,27 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
                           f"record.fields 应为 dict {{列名: {{from: 字段}}}}，当前为 {type(rec_fields).__name__}",
                           '例如: {"标题": {"from": "title"}}')
 
+    # 收官十五轮（用户复盘）：pipeline 跑在详情**之前**——引用了 detail.extract
+    # 才产出的字段时，派生列恒空且**没有任何报错**（实测 regex_extract 派生列为
+    # None）。这里在跑之前就把这个坑说出来，并指路 detail.post_pipeline
+    try:
+        import sys as _sys
+        _rec_fields = set((rec_fields or {}).keys()) if isinstance(rec_fields, dict) else set()
+        _det_names = {str(e.get("name")) for e in ((detail or {}).get("extract") or [])
+                      if isinstance(e, dict) and e.get("name")} if isinstance(detail, dict) else set()
+        _detail_only = _det_names - _rec_fields
+        if _detail_only:
+            _hit = [f"{i}:{s.get('type')}({s.get('field')})" for i, s in enumerate(pipeline)
+                    if isinstance(s, dict) and str(s.get("field") or "") in _detail_only]
+            if _hit:
+                print("[WARN] pipeline 引用了仅在详情阶段产出的字段 "
+                      f"{sorted(_detail_only)}（步骤 {_hit[:3]}）——pipeline 跑在详情**之前**，"
+                      "这些步骤会静默拿到空值、派生列恒为 None。请把这类步骤搬到 "
+                      'detail.post_pipeline（详情合并后执行，键与 pipeline 完全一致）',
+                      file=_sys.stderr, flush=True)
+    except Exception:
+        pass  # 告警失败绝不影响校验主流程
+
     ab = cfg.get("anti_bot", {})
     if ab is not None and not isinstance(ab, dict):
         raise ConfigError("anti_bot", "anti_bot 应为 dict",
@@ -395,30 +416,62 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
                               f"可选: {', '.join(sorted(ALL_PIPELINE_TYPES))}")
         if pt == "download" and not step.get("field"):
             raise ConfigError(f"pipelines[{i}]", "download 流水线需要 field（下载 URL 字段）")
+    # 收官十五轮（用户复盘）：pipelines 跑在详情**之前**——引用了 detail.extract
+    # 才产出的字段时派生列恒空且无报错。跑之前先说清楚，并指路 post_pipeline
+    try:
+        import sys as _sys2
+        _dc = cfg.get("detail")
+        _p_fields = set()
+        for _pc in (cfg.get("parsers") or {}).values():
+            if isinstance(_pc, dict):
+                _p_fields.update((_pc.get("fields") or {}).keys())
+        _d_names = {str(e.get("name")) for e in ((_dc or {}).get("extract") or [])
+                    if isinstance(e, dict) and e.get("name")} if isinstance(_dc, dict) else set()
+        _d_only = _d_names - _p_fields
+        if _d_only:
+            _hit2 = [f"{i}:{s.get('type')}({s.get('field')})"
+                     for i, s in enumerate(cfg.get("pipelines", []) or [])
+                     if isinstance(s, dict) and str(s.get("field") or "") in _d_only]
+            if _hit2:
+                print(f"[WARN] pipelines 引用了仅在详情阶段产出的字段 {sorted(_d_only)}"
+                      f"（步骤 {_hit2[:3]}）——pipelines 跑在详情**之前**，这些步骤会静默"
+                      "拿到空值。请把这类步骤搬到 detail.post_pipeline（详情合并后执行）",
+                      file=_sys2.stderr, flush=True)
+    except Exception:
+        pass  # 告警失败不影响校验主流程
     # detail.filters 校验（审查八轮，HIGH）：v3 的详情过滤此前**完全不校验**，
     # 坏步骤（如 {"type":"cast"} 缺 field、filter 缺 value）在抓完之后才崩——
     # 异常穿透 _run_locked，_finalize/_save_state 全被跳过，输出目录只剩 items/
     # （json/csv/xlsx/state 一个都没有）。与顶层 pipelines 同口径，跑之前拦住。
     _det_cfg = cfg.get("detail")
     if isinstance(_det_cfg, dict):
-        for i, step in enumerate(_det_cfg.get("filters", []) or []):
-            if not isinstance(step, dict):
-                raise ConfigError(f"detail.filters[{i}]",
-                                  f"过滤步骤应为 dict，实际 {type(step).__name__}",
-                                  '例如: {"type": "filter", "field": "标题", "op": "contains", "value": "2024"}')
-            pt = step.get("type")
-            if pt not in ALL_PIPELINE_TYPES:
-                raise ConfigError(f"detail.filters[{i}].type", f"未知流水线类型 '{pt}'",
-                                  f"可选: {', '.join(sorted(ALL_PIPELINE_TYPES))}")
-            if pt in ("filter", "cast", "add", "validate", "download", "split",
-                      "rename", "default", "template") and not step.get("field"):
-                raise ConfigError(f"detail.filters[{i}]", f"{pt} 步骤需要 field"
-                                  "（modules/pipelines.py 用 step[\"field\"] 取值，缺则 KeyError 崩详情阶段）")
-            if pt == "filter" and step.get("op", "contains") in ("contains", "eq", "not_contains") \
-                    and step.get("value") is None and not step.get("pattern"):
-                raise ConfigError(f"detail.filters[{i}].value",
-                                  f"filter(op={step.get('op', 'contains')}) 需要 value（或 regex 用 pattern）",
-                                  '例如: {"type": "filter", "field": "标题", "op": "contains", "value": "中标"}')
+        # 收官十五轮：post_pipeline（详情后处理，与 filters 同义/跨引擎统一键）
+        # 与 filters 同口径校验
+        for _dkey in ("filters", "post_pipeline"):
+            for i, step in enumerate(_det_cfg.get(_dkey, []) or []):
+                _where = f"detail.{_dkey}[{i}]"
+                if not isinstance(step, dict):
+                    raise ConfigError(_where,
+                                      f"过滤步骤应为 dict，实际 {type(step).__name__}",
+                                      '例如: {"type": "filter", "field": "标题", "op": "contains", "value": "2024"}')
+                pt = step.get("type")
+                if pt not in ALL_PIPELINE_TYPES:
+                    raise ConfigError(f"{_where}.type", f"未知流水线类型 '{pt}'",
+                                      f"可选: {', '.join(sorted(ALL_PIPELINE_TYPES))}")
+                if pt in ("filter", "cast", "add", "validate", "download", "split",
+                          "rename", "default", "template", "transform", "regex_extract") \
+                        and not step.get("field"):
+                    raise ConfigError(_where, f"{pt} 步骤需要 field"
+                                      "（modules/pipelines.py 用 step[\"field\"] 取值，缺则 KeyError 崩详情阶段）")
+                if pt == "regex_extract" and not step.get("pattern"):
+                    raise ConfigError(f"{_where}.pattern", "regex_extract 需要 pattern",
+                                      '例如: {"type": "regex_extract", "field": "raw", '
+                                      '"pattern": r"(\\\\d+)", "to": "数字"}')
+                if pt == "filter" and step.get("op", "contains") in ("contains", "eq", "not_contains") \
+                        and step.get("value") is None and not step.get("pattern"):
+                    raise ConfigError(f"{_where}.value",
+                                      f"filter(op={step.get('op', 'contains')}) 需要 value（或 regex 用 pattern）",
+                                      '例如: {"type": "filter", "field": "标题", "op": "contains", "value": "中标"}')
     # parsers 类型校验（任务自带 modules/parser.py 时跳过）
     if not has_custom_parser:
         for pname, pcfg in (cfg.get("parsers", {}) or {}).items():

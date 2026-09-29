@@ -47,17 +47,21 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
     if _sp.scheme not in ("http", "https"):
         return {"url": url, "status": 0, "text": "",
                 "error": f"仅允许 http/https: {url}"}
-    try:
-        import socket as _sock
-        for _info in _sock.getaddrinfo(_sp.hostname, None):
-            _ip = _ipa.ip_address(_info[4][0])
-            if _ip.is_private or _ip.is_loopback or _ip.is_reserved or _ip.is_link_local:
-                return {"url": url, "status": 0, "text": "",
-                        "error": f"拒绝私有/保留地址: {_sp.hostname}"}
-    except Exception as _e:
-        # 审查三轮（M）：曾只捕 gaierror——IDN 域名的 UnicodeError 等穿透崩掉
-        # fetch_url。解析失败归一为 error dict
-        return {"url": url, "status": 0, "text": "", "error": f"域名解析失败: {_e}"}
+    # 收官十五轮：与 core/journals/pdf_attach/rangedl 同口径——支持
+    # US_ALLOW_PRIVATE=1 白名单（内网镜像/本地 mock）；默认仍拒绝私网
+    import os as _os
+    if _os.environ.get("US_ALLOW_PRIVATE") != "1":
+        try:
+            import socket as _sock
+            for _info in _sock.getaddrinfo(_sp.hostname, None):
+                _ip = _ipa.ip_address(_info[4][0])
+                if _ip.is_private or _ip.is_loopback or _ip.is_reserved or _ip.is_link_local:
+                    return {"url": url, "status": 0, "text": "",
+                            "error": f"拒绝私有/保留地址: {_sp.hostname}"}
+        except Exception as _e:
+            # 审查三轮（M）：曾只捕 gaierror——IDN 域名的 UnicodeError 等穿透崩掉
+            # fetch_url。解析失败归一为 error dict
+            return {"url": url, "status": 0, "text": "", "error": f"域名解析失败: {_e}"}
     if not browser:
         # OCR R131 二轮（CRITICAL）：HTTP 路径曾无 SSRF 校验直连（js_recon 有、
         # 这里没有）——auto/agent 流程的 URL 可指向 169.254.169.254 云元数据。
@@ -402,15 +406,20 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
     sp = urlsplit(url)
     if sp.scheme not in ("http", "https"):
         return {"error": f"仅允许 http/https: {url}"}
-    try:
-        for info in socket.getaddrinfo(sp.hostname, None):
-            ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-                return {"error": f"拒绝私有/保留地址: {sp.hostname} -> {ip}"}
-    except Exception as e:
-        # 审查五轮（H）：曾只捕 gaierror——中文 IDN 域名的 UnicodeError 穿透
-        # （与 fetch_url 同款，此文件两处口径已统一）
-        return {"error": f"域名解析失败: {e}"}
+    # 收官十五轮：同 fetch_url——支持 US_ALLOW_PRIVATE=1 白名单，默认仍拒绝私网
+    import os as _os2
+    if _os2.environ.get("US_ALLOW_PRIVATE") == "1":
+        pass
+    else:
+        try:
+            for info in socket.getaddrinfo(sp.hostname, None):
+                ip = ipaddress.ip_address(info[4][0])
+                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                    return {"error": f"拒绝私有/保留地址: {sp.hostname} -> {ip}"}
+        except Exception as e:
+            # 审查五轮（H）：曾只捕 gaierror——中文 IDN 域名的 UnicodeError 穿透
+            # （与 fetch_url 同款，此文件两处口径已统一）
+            return {"error": f"域名解析失败: {e}"}
 
     from .core import make_http_client
     client = make_http_client({"min_interval": 0.5, "timeout": 20, "http_backend": "auto"})

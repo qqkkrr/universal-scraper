@@ -299,6 +299,8 @@ def main() -> int:
                              "JS 挑战类判型不完整，疑阻断时用完整模式复核")
     diag_p.add_argument("--history", nargs="?", const="", default=None, metavar="URL关键词",
                         help="📒 查诊断台账（可带 URL 关键词过滤，省略=全部最近记录），不发起诊断")
+    diag_p.add_argument("--out", default="", metavar="路径",
+                        help="把原始诊断 JSON 另存到指定文件（与 --json 同内容；批量/留证用）")
 
     cdp_p = sub.add_parser("cdp", help="🔗 调试 Chrome (9222) 辅助：列标签页 / 查登录态 / 导 Cookie")
     cap_p = sub.add_parser("captcha", help="🧩 验证码人机协同：CDP 附加真 Chrome + 文件协议"
@@ -2076,6 +2078,17 @@ def main() -> int:
                     _tmp.replace(_lp)
         except Exception:
             pass  # 台账是锦上添花，落账失败绝不影响诊断结论
+        if getattr(args, "out", ""):
+            # 收官十五轮（用户复盘）：diagnose 少了 --out，与其他命令参数风格不一致
+            # （用户明确点名）。与 --json 同内容，供批量/留证
+            try:
+                _op = Path(args.out).expanduser()
+                _op.parent.mkdir(parents=True, exist_ok=True)
+                _op.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+                print(f"📄 诊断 JSON 已存: {_op}")
+            except Exception as e:
+                print(f"⚠️ --out 写入失败: {type(e).__name__}: {e}", file=sys.stderr)
+                return 1
         if args.json:
             print(json.dumps(d, ensure_ascii=False, indent=1))
         else:
@@ -2330,9 +2343,31 @@ def main() -> int:
             import re as _re
             _raw_html = result.get("html") or result.get("text") or ""
             _scripts = len(_re.findall(r"<script", _raw_html, _re.I))
+            # 收官十五轮（用户复盘）：**先识别 SSR/内联数据页**再谈"壳页"。用户实测
+            # 93KB 的 SSR 页数据全在标记里，旧逻辑一律按"壳页→上浏览器+capture"劝
+            # （方向错误：SSR 根本不需要浏览器），甚至对中等大小的页打出"原文本身
+            # 就是小页面"的误导提示。SSR 特征：原文大 + 脚本少 + 含内联数据标记
+            _ssr_like = (len(_raw_html) >= 8000 and _scripts < 4 and bool(_re.search(
+                r"__DATA__|__NEXT_DATA__|__NUXT__|__INITIAL_STATE__|__APOLLO_STATE__|"
+                r"window\.__|application/(?:ld\+)?json|data-(?:page|props|state)=",
+                _raw_html, _re.I)))
             _empty_extract = _cl < 60
             _shellish = bool(result.get("shell_suspect")) or _empty_extract or (
                 len(_raw_html) >= 4000 and _scripts >= 3 and _cl < 200)
+            if _ssr_like:
+                print(f"ℹ️ 抽取正文偏短（{_cl} 字符）但原文 HTML 很大（{len(_raw_html)}B，"
+                      f"script×{_scripts}）且含**内联数据**——疑似 SSR/内联 JSON 页："
+                      "数据在 HTML 标记里，不是壳页、也不需要浏览器。下一步："
+                      "① fetch --raw --out page.html 看原始 HTML 确认数据结构 "
+                      "② 用 run --config 把 record.fields 指向数据容器（如 JSON 在 script 里，"
+                      "可用 selectors.extract_embedded_json_rows 或 source.type=http_json）"
+                      "③ 明细页字段放 detail.extract、清洗放 detail.post_pipeline",
+                      file=sys.stderr)
+                print(content)
+                if args.out:
+                    fp = save_result(result, args.out, as_json=False)
+                    print(f"\n（内容已保存，供按 SSR 结构重写配置）: {fp}")
+                return 3
             if _shellish:
                 print(f"⛔ 内容为空或极短（{_cl} 字符；原文 {len(_raw_html)}B / script×{_scripts}）"
                       "——大概率是壳页/渲染失败/被拦截，按铁律 3 走诊断："

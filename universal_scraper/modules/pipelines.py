@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from typing import Any, Dict, Optional
 
 from ..protocols import BasePipeline
@@ -269,6 +270,75 @@ class Pipeline(BasePipeline):
                 except (ValueError, TypeError, OverflowError):
                     # OCR R131（属性测试抓获）：超大整数（>1.8e308）经 float 转 int
                     # 抛 OverflowError——曾不在捕获列表，整条管线炸掉
+                    pass
+            elif t == "regex_extract":
+                # 收官十五轮（用户复盘）：v3 此前未实现 regex_extract/transform——
+                # 唯一能跑在**详情之后**的入口（detail.filters/post_pipeline）因此
+                # 无法清洗 detail.extract 产出的字段，用户被迫外挂 Python 脚本。
+                # 语义与 v2 run_pipeline 对齐（field/pattern/group/to），并接受 out 别名
+                fld = step.get("field")
+                if not fld:
+                    self._warn_once("regex_extract 缺 field——步骤跳过")
+                    self._bump(self.skipped, "regex_extract:缺field")
+                    continue
+                _pat = step.get("pattern", "")
+                if not isinstance(_pat, str):
+                    self._warn_once(f"regex_extract 的 pattern 应为字符串（{_pat!r}），步骤跳过")
+                    self._bump(self.skipped, "regex_extract:pattern非字符串")
+                    continue
+                try:
+                    grp = int(step.get("group", 1))
+                except (TypeError, ValueError):
+                    self._warn_once(f"regex_extract group 非整数（按 1 处理）: {step.get('group')!r}")
+                    grp = 1
+                to = step.get("to") or step.get("out") or f"{fld}_提取"
+                val = item.get(fld)
+                if val in (None, ""):
+                    continue
+                # 与 filter/validate 同口径：ReDoS 防线 + 文本截断
+                from ..selectors import regex_is_dangerous, _REGEX_TEXT_CAP
+                _txt = str(val)[:_REGEX_TEXT_CAP]
+                try:
+                    if regex_is_dangerous(_pat):
+                        self._bump(self.skipped, f"regex_extract:{fld}:危险正则已跳过")
+                        self._warn_once(f"regex_extract 字段 {fld} 的正则被判定为灾难回溯模式，"
+                                        f"已跳过该步：{_pat[:60]}")
+                        continue
+                    m = re.search(_pat, _txt)
+                except re.error:
+                    self._bump(self.skipped, f"regex_extract:{fld}:非法正则")
+                    self._warn_once(f"regex_extract 字段 {fld} 的正则非法，已跳过该步：{_pat[:60]}")
+                    continue
+                if m:
+                    try:
+                        item[to] = m.group(grp)
+                    except (IndexError, re.error):
+                        self._bump(self.skipped, f"regex_extract:{fld}:组号越界")
+                        continue
+            elif t == "transform":
+                # 与 v2 同口径：unix_to_datetime（秒/毫秒自适应）/ upper / lower
+                fld = step.get("field")
+                if not fld:
+                    self._warn_once("transform 缺 field——步骤跳过")
+                    self._bump(self.skipped, "transform:缺field")
+                    continue
+                op = step.get("op", "unix_to_datetime")
+                fmt = step.get("fmt", "%Y-%m-%d %H:%M:%S")
+                v = item.get(fld)
+                if v in (None, ""):
+                    continue
+                try:
+                    if op == "unix_to_datetime":
+                        ts = float(str(v).strip())
+                        if ts > 9_999_999_999:      # 毫秒时间戳
+                            ts /= 1000.0
+                        item[fld] = time.strftime(fmt, time.localtime(ts))
+                    elif op == "upper":
+                        item[fld] = str(v).upper()
+                    elif op == "lower":
+                        item[fld] = str(v).lower()
+                except (ValueError, TypeError, OSError, OverflowError):
+                    # 单行坏值不炸整条管线（与 cast 同口径）
                     pass
             elif t == "add":
                 item[step["field"]] = step.get("value")

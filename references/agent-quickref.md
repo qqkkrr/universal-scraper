@@ -16,7 +16,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli <cmd> [args]
 | JS 渲染壳 | `fetch <url> --browser` | playwright 桥接，CDP 降级 |
 | JSON API（已知端点） | `run --config`（http_json） | 或直接 curl_cffi |
 | 接口未知（SPA） | `fetch <url> --browser` + capture_all | 找 POST 体→改 http_json |
-| 列表+详情 | `run --config`（browser + detail） | |
+| 列表+详情 | `run --config`（browser + detail） | 详情字段清洗放 `detail.post_pipeline`（`pipeline` 跑在详情**之前**） |
 | PDF 下载 | `pdf --download 清单.json --out 目录` | %PDF 校验+断点 |
 | PDF 表格 | `pdf --tables x.pdf` | pdfplumber |
 | 批量队列 | `batch --queue q.json next/claim/done/fail/nodata/retry/status` | |
@@ -26,6 +26,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli <cmd> [args]
 | 症状 | 判定 | 动作 |
 |---|---|---|
 | 0 条 + 页面 200 | JS 壳 | → fetch --browser |
+| fetch 正文极短但原文 HTML 很大且含内联数据 | SSR/内联 JSON（**非壳页**） | → `fetch --raw --out p.html` 看结构；按 `record.fields` 写配置，**别升浏览器** |
 | 0 条 + 页面 403/421 | IP 封/配额 | → budget 已自动记；换 IP 或冷却 |
 | 0 条 + 空数据 | nodata | → WebSearch 核验 → batch nodata |
 | 连续 3 次网络失败 | 出口变化 | → doctor.py 复查 |

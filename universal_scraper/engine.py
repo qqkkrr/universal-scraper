@@ -1048,6 +1048,17 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
                     logger.info(f"断点续跑：从检查点合并 {merged} 条详情")
             rows = fetch_details(rows, detail, anti_iter, checkpoint=checkpoint, logger=logger,
                                  source=source, middleware=middleware)
+            # 收官十五轮（用户复盘）：v2 的 pipeline 跑在详情**之前**（见上方 993 行），
+            # detail.extract 产出的字段完全够不到清洗——用户实测 regex_extract 派生列
+            # 恒 None 且无报错。新增**详情后处理阶段**：detail.post_pipeline（跨引擎
+            # 统一键）或 detail.filters（v3 已有同义键）在详情合并后跑一次完整管道。
+            # 后置跑的是"过滤/派生"，行数变化会如实反映到导出与 summary
+            _post_steps = detail.get("post_pipeline") or detail.get("filters") or []
+            if _post_steps:
+                _before_post = len(rows)
+                rows = run_pipeline(rows, _resolve_template(_post_steps, ivars),
+                                    log_prefix=f"[{name}·post] ")
+                logger.info(f"详情后处理（{len(_post_steps)} 步）: {_before_post} -> {len(rows)} 条")
 
         if rows:
             all_rows.extend(rows)

@@ -1615,8 +1615,10 @@ class EngineV3:
             raise
         ex.shutdown(wait=True)
 
-        # 详情后过滤（如按发布日期区间）：对合并后的记录再跑 detail.filters
-        filters = detail.get("filters") or []
+        # 详情后过滤/后处理（如按发布日期区间、从详情文本派生新列）：对合并后的
+        # 记录再跑一次完整管道。收官十五轮：新增 post_pipeline 键（与 v2 跨引擎
+        # 统一；filters 保留为历史同义键——两者都走 Pipeline，任意步骤类型可用）
+        filters = detail.get("post_pipeline") or detail.get("filters") or []
         if filters:
             from .modules.pipelines import Pipeline
             fp = Pipeline(filters, self.vars)
