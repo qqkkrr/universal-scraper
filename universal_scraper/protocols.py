@@ -77,6 +77,10 @@ class Response:
     text: str = ""
     json: Any = None
     url: str = ""
+    # 收官十五轮（core 深审 H2）：响应是否被 max_size 截断。客户端层截断后
+    # 调用方必须能看见（此前 fetcher 只比 len(body) > max_size——客户端已截，
+    # 判据恒假、半截 JSON 被当完整数据）
+    truncated: bool = False
 
 
 @dataclass

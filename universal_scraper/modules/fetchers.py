@@ -6,8 +6,9 @@ import os
 import subprocess
 import sys
 import threading
+import urllib.parse
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from ..cookies import _norm_domain
 from ..protocols import BaseFetcher, Request, Response
@@ -138,6 +139,25 @@ def _reconcile_host_only_overrides(jar, archive_domain: str, names, req_host: st
                     pass
     except Exception:
         pass
+
+
+def _merge_url_params(url: str, params: Optional[dict]) -> str:
+    """把 params 合并进 URL 查询串（同名键整组替换、其余保序）。
+
+    收官十五轮（core 深审 M2/M4）：原 dict(parse_qsl(...)) 实现会把 URL 里合法的
+    重复参数折成最后一个（?tag=a&tag=b → tag=b）；浏览器/桥路径则完全不合并
+    meta.params（json_paged/offset 翻页在浏览器模式静默重复抓第 1 页）。两处统一到
+    本函数：HttpFetcher._build_url 与 BrowserFetcher.fetch 共用。
+    """
+    if not params:
+        return url
+    parts = urllib.parse.urlsplit(url)
+    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    _repl = {str(k): str(v) for k, v in params.items()}
+    out_pairs = [(k, v) for k, v in pairs if k not in _repl]
+    out_pairs.extend(_repl.items())
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path,
+                                   urllib.parse.urlencode(out_pairs), parts.fragment))
 
 
 class HttpFetcher(BaseFetcher):
@@ -409,16 +429,20 @@ class HttpFetcher(BaseFetcher):
         text = res.get("text", "")
         # 响应大小限制：防内存爆（max_size 字节，默认 20MB）
         max_size = int(self.config.get("max_size", 20 * 1024 * 1024))
-        if len(body) > max_size:
+        # 收官十五轮（core 深审 H2，实测）：客户端层（三后端）已按 max_size 截断并
+        # 打 truncated 标记；而这里曾只比 `len(body) > max_size`——恒假（body 已截），
+        # "截断曾静默"的 P1 修复实为死代码，半截 JSON 被当完整数据。改为读标记 + 兜底长度判
+        _truncated = bool(res.get("truncated")) or (max_size and len(body) > max_size)
+        if _truncated:
             body = body[:max_size]
             text = text[:max_size]
-            res["truncated"] = True
             # 审查修复（P1）：截断曾静默——JSON 任务会误诊"返回不是 JSON"，
             # HTML 任务尾部记录无声丢失
             log(f"⚠️ 响应超过 max_size 已截断（{req.url}）——大响应请调大 max_size", "WARN")
         resp = Response(request=req, status=res.get("status", 0),
                         body=body, text=text,
-                        json=res.get("json"), url=res.get("url", req.url))
+                        json=res.get("json"), url=res.get("url", req.url),
+                        truncated=_truncated)
         self._announce_throttle()   # 延迟感知降速事件也在成功路径上播报（否则静默爬升到 8s）
         self._maybe_speedup()
         if self._cache is not None and req.method == "GET" and ok:
@@ -434,18 +458,9 @@ class HttpFetcher(BaseFetcher):
 
     def _build_url(self, req: Request) -> str:
         """合并 source.query 静态参数 + 请求 meta.params（分页等）到 URL。"""
-        import urllib.parse
         params = dict(self.config.get("query", {}) or {})
         params.update(req.meta.get("params", {}) or {})
-        if not params:
-            return req.url
-        parts = urllib.parse.urlsplit(req.url)
-        # 同名参数替换（分页时把旧 page 换成新 page），避免 ?page=1&page=2
-        qdict = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))  # 空值参数保留
-        for k, v in params.items():
-            qdict[k] = str(v)
-        return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path,
-                                        urllib.parse.urlencode(qdict), parts.fragment))
+        return _merge_url_params(req.url, params)
 
     @staticmethod
     def _retry_after(headers: dict) -> float:
@@ -791,6 +806,14 @@ class BrowserFetcher(BaseFetcher):
     def fetch(self, req: Request) -> Response:
         if self._stopped():
             raise KeyboardInterrupt("任务已停止（WebUI 停止信号）")
+        # 收官十五轮（core 深审 M4，实测）：交互/单页/池三条子路径都直接用 req.url，
+        # 而 json_paged/offset 翻页与断点恢复用 meta.params 表达分页（HTTP 路径会
+        # 合并、这里不会）→ 浏览器模式反复抓第 1 页，Request.key 含 params 也拦不住。
+        # 入口统一把 config.query + meta.params 合并进 URL，三条子路径自动继承
+        _p = {**(self.config.get("query") or {}), **(req.meta.get("params") or {})}
+        if _p:
+            import dataclasses as _dc
+            req = _dc.replace(req, url=_merge_url_params(req.url, _p))
         # 人工交互场景（登录 / 整页验证码 / headless=false 弹窗）→ browser_generic.cjs
         if (self.config.get("login") or {}).get("enabled") or \
            (self.config.get("verify") or {}).get("enabled") or \

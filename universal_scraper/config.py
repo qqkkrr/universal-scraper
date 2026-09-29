@@ -332,8 +332,16 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
     - 任务包自带 modules/fetcher.py 时允许任意 source.type（插件协议）
     - 仅 http/browser 需要 start_urls（桥/自定义 fetch_all 可省略）"""
     _require(cfg, "name", "(根)", str, "任务名")
+    # 收官十五轮（模糊测试）：source 非 dict（字符串/列表）曾裸 AttributeError；
+    # source.type 为 dict/list 时 `in 集合` 抛 unhashable TypeError。都归一为 ConfigError
     src = cfg.get("source", {}) or {}
+    if not isinstance(src, dict):
+        raise ConfigError("source", f"source 应为 dict，实际 {type(src).__name__}",
+                          '例如: {"type": "http", "url": "https://..."}')
     stype = src.get("type", "http")
+    if not isinstance(stype, str):
+        raise ConfigError("source.type", f"source.type 应为字符串，实际 {type(stype).__name__}",
+                          f"可选: {', '.join(sorted(V3_SOURCE_TYPES))}")
     if stype not in V3_SOURCE_TYPES and not has_custom_fetcher:
         raise ConfigError("source.type", f"未知取数类型 '{stype}'",
                           f"可选: {', '.join(sorted(V3_SOURCE_TYPES))} 或提供 modules/fetcher.py 自定义")

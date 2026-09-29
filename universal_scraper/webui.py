@@ -648,19 +648,31 @@ def run_books_job(job: dict, spec_src: str, out_dir: str, download_covers: bool,
             _job_error(job, "请先粘贴书籍清单 spec JSON（可在「📚 图书目录」点「填入示例」快速开始）")
             return
         spec = None
-        # 也接受本地 .json 文件路径：先按输入路径找，找不到再按项目根重试
+        # 也接受本地 .json 文件路径（限 ROOT 内，见下）
         if text.endswith(".json"):
             p = Path(text).expanduser()
             if not p.is_absolute() and not p.exists():
                 p2 = ROOT / p
                 if p2.exists():
                     p = p2
+            # 收官十五轮（安全审计 M1，实测）：spec 是本文件唯一没做 containment 的
+            # 路径参数（out/task_dir/file 均有）——可传 /etc/... 或任意绝对路径读
+            # 服务器上的 .json 并把绝对路径回显进任务日志（目录结构泄露 + 存在性
+            # oracle）。与非 outputs 路径同口径：resolve 后必须落在 ROOT 内
+            try:
+                _rp = p.resolve()
+                _rp.relative_to(ROOT.resolve())
+                p = _rp
+            except Exception:
+                _job_error(job, "非法 spec 路径（仅允许工具目录内的 .json 文件；"
+                                "也可直接粘贴 JSON 内容）")
+                return
             try:
                 spec = json.loads(p.read_text(encoding="utf-8"))
-                _job_log(job, f"📖 已从文件读取 spec：{p}")
+                _job_log(job, f"📖 已从文件读取 spec：{p.relative_to(ROOT.resolve())}")
             except Exception as e:
                 _job_error(job, f"spec 文件读取/解析失败：{type(e).__name__}: {e}"
-                                f"（文件：{p}；可改为直接粘贴 JSON 内容）")
+                                f"（可改为直接粘贴 JSON 内容）")
                 return
         if spec is None:
             try:
@@ -851,7 +863,16 @@ def run_batch_job(job: dict, urls: list, mode: str = "auto", browser: bool = Fal
             files["csv"] = f"outputs/{base}.csv"
         if (ROOT / "outputs" / f"{base}.xlsx").exists():
             files["xlsx"] = f"outputs/{base}.xlsx"
+        # 收官十五轮（安全审计 L3）：全部 URL 失败（errors==len(urls) 且 0 条）时曾
+        # 仍置 status=done + "✅" 摘要——按 /api/job.status 判定成败的自动化消费方
+        # 拿到假绿灯（books 分支对 0 行是硬失败，口径不一致）。改为显式失败
+        if urls and errs == len(urls) and not rows_all:
+            _job_error(job, f"批量抓取全部失败：{len(urls)} 个网址均未取到数据"
+                            f"（逐 URL 错误见任务消息）——请先 `us diagnose` 判型再重试")
+            return
         summary = f"✅ 批量完成：{len(urls)} 个网址，成功 {len(urls)-errs}，共 {len(rows_all)} 条，导出 {list(files.values())}"
+        if errs:
+            summary = f"⚠️ 批量完成（{errs}/{len(urls)} 个网址失败）：成功 {len(urls)-errs}，共 {len(rows_all)} 条，导出 {list(files.values())}"
         _job_done(job, {"total": len(rows_all), "fetched": len(urls), "errors": errs, "files": files}, summary,
                   _auto_verify(rows_all, None))
     except BaseException as e:
@@ -947,23 +968,32 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
-        # 页面/静态资源不鉴权（否则用户连输入令牌的页面都打不开）；仅 /api/* 需要
-        if self.path.startswith("/api/") and not self._auth_ok(self.headers):
-            self._send(403, "Forbidden: 需要 X-Auth-Token")
-            return
-        if self.path.startswith("/api/") and not self._host_ok():
+        # 收官十五轮（安全审计 H1，实测）：鉴权/Host 守卫曾用 `self.path.startswith`
+        # 判断——absolute-form 请求行（`GET http://host:port/api/status HTTP/1.1`，
+        # 裸 socket / curl --request-target 即可构造）不以 "/api/" 开头，两个守卫
+        # 双双跳过，而下方路由用 urlparse(...).path 仍命中 → 零令牌读全部 GET 接口
+        # （含 /api/status 回传的令牌本体与 /api/preview 的数据下载）。
+        # 修法：路由判定与安全判定统一用解析后的 u.path
+        u = urllib.parse.urlparse(self.path)
+        q = urllib.parse.parse_qs(u.query)
+        _gp = u.path
+        # 页面/静态资源不鉴权（否则用户连输入令牌的页面都打不开）；API 与报告需鉴权。
+        # 收官十五轮（M3）：/reports/ 曾跳过 Host 校验（R8 的 DNS-rebinding 防线
+        # 只覆盖 /api/*），而它正是唯一直接吐爬取数据的静态通道——统一到同一道闸
+        if (_gp.startswith("/api/") or _gp.startswith("/reports/")) and not self._host_ok():
             # 审查修复（P1，R8）：DNS rebinding 下 Origin==Host 皆受攻击者控制，
             # 唯一可靠锚点是 Host 头
             self._send(403, "Forbidden: Host 不受信任（本地部署仅允许 127.0.0.1/localhost）")
             return
-        u = urllib.parse.urlparse(self.path)
-        q = urllib.parse.parse_qs(u.query)
+        if _gp.startswith("/api/") and not self._auth_ok(self.headers):
+            self._send(403, "Forbidden: 需要 X-Auth-Token")
+            return
         try:
-            if u.path.startswith("/reports/"):
+            if _gp.startswith("/reports/"):
                 # 路径穿越防护：只允许 outputs/reports 目录内（resolve 后校验前缀，拒绝绝对路径/..）
                 try:
                     _rp_root = (ROOT / "outputs" / "reports").resolve()
-                    fp = (_rp_root / u.path[len("/reports/"):]).resolve()
+                    fp = (_rp_root / _gp[len("/reports/"):]).resolve()
                     fp.relative_to(_rp_root)
                 except Exception:
                     self._send(403, "非法路径")
@@ -1544,14 +1574,20 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         self._json({"ok": False, "message": "❌ 页面未包含商家列表（Cookie 可能失效），请重新复制"})
                 else:
-                    import urllib.request as _urlreq
-                    from .core import assert_http_url
+                    # 收官十五轮（安全审计 M2，实测）：原实现是裸 urlopen + 仅 scheme
+                    # 校验——share 模式下可当内网/回环端口探测器（开放 200 / 关闭
+                    # URLError 可区分）。改走 quick.fetch_url：与引擎同一套出站守卫
+                    # （拒私网/环回/保留地址、支持 US_ALLOW_PRIVATE 白名单）与指纹伪装
+                    from .quick import fetch_url as _fetch_url
                     try:
-                        assert_http_url(url or "https://www.baidu.com/")
-                        req = _urlreq.Request(url or "https://www.baidu.com/",
-                                              headers={"User-Agent": "Mozilla/5.0", "Cookie": cookie})
-                        rr = _urlreq.urlopen(req, timeout=15)
-                        self._json({"ok": True, "message": f"✅ Cookie 已随请求发送（HTTP {rr.status}）"})
+                        _r = _fetch_url(url or "https://www.baidu.com/",
+                                        cookie=cookie, timeout=20)
+                        if _r.get("error"):
+                            self._json({"ok": False,
+                                        "message": f"❌ 测试失败：{str(_r['error'])[:100]}"})
+                        else:
+                            self._json({"ok": True,
+                                        "message": f"✅ Cookie 已随请求发送（HTTP {_r.get('status')}）"})
                     except Exception as e:
                         self._json({"ok": False, "message": f"❌ 测试失败：{type(e).__name__}"})
 
@@ -1732,6 +1768,16 @@ def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
     global AUTH_TOKEN
     import secrets  # OCR R131（L）：原 import sys 随 PY 死全局一并清理
     global _CODE_FP_START
+    # 收官十五轮（安全审计 M5，实测）：crawl 分支读 `ROOT/outputs/<base>.json` 算行数，
+    # 而引擎/quick 按 **CWD 相对**写 `outputs/`——以 PYTHONPATH/软链方式从别处启动时
+    # 两者错位：任务摘要仍"✅ 0 条"成功、/api/preview 永远打不开这些文件。
+    # 与 /api/restart（Popen cwd=ROOT）对齐：启动即把 CWD 归到工具根，
+    # 使"outputs"在读取与写入两侧指同一目录
+    try:
+        if Path.cwd().resolve() != ROOT.resolve():
+            os.chdir(ROOT)
+    except OSError:
+        pass
     # ⚙️ 启动时加载持久化 AI 配置（用户上次在界面里配置的模型/接口/Key 自动生效）
     try:
         _apply_settings_to_env(_load_settings())

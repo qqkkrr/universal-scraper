@@ -109,6 +109,19 @@ def _budget_auto_mark(url: str, status: int, body=None, hours: float = 24.0):
 # 每进程每域只提示一次"通道拦截 vs 配额"的区分（防刷屏）
 # OCR R131（M）：set 的 contains/add 竞态曾让并发首漏打双份提示——统一持锁
 _CHANNEL_HINT_LOGGED = set()
+
+_WARN_ONCE_SEEN: set = set()
+
+
+def _warn_once(msg: str, level: str = "WARN") -> None:
+    """同一消息全进程只告警一次（收官十五轮：hot path 上的能力缺失提示防刷屏）。"""
+    if msg in _WARN_ONCE_SEEN:
+        return
+    _WARN_ONCE_SEEN.add(msg)
+    try:
+        log(f"⚠️ {msg}", level)
+    except Exception:
+        pass
 _DIAG_LOCK = threading.Lock()
 
 
@@ -362,14 +375,17 @@ def parse_relative_time(text: str, now: Optional[datetime] = None) -> str:
         except ValueError:
             return ""
 
-    m = _re.match(r"^(\d{1,2})[-月/](\d{1,2})[日]?$", s)
+    # 收官十五轮（core 深审 L4，实测）：原为 `[日]?$` 锚定——"07-16 10:23"（无年份
+    # 日期+时间，论坛/BBS 常见）匹配不上，日期字段静默为空。允许可选时间后缀
+    m = _re.match(r"^(\d{1,2})[-月/](\d{1,2})[日]?(?:\s+(\d{1,2}):(\d{2}))?$", s)
     if m:
         mo, d = int(m.group(1)), int(m.group(2))
+        h, mi = int(m.group(3) or 0), int(m.group(4) or 0)
         try:
-            r = datetime(now.year, mo, d)
+            r = datetime(now.year, mo, d, h, mi)
             if r > now + _td(days=1):
                 r = r.replace(year=now.year - 1)
-            return r.strftime("%Y-%m-%d")
+            return r.strftime("%Y-%m-%d %H:%M") if (h or mi) else r.strftime("%Y-%m-%d")
         except ValueError:
             return ""
 
@@ -449,7 +465,12 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
     if m:
         enc = m.group(1); explicit = True
     elif raw[:3] == b"\xef\xbb\xbf":
-        enc = "utf-8-sig"
+        # 收官十五轮（core 深审 H1，实测）：该分支曾只置 enc="utf-8-sig" 而
+        # `explicit` 仍为 False——下面 `if not explicit: return best_s` 直接返回
+        # 候选打分结果（含 BOM 的 utf-8 解码），分支成为死代码。BOM 残留会把
+        # JSON 首字符变成 \ufeff（json.loads 报 "Unexpected UTF-8 BOM"）与 CSV 表头
+        # 变成 "\ufeffid"。BOM 是**权威声明**：直接按 utf-8-sig 解码（去 BOM）
+        return raw.decode("utf-8-sig", "replace")
     else:
         head = raw[:2048].decode("utf-8", "ignore").lower()
         m2 = re.search(r"charset=[\"']?([\w-]+)", head)
@@ -478,7 +499,15 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
         _c = from_bytes(raw[:65536]).best() if raw else None  # 只采样探测，控制 CPU 开销
         if _c is not None and _c.encoding:
             e, s2 = _score(_c.encoding)
-            if s2 is not None and e < best_err:
+            _ce = str(_c.encoding).lower()
+            # 收官十五轮（core 深审 M3，实测）：gb18030 能"零错误"解出几乎任何双字节
+            # 组合，而严格 `<` 判据让它在平局时不败——Big5/Shift-JIS 页（未声明编码）
+            # 被解成 PUA 乱码且替换字符为 0（静默乱码，人眼才看得出）。零错误平局时，
+            # 若探测器给出的是**更具体的非 UTF-8/非 GB 系**编码，采信它
+            if s2 is not None and (e < best_err or (
+                    e == best_err == 0
+                    and _ce not in ("utf-8", "utf8")
+                    and not _ce.startswith(("gb", "cp9", "cp1")))):
                 best_err, best_s = e, s2
     except Exception as _e:
         log(f"  charset_normalizer 探测失败: {_e}", "DEBUG")
@@ -486,21 +515,27 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
     single_byte = (enc.lower() in ("latin-1", "latin1", "ascii", "iso-8859-1", "windows-1252", "cp1252")
                    or enc.lower().startswith("iso-8859") or enc.lower().startswith("windows-125")
                    or enc.lower().startswith("cp125"))
+    # 收官十五轮（core 深审 H1 补漏，实测）：BOM 必须在**所有出口**剥离。服务端
+    # 既发 BOM 又声明 charset=utf-8 时走 explicit 分支，上面那个 elif 进不去 ——
+    # CSV 表头曾残留 "\ufeffid"、json 任务仍会踩 "Unexpected UTF-8 BOM"
+    def _fin(s: str) -> str:
+        return s.lstrip("\ufeff") if s and s[0] == "\ufeff" else s
+
     if not explicit:
-        return best_s if best_s is not None else raw.decode("utf-8", "replace")
+        return _fin(best_s if best_s is not None else raw.decode("utf-8", "replace"))
     if single_byte:
         # latin-1 等"万能解码"：若候选能零错误解出（如实际是 UTF-8/GBK），优先用候选
         if best_err == 0 and best_s is not None:
-            return best_s
-        return raw.decode(enc, "replace")
+            return _fin(best_s)
+        return _fin(raw.decode(enc, "replace"))
     try:
-        return raw.decode(enc, "strict")
+        return _fin(raw.decode(enc, "strict"))
     except (UnicodeDecodeError, LookupError):
         pass
     decl_err, _ = _score(enc)
     if best_s is not None and best_err < max(1, decl_err // 2):
-        return best_s
-    return raw.decode(enc, "replace")
+        return _fin(best_s)
+    return _fin(raw.decode(enc, "replace"))
 
 
 def assert_http_url(url: str) -> str:
@@ -714,6 +749,43 @@ def assert_public_url(url: str, context: str = "") -> str:
     return url
 
 
+_REBIND_CACHE: Dict[str, float] = {}
+
+
+def _rebind_suspect(host: str) -> bool:
+    """DNS 重绑定探测（收官十五轮，core 深审 H3 的定向缓解）。
+
+    守卫在 Python 侧解析一次、HTTP 客户端（urllib/requests/libcurl）连接时**再解析
+    一次**——攻击者用 TTL=0 的域名可让第一次返回公网（放行）、第二次返回 127.0.0.1
+    （实际连到内网）。这里在守卫放行后再解析一次并检查是否出现私网地址：TTL=0
+    交替型攻击会被命中；正常站点（含轮询 CDN）只会返回公网地址，不误伤。
+    局限（如实声明）：不是完整 IP 钉扎——"探测两次都回公网、仅连接那次回私网"的
+    定向 DNS 仍可绕过；完整修复需按解析结果直连（保留 SNI/Host），属架构级改动。
+    """
+    import ipaddress
+    h = (host or "").strip().lower().rstrip(".")
+    if not h or h == "localhost":
+        return False
+    now = time.time()
+    ts = _REBIND_CACHE.get(h)
+    if ts and now - ts < 60:
+        return False                     # 近 60s 已探过且无嫌疑
+    try:
+        import socket as _sock
+        for info in _sock.getaddrinfo(h, None):
+            ip = ipaddress.ip_address(info[4][0])
+            if (ip.is_private or ip.is_loopback or ip.is_reserved
+                    or ip.is_link_local or ip.is_multicast):
+                _HOST_PRIVATE_CACHE.pop(h, None)   # 作废过期的"公网"结论
+                return True
+    except Exception:
+        return False                     # 解析失败交由请求层报错
+    if len(_REBIND_CACHE) > 512:
+        _REBIND_CACHE.clear()
+    _REBIND_CACHE[h] = now
+    return False
+
+
 def _entry_guard_error(url: str) -> Optional[Dict[str, Any]]:
     """客户端级抓取入口守卫（审查八轮，HIGH）——统一出口，不再逐入口打补丁。
 
@@ -732,6 +804,19 @@ def _entry_guard_error(url: str) -> Optional[Dict[str, Any]]:
         return {"ok": False, "status": 0, "body": b"", "text": str(e), "json": None,
                 "url": url, "headers": {},
                 "hint": "出站守卫：目标为私网/保留地址（内网场景请设 US_ALLOW_PRIVATE=1）"}
+    # 收官十五轮（core 深审 H3）：守卫解析与客户端连接解析各一次 = TOCTOU，
+    # TTL=0 域名可"先公网后私网"绕过。放行后再解析一次做重绑定探测
+    if not _allow_private_targets():
+        try:
+            _h = urllib.parse.urlsplit(url).hostname or ""
+        except Exception:
+            _h = ""
+        if _h and _rebind_suspect(_h):
+            _msg = (f"DNS 重绑定嫌疑：{_h} 连续解析结果从公网变为私网地址——"
+                    "已拒绝本次请求（防 SSRF；如确为目标站请改用其固定 IP 或稍后重试）")
+            log(f"  ⛔ {_msg}", "WARN")
+            return {"ok": False, "status": 0, "body": b"", "text": _msg, "json": None,
+                    "url": url, "headers": {}, "hint": _msg}
     return None
 
 
@@ -887,7 +972,12 @@ def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optio
             except Exception:
                 pass
         if r.status_code < 400:
-            return raw or None
+            if not raw:
+                # 收官十五轮（core 深审 L2）：200 + 0 字节曾静默返回 None——
+                # 与网络失败不可区分。保持 None（调用方契约）但写明原因
+                fetch_bytes.last_error = "空响应（HTTP 200 但 0 字节）"
+                return None
+            return raw
         fetch_bytes.last_error = f"curl_cffi: HTTP {r.status_code}"
         return None
     except Exception as e:
@@ -909,9 +999,19 @@ def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optio
                     if max_size and len(raw) > max_size:
                         fetch_bytes.last_error = f"解压后超过 max_size={max_size}，已中止"
                         return None
-                except Exception:
-                    pass
-            return raw or None
+                except Exception as _gz_e:
+                    # 收官十五轮（core 深审 M5，实测）：解压失败曾 `pass`——损坏/截断的
+                    # gzip 流会把**压缩字节原样**当下载结果返回（坏文件落盘并被当有效
+                    # 输出）。与 HttpClient 口径对齐：明确失败并写原因
+                    fetch_bytes.last_error = (f"gzip 解压失败（响应可能被截断或非 gzip）: "
+                                              f"{type(_gz_e).__name__}: {_gz_e}")
+                    return None
+            if not raw:
+                # 收官十五轮（core 深审 L2）：200 + 0 字节曾静默返回 None——
+                # 与网络失败不可区分。保持 None（调用方契约）但写明原因
+                fetch_bytes.last_error = "空响应（HTTP 200 但 0 字节）"
+                return None
+            return raw
     except Exception as e:
         fetch_bytes.last_error += f" | urllib: {type(e).__name__}: {e}"
         return None
@@ -1013,7 +1113,19 @@ class HttpClient:
         if extra:
             h.update(extra)
         if self.cookies:
-            h["Cookie"] = "; ".join(f"{k}={v}" for k, v in self.cookies.items())
+            # 收官十五轮（core 深审 M1，实测）：曾整串覆盖调用方的 Cookie 头——
+            # anti_bot.cookies（文档推荐与 cookie_domain 同填）与归档/会话登录态
+            # 同时存在时，urllib 后端只发实例 cookies、curl_cffi/requests 只发
+            # 显式头，表现为登录墙/B 站 -352 类风控且无任何提示。改为**按名合并**：
+            # 调用方（更具体）同名优先，实例 cookies 补齐其余
+            _merged: Dict[str, str] = dict(self.cookies)
+            _existing = h.get("Cookie")
+            if _existing:
+                for pair in str(_existing).split(";"):
+                    if "=" in pair:
+                        _k, _v = pair.split("=", 1)
+                        _merged[_k.strip()] = _v.strip()
+            h["Cookie"] = "; ".join(f"{k}={v}" for k, v in _merged.items() if k)
         return h
 
     def _opener(self) -> urllib.request.OpenerDirector:
@@ -1210,7 +1322,8 @@ class HttpClient:
                             raw = raw[:limit]
                     else:
                         raw = resp.read(limit) if limit else resp.read()
-                    if max_size and len(raw) > max_size:
+                    _trunc1 = bool(max_size and len(raw) > max_size)
+                    if _trunc1:
                         raw = raw[:max_size]
                     status = getattr(resp, "status", 200)
                     ctype = resp.headers.get("Content-Type", "")
@@ -1229,6 +1342,9 @@ class HttpClient:
                         "url": resp.geturl() or url,
                         "headers": {k.lower(): v for k, v in resp.headers.items()},
                         "raw_headers": resp.headers,
+                        # 收官十五轮（core 深审 H2）：截断必须带标记——此前客户端已截，
+                        # fetcher 再比 `len(body) > max_size` 恒 False，半截响应被当完整
+                        "truncated": _trunc1,
                     }
                     self._at.note_latency(time.time() - _t0)
                     self._at.note_ok()
@@ -1420,9 +1536,15 @@ def export_rows(rows: List[Dict[str, Any]], out_dir: Path, base_name: str,
 
                 def _csv_cell(v: Any) -> str:
                     # CSV 公式注入（审查 P2，R77）：以 =+-@/Tab/CR 开头的抓取文本
-                    # 在 Excel 里会被当公式执行（=WEBSERVICE(...) 是标准注入向量）
-                    s = "" if v is None else str(_safe(v))
-                    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+                    # 在 Excel 里会被当公式执行（=WEBSERVICE(...) 是标准注入向量）。
+                    # 收官十五轮（core 深审 L3）：前缀曾对所有值生效——数值 -5/-3.5
+                    # 被写成 "'-5"（pandas 读回是字符串，数值列全变文本）。只有
+                    # **字符串值**才可能承载公式（xlsx 路径口径一致）
+                    if v is None:
+                        return ""
+                    if isinstance(v, str):
+                        return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
+                    return str(_safe(v))
 
                 for r in rows:
                     w.writerow({k: _csv_cell(v) for k, v in r.items()})
@@ -1572,6 +1694,12 @@ class RequestsClient:
                 json_data=None, headers=None, use_cache: bool = False,
                 allow_html_404: bool = False, proxy: Optional[str] = None,
                 max_size: Optional[int] = None) -> Dict[str, Any]:
+        # 收官十五轮（core 深审 L1）：本后端不实现缓存，use_cache 曾静默 no-op
+        # （curl_cffi/urllib 两后端都实现了）——调用方以为有缓存。显式告警一次，
+        # 并如实声明（不改变行为，避免"为了对齐而引入半成品缓存"）
+        if use_cache:
+            _warn_once("requests 后端暂不支持 use_cache（本次请求照常发出，未读写缓存）"
+                       "——需要缓存请用默认 curl_cffi 后端或 urllib 后端")
         _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
         if _blk is not None:
             return _blk
@@ -1606,6 +1734,8 @@ class RequestsClient:
                     # R129 修复（P1）：统一限读提前——此前 429 早退路径无视 max_size
                     # 全量读体（恶意 429 + 超大响应=内存放大）；重试路径读完不关（连接泄漏）
                     raw = _ReadCapped.read(resp, max_size)
+                    # 到达 cap 即视为截断（恰好等长时误报可接受：只影响一条告警）
+                    _trunc2 = bool(max_size and len(raw) >= max_size)
                     # batch1600 战训（P1）：403/421/52x 自动记入域名封锁台账（budget --list 可查）。
                     # best-effort：台账故障绝不影响抓取主流程；已冷却中则不重复记账。
                     # 记账前先判型：瑞数/CF 通道拦截不记账（NMPA 战训）
@@ -1645,7 +1775,11 @@ class RequestsClient:
                     ctype = resp.headers.get("Content-Type", "")
                     if "json" in ctype or raw[:1] in (b"{", b"["):
                         try:
-                            parsed = json.loads(raw.decode("utf-8", "ignore"))
+                            # 收官十五轮（core 深审 H1）：曾 str 化后 loads——带
+                            # UTF-8 BOM 的合法 JSON 必抛 "Unexpected UTF-8 BOM"（实测
+                            # 国内 API 常见），json 恒 None → JSON 任务静默 0 条。
+                            # json.loads 按 **bytes** 解析自带 BOM/编码嗅探（UTF-16 也可）
+                            parsed = json.loads(raw)
                         except Exception:
                             parsed = None
                     # 无 charset 头时 resp.text 按 ISO-8859-1 解码 → 中文全乱码
@@ -1658,7 +1792,8 @@ class RequestsClient:
                     return {"ok": True, "status": resp.status_code, "body": raw,
                             "text": _text, "json": parsed, "url": resp.url,
                             "headers": {k.lower(): v for k, v in resp.headers.items()},
-                            "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None)}
+                            "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None),
+                            "truncated": _trunc2}
                 finally:
                     # R130：stream 模式下半读/重试丢弃的响应必须显式关闭，归还连接
                     try:
@@ -1869,8 +2004,10 @@ class CurlCffiClient:
                             total += len(chunk)
                             if total > max_size:
                                 break
+                        _trunc3 = bool(total > max_size)
                         raw = b"".join(chunks)[:max_size]
                     else:
+                        _trunc3 = False
                         raw = resp.content
                     # batch1600 战训：403/421/52x 自动记账（须覆盖全部后端——curl_cffi 是默认后端，
                     # v1.12.0 曾只挂在 RequestsClient 导致默认路径静默失效）。
@@ -1914,7 +2051,11 @@ class CurlCffiClient:
                     # 一律从 raw 解析 JSON：stream 模式下 resp.json() 读不到已消费的流
                     if "json" in resp.headers.get("Content-Type", "") or raw[:1] in (b"{", b"["):
                         try:
-                            parsed = json.loads(raw.decode("utf-8", "ignore"))
+                            # 收官十五轮（core 深审 H1）：曾 str 化后 loads——带
+                            # UTF-8 BOM 的合法 JSON 必抛 "Unexpected UTF-8 BOM"（实测
+                            # 国内 API 常见），json 恒 None → JSON 任务静默 0 条。
+                            # json.loads 按 **bytes** 解析自带 BOM/编码嗅探（UTF-16 也可）
+                            parsed = json.loads(raw)
                         except Exception:
                             parsed = None
                     # 无 charset 头时 resp.text 按 ISO-8859-1 解码 → 中文全乱码
@@ -1944,7 +2085,8 @@ class CurlCffiClient:
                                "text": _text,
                                "json": parsed,
                                "url": str(resp.url), "headers": {k.lower(): v for k, v in resp.headers.items()},
-                               "raw_headers": resp.headers}
+                               "raw_headers": resp.headers,
+                               "truncated": _trunc3}
                     # 收官三轮（审查 H）：cffi.request 是模块级无状态调用——服务端
                     # Set-Cookie 从不回写 self.cookies，"单会话 cookie jar" 在默认
                     # 后端不成立（登录态多步链拿错数据还报成功）。此处补回写：

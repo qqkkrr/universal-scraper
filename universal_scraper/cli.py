@@ -79,6 +79,24 @@ SCAFFOLD_TEMPLATE = {
 }
 
 
+def _guard_out_is_file(p, cmd: str) -> bool:
+    """`--out` 语义为"文件路径"的子命令统一守卫：指向已存在目录时干净报错。
+
+    收官十五轮（安全审计 M4）：report/rangedl/cookies/guide 曾直接 write_text /
+    os.open —— 目录路径抛 IsADirectoryError 裸栈（fetch --raw 那条还会连带
+    丢掉已抓到的正文，已在 fetch 分支单独修）。返回 False = 调用方应中止。
+    """
+    if not p:
+        return True
+    pp = Path(str(p)).expanduser()
+    if pp.is_dir():
+        _ext = ".html" if cmd == "report" else ".json"
+        print(f"❌ {cmd}: --out 需要文件名，而 {pp} 是目录——例如 --out {pp}/result{_ext}",
+              file=sys.stderr)
+        return False
+    return True
+
+
 def main() -> int:
     import signal as _signal
     def _sigterm(*_a):
@@ -170,9 +188,9 @@ def main() -> int:
     fp.add_argument("--links-allow", default=None, help="只保留匹配该正则的外链")
     fp.add_argument("--links-deny", default=None, help="排除匹配该正则的外链")
     fp.add_argument("--cdp", default=None, help="附加调试 Chrome（如 http://127.0.0.1:9222），侦察与正式跑同通道")
-    fp.add_argument("--capture", default=None,
+    fp.add_argument("--capture", nargs="?", const="outputs/fetch_capture.json", default=None,
                     help="捕获页面全部 XHR/fetch JSON 响应并保存（自动启用浏览器模式；"
-                         "参数=保存路径，默认 outputs/fetch_capture.json）——SPA 接口侦察一步到位")
+                         "裸用=outputs/fetch_capture.json，也可给保存路径）——SPA 接口侦察一步到位")
 
     cp = sub.add_parser("crawl", help="从 URL 递归爬站（Firecrawl crawl 风格）")
     cp.add_argument("url", help="入口 URL")
@@ -889,6 +907,8 @@ def main() -> int:
 
     if args.cmd == "report":
         from .report import generate as _report_gen
+        if not _guard_out_is_file(getattr(args, "out", ""), "report"):
+            return 2
         try:
             r = _report_gen(args.csv, args.group, args.out)
         except (FileNotFoundError, ValueError) as e:
@@ -986,6 +1006,8 @@ def main() -> int:
         out = "; ".join(pairs)
         print(out)
         if args.out:
+            if not _guard_out_is_file(args.out, "cookies"):
+                return 2
             # R100 修复（P2）：登录 Cookie 串曾 0644 落盘（R18 同类）
             import os as _os
             _fd = _os.open(args.out, _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
@@ -1597,6 +1619,8 @@ def main() -> int:
 
     if args.cmd == "rangedl":
         from .rangedl import rangedl
+        if not _guard_out_is_file(getattr(args, "out", ""), "rangedl"):
+            return 2
         r = rangedl(args.url, out=args.out, segments=args.segments,
                     concurrency=args.concurrency)
         if r.get("error"):
@@ -2080,15 +2104,19 @@ def main() -> int:
             pass  # 台账是锦上添花，落账失败绝不影响诊断结论
         if getattr(args, "out", ""):
             # 收官十五轮（用户复盘）：diagnose 少了 --out，与其他命令参数风格不一致
-            # （用户明确点名）。与 --json 同内容，供批量/留证
+            # （用户明确点名）。与 --json 同内容，供批量/留证。
+            # 收官十五轮（安全审计 L1）：写失败曾 return 1 并把**整份判型结论也吞掉**
+            # （阻断类本该 exit 2 变成 exit 1）——改为只告警，结论与退出码照常
             try:
                 _op = Path(args.out).expanduser()
+                if _op.is_dir():
+                    raise IsADirectoryError(_op)
                 _op.parent.mkdir(parents=True, exist_ok=True)
                 _op.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
                 print(f"📄 诊断 JSON 已存: {_op}")
             except Exception as e:
-                print(f"⚠️ --out 写入失败: {type(e).__name__}: {e}", file=sys.stderr)
-                return 1
+                print(f"⚠️ --out 写入失败（不影响判型结论）: {type(e).__name__}: {e}"
+                      f"——如需落盘请给文件名而非目录，如 --out out/diag.json", file=sys.stderr)
         if args.json:
             print(json.dumps(d, ensure_ascii=False, indent=1))
         else:
@@ -2105,6 +2133,8 @@ def main() -> int:
 
     if args.cmd == "guide":
         from .agent_guide import emit
+        if not _guard_out_is_file(getattr(args, "out", ""), "guide"):
+            return 2
         p_ = emit(args.out)
         print(f"📖 子代理执行规范已生成: {p_.resolve()}")
         print("   随任务分派发给每个并行子代理，并写进调度 prompt。")
@@ -2319,12 +2349,28 @@ def main() -> int:
             return 0
         if getattr(args, "raw", False) and result.get("text") is not None:
             # OCR R131 反馈 #4：fetch --raw 输出原始 HTML——反爬取证（@font-face、
-            # CSS 偏移、加密脚本）需要看原始字节而非 markdown 化结果
+            # CSS 偏移、加密脚本）需要看原始字节而非 markdown 化结果。
+            # 收官十五轮（安全审计 M4）：写盘曾直接 write_text——--out 指向已存在
+            # 目录时抛 IsADirectoryError 裸栈，且**抓到的正文既不落盘也不打印**。
+            # 改为：写失败只告警，正文照打 stdout（侦察/取证数据永不丢）
             raw_html = result.get("html") or result.get("text", "")
             if args.out:
-                Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-                Path(args.out).write_text(raw_html, encoding="utf-8")
-                print(f"✅ 原始 HTML 已保存: {args.out}（{len(raw_html)} 字符）", file=sys.stderr)
+                _outp = Path(args.out)
+                _wrote = False
+                if _outp.is_dir():
+                    print(f"⚠️ --out 是目录（{_outp}）——请给文件名，如 --out {_outp}/page.html；"
+                          "本次改为打印到 stdout", file=sys.stderr)
+                else:
+                    try:
+                        _outp.parent.mkdir(parents=True, exist_ok=True)
+                        _outp.write_text(raw_html, encoding="utf-8")
+                        print(f"✅ 原始 HTML 已保存: {_outp}（{len(raw_html)} 字符）", file=sys.stderr)
+                        _wrote = True
+                    except Exception as e:
+                        print(f"⚠️ 原始 HTML 落盘失败（{type(e).__name__}: {e}）——改为打印到 stdout",
+                              file=sys.stderr)
+                if not _wrote:
+                    sys.stdout.write(raw_html)
             else:
                 sys.stdout.write(raw_html)
             return 0
@@ -2352,7 +2398,13 @@ def main() -> int:
                 r"window\.__|application/(?:ld\+)?json|data-(?:page|props|state)=",
                 _raw_html, _re.I)))
             _empty_extract = _cl < 60
-            _shellish = bool(result.get("shell_suspect")) or _empty_extract or (
+            # 收官十五轮（e2e 矩阵实测）：`_cl < 60` 曾无条件判壳页——78B 的中文短页
+            # （27 字符正文，正常抓取）被报"大概率是壳页/被拦截"并 exit 3，与早先
+            # "原文本身就小＝真短页照常成功"的修复意图相悖（该意图只覆盖了 ≥4KB 分支）。
+            # 原文确实很小（100B~4KB 且脚本少）时不算壳页；0B/近空响应仍算（防假成功）
+            _small_origin = 0 < len(_raw_html) < 4000 and _scripts < 3
+            _shellish = bool(result.get("shell_suspect")) or (
+                _empty_extract and not _small_origin) or (
                 len(_raw_html) >= 4000 and _scripts >= 3 and _cl < 200)
             if _ssr_like:
                 print(f"ℹ️ 抽取正文偏短（{_cl} 字符）但原文 HTML 很大（{len(_raw_html)}B，"

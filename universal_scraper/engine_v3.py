@@ -617,11 +617,13 @@ class EngineV3:
                         elif not self._spooling:
                             self._spooling = True
                             self.logger.info(f"条目超过 {self._spool_threshold}，已切换为磁盘 spool（内存不再累计）")
-                        # 收官十三轮（审查 M）：登记本轮 _url（spool 回写后过滤历史行用）
+                        # 收官十三轮（审查 M）：登记本轮 _url（spool 回写后过滤历史行用）。
+                        # 收官十五轮修复：此处**已在 self._lock 内**（上方 stats/limit
+                        # 块），再套一层 `with self._lock` 会自死锁（threading.Lock
+                        # 不可重入）——每个条目写入即挂死整个任务
                         _ru = str(item.get("_url") or "")
                         if _ru:
-                            with self._lock:
-                                self._run_urls.add(_ru)
+                            self._run_urls.add(_ru)
             # R102：整页处理成功后统一标记分布式已见（一次，页级口径）——
             # 曾挂在 per-item/增量键上的两种写法分别漏"0 条幸存页"和默认配置
             # 收官十三轮（审查 M，实测）：本地 resume 也按**请求键**记账。

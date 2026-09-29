@@ -130,6 +130,27 @@ check("opener_for 无默认 env ProxyHandler", not any(
                                                       "https": "http://127.0.0.1:1"}
     for h in _chain), str([type(h).__name__ for h in _chain]))
 
+print("== 静态缺陷检查（AST：同锁嵌套/裸 except/可变默认） ==")
+import ast as _ast
+import importlib.util as _ilu
+
+_sc_spec = _ilu.spec_from_file_location("static_checks", Path(__file__).resolve().parent / "static_checks.py")
+_sc = _ilu.module_from_spec(_sc_spec)
+_sc_spec.loader.exec_module(_sc)
+_nested = []
+for _f in sorted((ROOT / "universal_scraper").rglob("*.py")):
+    if "__pycache__" in str(_f):
+        continue
+    try:
+        _t = _ast.parse(_f.read_text(encoding="utf-8"))
+    except SyntaxError as _e:
+        _nested.append(f"{_f}: 语法错误 {_e}")
+        continue
+    _sc.FAIL.clear()
+    _sc.check_locks(_f, _t)
+    _nested.extend(_sc.FAIL)
+check("无同锁嵌套（自死锁）", not _nested, str(_nested[:2]))
+
 print("== 收官十轮回归（lint 加固/文本净化/分页/站点解析） ==")
 from universal_scraper.selectors import regex_is_dangerous, css_text
 

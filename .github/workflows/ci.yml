@@ -36,6 +36,21 @@ jobs:
       - name: CI 自检（行为探针 + 夹具）
         run: python tests/ci_check.py
 
+      - name: 静态缺陷检查（同锁嵌套/裸 except/可变默认）
+        run: python tests/static_checks.py
+
+      - name: 文档-代码一致性（幽灵命令/类型/CLI 关键参数）
+        run: python tests/docs_consistency.py
+
+      - name: 模糊测试（畸配置/管道步骤/HTML；200 轮）
+        run: python tests/fuzz_inputs.py 200
+
+      - name: 跨引擎一致性（v2 vs v3 同语义）
+        run: python tests/cross_engine.py
+
+      - name: 端到端 CLI 矩阵（本地站点，27 项）
+        run: python tests/e2e_matrix.py
+
       - name: 属性测试（hypothesis）
         run: |
           pip install hypothesis

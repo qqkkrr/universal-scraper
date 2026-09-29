@@ -99,15 +99,52 @@ def _parse_zh_datetime(text: str, base) -> Optional[Any]:
 
 
 
+def _as_field_key(v: Any) -> Optional[str]:
+    """把 step 里声明的字段名归一为可安全用于 item.get 的 str；非法形状返回 None。
+
+    收官十五轮（模糊测试，200 轮 124 例崩溃）：`field` 写成 dict/list 时
+    `item.get(field)` 抛 `TypeError: unhashable type`——异常穿透引擎导出路径，
+    整轮数据丢失。畸形字段名按"该步无效、告警跳过"处理（行保留），
+    与 v2 run_pipeline 同策略。数字字段名（列名是数字）唯一合法非字符串形态。
+    """
+    if isinstance(v, str):
+        return v
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return str(v)
+    return None
+
+
+def _as_field_keys(v: Any) -> Optional[list]:
+    """多个字段名的归一（dedup 的 key、content_hash 的 fields）：任一非法即整体 None。"""
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return [str(v)]
+    if isinstance(v, (list, tuple)):
+        out = []
+        for x in v:
+            k = _as_field_key(x)
+            if k is None:
+                return None
+            out.append(k)
+        return out or None
+    return None
+
+
 def content_hash(item: Dict[str, Any], fields: Optional[list] = None) -> str:
     """对条目算 SHA-256 内容指纹（对标 browsertrix-crawler-deduplication 内容哈希去重）。
     fields 指定时只对这几个字段；否则对所有非元字段。
 
     收官十二轮（审查，实测）：fields 传字符串（配置写 "fields": "title"，或按
     contract 文档写单数 "field"）曾按**单个字符**建 payload——所有记录哈希相同，
-    整批被压成 1 条（静默丢 99%）。此处归一为列表，并由调用侧接受 field/fields 两名。"""
-    if isinstance(fields, str):
-        fields = [fields]
+    整批被压成 1 条（静默丢 99%）。此处归一为列表，并由调用侧接受 field/fields 两名。
+    收官十五轮：字段名含 dict/list 时 item.get 抛 unhashable——非法形状退化为
+    "全字段"口径（宽去重），绝不抛异常。"""
+    _fk = _as_field_keys(fields)
+    if _fk:
+        fields = _fk
+    elif fields:
+        fields = None          # 非法形状 → 退化为全字段哈希（保守：宁可少去重不崩）
     if fields:
         payload = {k: item.get(k) for k in fields}
     else:
@@ -121,7 +158,6 @@ class Pipeline(BasePipeline):
 
     def __init__(self, config, task_vars):
         super().__init__(config, task_vars)
-        self.steps = config or []
         self.dropped = {}
         self.skipped = {}
         self._warned = set()   # R24b：跳过类告警只打印一次（防每行刷屏）
@@ -129,6 +165,65 @@ class Pipeline(BasePipeline):
         # engine_v3 多 worker 并发 process 同一实例，重复条目可双双通过、计数丢失
         import threading as _th
         self._state_lock = _th.Lock()
+        # 收官十五轮（模糊测试，200 轮 124 例崩溃）：**入口归一**——非 dict 步骤与
+        # "字段名形状错（dict/list 当列名 → item.get 抛 unhashable）"的步骤在此
+        # 一次性剔除（各告警一次并计入 skipped），process 路径无需到处防御。
+        # 语义同 v2 run_pipeline：跳过该步、保留行（崩在管道里=整轮数据丢失）。
+        # 列名是数字属合法形态（归一为 str）。
+        self.steps = self._sanitize_steps(config or [])
+
+    _REQ_KEYS = {"filter": ("field",), "cast": ("field",), "add": ("field",),
+                 "transform": ("field",), "default": ("field",), "template": ("field",),
+                 "validate": ("field",), "download": ("field",), "split": ("field",),
+                 "regex_extract": ("field", "pattern"), "rename": ("mapping",)}
+
+    def _sanitize_steps(self, config: list) -> list:
+        clean = []
+        for i, st in enumerate(config):
+            if not isinstance(st, dict):
+                self._warn_once(f"流水线第 {i} 步不是对象（{type(st).__name__}），已跳过")
+                self._bump(self.skipped, f"pipeline:step{i}:非对象")
+                continue
+            t = st.get("type")
+            # 收官十五轮：type 非字符串（dict/list/数字）时连"查必需键表"都会抛
+            # unhashable——此类步骤无法路由，统一剔除（process 的未知类型分支只覆盖字符串）
+            if not isinstance(t, str):
+                self._warn_once(f"流水线步骤 #{i} 的 type 非字符串（{type(t).__name__}），已跳过")
+                self._bump(self.skipped, f"pipeline:step{i}:type非字符串")
+                continue
+            bad = None
+            need = self._REQ_KEYS.get(t)
+            if need:
+                for k in need:
+                    v = st.get(k)
+                    if k == "pattern":
+                        ok = isinstance(v, str) and bool(v)
+                    elif k == "mapping":
+                        ok = isinstance(v, dict) and bool(v)
+                    else:
+                        ok = _as_field_key(v) is not None
+                    if not ok:
+                        bad = k
+                        break
+            new = st
+            if bad is None and "field" in st:
+                fk = _as_field_key(st["field"])
+                if fk != st["field"]:
+                    new = dict(new)
+                    new["field"] = fk
+            if bad is None and t == "dedup" and "key" in st:
+                kk = _as_field_keys(st.get("key"))
+                if kk is None:
+                    bad = "key"
+                else:
+                    new = dict(new)
+                    new["key"] = kk if len(kk) > 1 else kk[0]
+            if bad is not None:
+                self._warn_once(f"流水线步骤 #{i}（type={t!r}）的 {bad} 形状非法，已跳过该步")
+                self._bump(self.skipped, f"pipeline:step{i}:{bad}非法")
+                continue
+            clean.append(new)
+        return clean
 
     def _bump(self, store: dict, key: str) -> None:
         """OCR R6 终审：dropped/skipped 计数的 read-modify-write 曾无锁——
@@ -152,7 +247,14 @@ class Pipeline(BasePipeline):
             pass
 
     def process(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        for step in self.steps:
+        for _si, step in enumerate(self.steps):
+            # 收官十五轮（模糊测试）：非 dict 步骤（None/数字/字符串/列表）曾裸
+            # AttributeError 穿透引擎导出路径（整轮数据丢失）。告警跳过该步、保留行，
+            # 并计入 self.skipped（摘要可见）——与 v2 run_pipeline 同策略
+            if not isinstance(step, dict):
+                self._warn_once(f"流水线第 {_si} 步不是对象（{type(step).__name__}），已跳过")
+                self._bump(self.skipped, f"pipeline:step{_si}:非对象")
+                continue
             t = step.get("type")
             if t == "filter":
                 field, op = step["field"], step.get("op", "contains")
