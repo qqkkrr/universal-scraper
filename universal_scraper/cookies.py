@@ -18,7 +18,23 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
-COOKIE_DIR = ROOT / "outputs" / ".cookies"
+def _cookie_dir() -> Path:
+    """cookie 存档目录（收官十五轮：支持 US_COOKIE_DIR 覆盖）。
+
+    CI/多任务隔离与 e2e 测试需要把凭据档案重定向到临时目录——此前只认固定的
+    outputs/.cookies，测试只能污染真实档案（或者在 CI 里读到空目录而误判失败）。
+    与仓库其它 US_* 环境开关同风格，默认行为不变。
+    """
+    env = os.environ.get("US_COOKIE_DIR", "").strip()
+    if env:
+        try:
+            return Path(env).expanduser()
+        except Exception:
+            pass
+    return ROOT / "outputs" / ".cookies"
+
+
+COOKIE_DIR = _cookie_dir()
 _LOCK = threading.Lock()
 
 # 常见"登录态"cookie 名（健康检查用）：存档里一条都没有时提示可能未登录

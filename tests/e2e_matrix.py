@@ -347,9 +347,11 @@ def main(only=None):
             r = cli("cookies", "--session", str(sess), "--domain", "example.com",
                     env_extra={"US_COOKIE_DIR": str(cdir)})
             r2 = cli("cookies", "--list", env_extra={"US_COOKIE_DIR": str(cdir)})
-            check("cookies 导入+list", r.returncode == 0 and r2.returncode == 0
-                  and "example.com" in r2.stdout,
-                  f"rc={r.returncode}/{r2.returncode} out={r2.stdout[:150]!r} err={r.stderr[:80]!r}")
+            check("cookies 会话导入打印 + list 可运行",
+                  r.returncode == 0 and "S=v" in r.stdout and r2.returncode == 0,
+                  f"rc={r.returncode}/{r2.returncode} out={r.stdout[:80]!r} err={r.stderr[:80]!r}")
+            # 语义说明：`cookies --session` 打印 Cookie 串（--out 可落文件）；
+            # 建立域档案走 `--from-cdp`（需调试 Chrome + node，CI 不可用）
     finally:
         srv.shutdown()
         shutil.rmtree(tmp, ignore_errors=True)
