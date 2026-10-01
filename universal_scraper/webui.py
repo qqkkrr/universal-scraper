@@ -155,18 +155,24 @@ def _scheduler_loop() -> None:
                 scheds = _load_schedules()
                 _due = False
                 for sc in scheds:
-                    if not sc.get("enabled", True):
+                    # 审查十轮（L）：float() 曾在整段大 try 内——一条手编坏记录
+                    # （next_run 非数字）每分钟把整轮到期检查炸掉（except: pass），
+                    # 所有定时任务被静默跳过。逐条隔离
+                    try:
+                        if not sc.get("enabled", True):
+                            continue
+                        if float(sc.get("next_run") or 0) <= now:
+                            sc["next_run"] = now + float(sc.get("interval_hours") or 24) * 3600
+                            sc["last_run"] = now
+                            _due = True
+                            desc = sc.get("description", "")
+                            if desc:
+                                job = _new_job("auto", "⏰ 定时任务：" + desc[:40], description=desc)
+                                threading.Thread(target=run_auto_job,
+                                                 args=(job, desc, None, 2, None, "", ""),
+                                                 daemon=True).start()
+                    except Exception:
                         continue
-                    if float(sc.get("next_run") or 0) <= now:
-                        sc["next_run"] = now + float(sc.get("interval_hours") or 24) * 3600
-                        sc["last_run"] = now
-                        _due = True
-                        desc = sc.get("description", "")
-                        if desc:
-                            job = _new_job("auto", "⏰ 定时任务：" + desc[:40], description=desc)
-                            threading.Thread(target=run_auto_job,
-                                             args=(job, desc, None, 2, None, "", ""),
-                                             daemon=True).start()
                 if _due:
                     _save_schedules(scheds)
         except Exception:
@@ -431,8 +437,10 @@ def _export_rows(rows: list, base: str) -> Dict[str, str]:
             files["xlsx"] = f"outputs/{base}.xlsx"
         except Exception:
             pass
-    except Exception:
-        pass
+    except Exception as e:
+        # 审查十轮（L）：曾静默吞掉全部导出异常——磁盘满/目录只读时摘要仍
+        # "✅ 抓取成功"但一个文件都没有且无提示
+        files["export_error"] = f"{type(e).__name__}: {e}"[:120]
     return files
 
 
@@ -898,6 +906,11 @@ def _auto_verify(rows, cfg):
 # --------------------------------------------------------------------------
 
 class Handler(BaseHTTPRequestHandler):
+    # 审查十轮（M）：无超时曾让半截请求永久占住线程（Slowloris：每连接一线程
+    # 且线程数无上限，N 个空闲连接 = N 线程+fd 被耗尽；后续任务线程 start 失败
+    # 还会留僵尸 running 任务）。socket 级 30s 超时兜底
+    timeout = 30
+
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         data = body.encode("utf-8") if isinstance(body, str) else body
         try:
@@ -1513,8 +1526,14 @@ class Handler(BaseHTTPRequestHandler):
                         _occupied = False
                     if _occupied:
                         if _sys.platform.startswith("win"):
-                            _sp.Popen(["cmd", "/c", "start", "chrome", url or "https://www.baidu.com"],
-                                      stdout=_sp.DEVNULL, stderr=_sp.STDOUT)
+                            # 审查十轮（H2）：`cmd /c start chrome <url>` 曾命令注入
+                            # （URL 里的 & 直达 cmd.exe——list2cmdline 对无空格参数
+                            # 不加引号）。os.startfile 用系统关联打开（等价双击），
+                            # 无 shell 注入面
+                            try:
+                                os.startfile(url or "https://www.baidu.com")
+                            except Exception:
+                                pass
                         elif _sys.platform == "darwin":
                             _sp.Popen(["open", "-a", "Google Chrome", url or "https://www.baidu.com"])
                         else:
@@ -1545,8 +1564,9 @@ class Handler(BaseHTTPRequestHandler):
                     _cmd += ["--port", str(_port)]
                     if os.environ.get("US_WEBUI_SHARE") == "1":
                         _cmd += ["--share"]  # 分享模式重启后保持局域网可访问
-                    if AUTH_TOKEN:
-                        _cmd += ["--token", AUTH_TOKEN]
+                    # 审查十轮（L）：令牌曾进子进程 argv——同机其他用户 ps 可见。
+                    # serve() 启动时已把令牌写入 US_WEBUI_TOKEN 环境变量，新进程
+                    # 继承 env 即可（不进 argv）
                     _sp.Popen(_cmd, cwd=str(ROOT), start_new_session=True,
                               stdout=open(ROOT / "outputs" / "webui_restart.log", "a"),
                               stderr=_sp.STDOUT)
@@ -1790,6 +1810,10 @@ def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
     _CODE_FP_START = _code_fingerprint()
     # OCR R131（L）：原 PY 全局只写不读（子进程一律现取 sys.executable）——删除
     AUTH_TOKEN = token or os.environ.get("US_WEBUI_TOKEN", "")
+    # 审查十轮（L）：显式 --token 传入时也要写进 env——/api/restart 靠环境变量
+    # 传递令牌（不进 argv，ps 不可见）
+    if AUTH_TOKEN:
+        os.environ["US_WEBUI_TOKEN"] = AUTH_TOKEN
     print("🕷️ 万能爬虫工具 · 可视化版 v3", flush=True)
     if share:
         host = "0.0.0.0"
@@ -1805,6 +1829,20 @@ def serve(port: int = 8642, host: str = "127.0.0.1", auto_open: bool = True,
         for u in _lan_urls(port):
             print(f"      {u}", flush=True)
     elif AUTH_TOKEN:
+        print(f"   🔑 访问令牌: {AUTH_TOKEN}（所有 /api/* 需带 X-Auth-Token）", flush=True)
+    # 审查十轮（H1）：Host 头校验只防 DNS rebinding（浏览器威胁），防不了直连
+    # ——--host 0.0.0.0 且无令牌曾 = 局域网无鉴权全 API 开放（实测：伪造 Host
+    # 即绕过 _host_ok）。绑定非环回时强制生成令牌（share 模式上面已生成）
+    def _is_loopback_h(h: str) -> bool:
+        try:
+            import ipaddress as _ipa
+            return _ipa.ip_address(str(h).strip("[]")).is_loopback
+        except ValueError:
+            return str(h).lower() in ("localhost",)
+    if not AUTH_TOKEN and not _is_loopback_h(host):
+        AUTH_TOKEN = secrets.token_hex(8)
+        os.environ["US_WEBUI_TOKEN"] = AUTH_TOKEN
+        print("   ⚠️ 绑定非环回地址且未配置令牌——为防局域网无鉴权访问，已自动生成访问令牌", flush=True)
         print(f"   🔑 访问令牌: {AUTH_TOKEN}（所有 /api/* 需带 X-Auth-Token）", flush=True)
     try:
         # 审查修复（P2，R25）：/api/restart 重启链路是"新进程 Popen → 旧进程

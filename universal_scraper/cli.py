@@ -97,6 +97,22 @@ def _guard_out_is_file(p, cmd: str) -> bool:
     return True
 
 
+def _guard_out_is_dir(p, cmd: str) -> bool:
+    """`--out` 语义为"目录路径"的子命令守卫：已存在同名普通文件时干净报错。
+
+    审查十轮（M）：session/xhs/bili/books/research 的 mkdir(exist_ok=True) 只
+    豁免目录——--out 指向已存在文件时 FileExistsError 裸栈。返回 False = 中止。
+    """
+    if not p:
+        return True
+    pp = Path(str(p)).expanduser()
+    if pp.exists() and not pp.is_dir():
+        print(f"❌ {cmd}: --out 需要目录路径，但已存在同名文件: {pp}",
+              file=sys.stderr)
+        return False
+    return True
+
+
 def main() -> int:
     import signal as _signal
     def _sigterm(*_a):
@@ -520,12 +536,13 @@ def main() -> int:
         try:
             task = Task(_P(args.task))
             cfg = task.config
-            vars_ = dict(cfg.get("vars", {}))
+            # 审查十轮（M）：显式 null 曾穿透 dict(None) TypeError（报错不指向键）
+            vars_ = dict(cfg.get("vars") or {})
             for kv in (args.var or []):
                 _k, _, _v = kv.partition("=")
                 if _k:
                     vars_[_k] = _v
-            anti = dict(cfg.get("anti_bot", {}))
+            anti = dict(cfg.get("anti_bot") or {})
             anti.setdefault("min_interval", 0.05)
             set_request_budget(50)  # 预检硬闸：绝不烧成全量抓取
             src = resolve_tpl(dict(cfg.get("source", {})), vars_)
@@ -546,7 +563,7 @@ def main() -> int:
             if pcls is None:
                 print(f"❌ 任务包没有可用 parser（routed={pname}）", file=sys.stderr)
                 return 1
-            parser = pcls(cfg.get("parsers", {}).get(pname, {}), vars_)
+            parser = pcls((cfg.get("parsers") or {}).get(pname, {}), vars_)
             resp = fetcher.fetch(Request(url=args.url, depth=0))
             ctx = ParseContext(task, cfg, vars_)
             result = parser.parse(resp, ctx)
@@ -626,7 +643,13 @@ def main() -> int:
 
     if args.cmd == "scaffold" and args.type == "task":
         from .task_bundle import scaffold_task
-        out = scaffold_task(args.name, Path(args.out))
+        # 审查十轮（M）：已存在任务包时 task_bundle 有意抛 FileExistsError
+        # （拒绝覆盖）——CLI 不接曾裸栈，本该是一句话报错
+        try:
+            out = scaffold_task(args.name, Path(args.out))
+        except FileExistsError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 2
         print(f"✅ 任务包已生成: {out}")
         print("   下一步: 改 config.json 的 start_urls/rules/parsers，或写 modules/parser.py")
         print(f"   运行:   python3 -m universal_scraper.cli run --task {out}")
@@ -639,6 +662,12 @@ def main() -> int:
         # 审查八轮（LOW）：--out 指向已存在目录曾甩裸 IsADirectoryError（traceback）
         if out.is_dir():
             print(f"❌ --out 是目录（需要文件路径）: {out}\n   例如: --out {out}/{args.name}.json",
+                  file=sys.stderr)
+            return 2
+        # 审查十轮（M）：与 --type task 的"拒绝覆盖"口径对齐——普通模板曾对
+        # 已存在文件无确认直接覆盖（用户编辑过的配置被静默换掉）
+        if out.exists():
+            print(f"❌ 目标文件已存在（拒绝覆盖）: {out}\n   如需重新生成请先删除，或换 --out 路径",
                   file=sys.stderr)
             return 2
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -688,7 +717,10 @@ def main() -> int:
         # 的 blocked.json 写盘调用 time.strftime 必抛 UnboundLocalError，
         # exit 5 时证据文件永远写不出来
         key_field = args.key
-        diff_fields = args.diff_fields.split(",") if args.diff_fields else None
+        # 审查十轮（L）：逗号后带空格（"title, price"）曾不 strip——" price" 永远
+        # 取不到值，该字段变更静默漏报
+        diff_fields = [f.strip() for f in args.diff_fields.split(",") if f.strip()] \
+            if args.diff_fields else None
         tp = Path(args.task)
         snap_path = Path("outputs") / f".snapshot_{tp.name}.json"
         old_snap = {}
@@ -724,9 +756,17 @@ def main() -> int:
                 print(f"[monitor] ⚠️ 本轮抓取失败（快照保持不变）: "
                       f"{type(e).__name__}: {str(e)[:140]}", file=sys.stderr, flush=True)
                 if args.times == 0 or run_no < args.times:
-                    time.sleep(args.every)
+                    time.sleep(max(1.0, args.every))  # 审查十轮（M）：0 曾热循环全速轰炸目标站
                 continue
-            snap = {str(r.get(key_field)): r for r in rows if r.get(key_field)}
+            # 审查十轮（H）：默认 key=url 对 v3 任务普遍失明——引擎导出行只有
+            # _url（engine_v3 给每条 item setdefault("_url", ...)），url 字段仅
+            # 在任务显式映射时存在 → 恒"无变化（共 0 条）"exit 0。默认口径下
+            # 行里没有 url 时回退 _url
+            _kf = key_field
+            if _kf == "url" and rows and not any(r.get("url") for r in rows) \
+                    and any(r.get("_url") for r in rows):
+                _kf = "_url"
+            snap = {str(r.get(_kf)): r for r in rows if r.get(_kf)}
             added = [k for k in snap if k not in old_snap]
             removed = [k for k in old_snap if k not in snap]
             changed = []
@@ -754,7 +794,7 @@ def main() -> int:
             old_snap = snap
             if args.times == 0 or run_no < args.times:
                 print(f"[monitor] 等待 {args.every}s...", flush=True)
-                time.sleep(args.every)
+                time.sleep(max(1.0, args.every))  # 审查十轮（M）：负数曾 ValueError 崩溃
         if _failed_rounds:
             print(f"[monitor] 结束：共 {_failed_rounds} 轮失败（见上方告警）", file=sys.stderr)
             return 1
@@ -779,7 +819,7 @@ def main() -> int:
                       file=sys.stderr, flush=True)
             if args.times == 0 or run_no < args.times:
                 print(f"[schedule] 等待 {args.every}s...", flush=True)
-                _time.sleep(args.every)
+                _time.sleep(max(1.0, args.every))
         if _failed_rounds:
             print(f"[schedule] 结束：共 {_failed_rounds} 轮失败（见上方告警）", file=sys.stderr)
             return 1
@@ -828,6 +868,9 @@ def main() -> int:
 
     if args.cmd == "books":
         from .book_catalog import build_catalog
+        # 审查十轮（M）：--out 指向已存在文件曾 FileExistsError 裸栈
+        if not _guard_out_is_dir(getattr(args, "out", None), "books"):
+            return 1
         spec_path = Path(args.spec)
         if not spec_path.exists():
             print(f"❌ spec 文件不存在: {spec_path}", file=sys.stderr)
@@ -850,7 +893,10 @@ def main() -> int:
         from .llm import LLMClient
         from pathlib import Path as _P
         _zs = _P.home() / ".zshenv"
-        _lines = _zs.read_text().splitlines() if _zs.exists() else []
+        # 审查十轮（L）：读曾不指定 encoding（locale 非 UTF-8 时 UnicodeDecodeError
+        # 裸栈），写却是 utf-8——读写口径对齐
+        _lines = _zs.read_text(encoding="utf-8", errors="replace").splitlines() \
+            if _zs.exists() else []
         def _upsert(k, v):
             nonlocal _lines
             _lines = [ln for ln in _lines if not ln.startswith(f"export {k}=")]
@@ -890,7 +936,8 @@ def main() -> int:
             return 0
         if args.refresh:
             from .proxy_fetch import refresh as _pf_refresh
-            r = _pf_refresh(out=args.out, workers=args.workers,
+            # 审查十轮（L）：--workers 0/负数曾 ThreadPoolExecutor ValueError 裸栈
+            r = _pf_refresh(out=args.out, workers=max(1, args.workers),
                             target_url=args.target_url or None,
                             marker=args.marker or None, sample=args.sample)
             print(json.dumps(r, ensure_ascii=False))
@@ -1279,7 +1326,11 @@ def main() -> int:
             except json.JSONDecodeError as e:
                 print(f"❌ --actions 不是合法 JSON: {e}", file=sys.stderr)
                 return 1
-        r = fetch_url(args.url, browser=args.browser, cookie=args.cookie or None,
+        # 审查十轮（H 同款）：--cdp/--actions 自动启用浏览器模式（--cdp 忘加
+        # --browser 时登录态通道曾静默变成匿名直连）
+        r = fetch_url(args.url,
+                      browser=(args.browser or bool(args.cdp) or bool(_sh_actions)),
+                      cookie=args.cookie or None,
                       proxy=args.proxy or None, timeout=args.timeout,
                       js=args.js or None, wait_selector=args.wait_selector or None,
                       actions=_sh_actions, cdp=args.cdp or None)
@@ -1437,6 +1488,8 @@ def main() -> int:
 
     if args.cmd == "xhs":
         # 实战反馈五#1 收编：小红书一等公民采集（搜索 Top-N + 评论 + 作者主页）
+        if not _guard_out_is_dir(getattr(args, "out", None), "xhs"):
+            return 1
         import json as _json
         import os as _os
         import subprocess as _sp
@@ -1595,15 +1648,23 @@ def main() -> int:
                 sm_urls = fetch_sitemap_urls(client, f"{_base}/sitemap.xml",
                                              max_urls=args.max_urls)
                 # 审查六轮（L4）：sitemap URL 也过一遍 allow/deny（与 extract_links
-                # 同口径 path+query）；CLI 级重复复筛曾用纯 path 口径清空合法结果
+                # 同口径 path+query）；CLI 级重复复筛曾用纯 path 口径清空合法结果。
+                # 审查十轮（H）：完整 URL 口径曾让锚定写法（^/page/\d+/$）把
+                # sitemap URL 静默清光——统一按 path+query 复筛
+                from urllib.parse import urlsplit as _usp
+
+                def _pq(u):
+                    _p = _usp(u)
+                    return (_p.path or "") + (("?" + _p.query) if _p.query else "")
                 if args.allow:
-                    sm_urls = [u for u in sm_urls if re.search(args.allow, u)]
+                    sm_urls = [u for u in sm_urls if re.search(args.allow, _pq(u))]
                 if args.deny:
-                    sm_urls = [u for u in sm_urls if not re.search(args.deny, u)]
+                    sm_urls = [u for u in sm_urls if not re.search(args.deny, _pq(u))]
                 urls.extend(u for u in sm_urls if u not in urls)
             except Exception as e:
                 print(f"  (sitemap 不可用: {type(e).__name__})", file=sys.stderr)
-        urls = urls[:args.max_urls]
+        # 审查十轮（L）：负数曾触发 urls[:-n] 截尾语义（丢尾部 N 条而非"最多 N 条"）
+        urls = urls[:max(0, args.max_urls)]
         print(f"🗺️ {args.url} → {len(urls)} 个 URL：")
         for u in urls[:100]:
             print(f"  {u}")
@@ -1784,6 +1845,11 @@ def main() -> int:
                 print(f"❌ {type(e).__name__}: {e}", file=sys.stderr)
                 return 1
             out = args.out or str(Path(args.tables).with_suffix(".tables.json").resolve())
+            # 审查十轮（M）：--out 指目录/父目录缺失曾裸栈——抽取出的表格 JSON
+            # 没写到任何地方就崩（IsADirectoryError/FileNotFoundError）
+            if not _guard_out_is_file(out, "pdf --tables"):
+                return 1
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
             Path(out).write_text(json.dumps(tables, ensure_ascii=False, indent=1), encoding="utf-8")
             n = sum(len(t["rows"]) for t in tables)
             # 质量门（招行摘要战训：退化垃圾列曾照样报 ✅）
@@ -1802,6 +1868,9 @@ def main() -> int:
 
     if args.cmd == "session":
         from .api_session import run_session
+        # 审查十轮（M）：--out 指向已存在文件曾 FileExistsError 裸栈（mkdir 只豁免目录）
+        if not _guard_out_is_dir(args.out, "session"):
+            return 1
         try:
             plan = json.loads(Path(args.plan).read_text(encoding="utf-8-sig"))
         except Exception as e:
@@ -1878,6 +1947,8 @@ def main() -> int:
 
     if args.cmd == "bili":
         # R101 沉淀：B站四通道（元数据/弹幕/评论/UP主列表）——战法详见 recipes R34
+        if not _guard_out_is_dir(getattr(args, "out", None), "bili"):
+            return 1
         from pathlib import Path as _P
         from universal_scraper import bili as _bili
         from universal_scraper.core import export_rows
@@ -2149,6 +2220,9 @@ def main() -> int:
     if args.cmd == "research":
         from .research import ResearchRunner, load_keywords, load_universe, build_panel_xlsx
         from pathlib import Path as _P
+        # 审查十轮（M）：--out 指向已存在文件曾 FileExistsError 裸栈
+        if not _guard_out_is_dir(getattr(args, "out", None), "research"):
+            return 1
         if args.research_cmd == "run":
             kw = load_keywords(args.keywords)
             pending = load_universe(args.universe, args.year_from, args.year_to)
@@ -2313,6 +2387,11 @@ def main() -> int:
 
     if args.cmd == "fetch":
         from .quick import fetch_url, save_result
+        # 审查十轮（M）：--out 指向已存在目录曾抛 IsADirectoryError 裸栈
+        # （save_result 5 处调用点全部无守卫；--raw 分支有内联检查，其余漏网）
+        # ——JSON 已打印到 stdout 后才崩，管道消费方判失败但 stdout 有数据
+        if args.out and not _guard_out_is_file(args.out, "fetch"):
+            return 1
         actions = None
         if args.actions:
             try:
@@ -2320,7 +2399,12 @@ def main() -> int:
             except json.JSONDecodeError as e:
                 print(f"❌ --actions 不是合法 JSON: {e}", file=sys.stderr)
                 return 1
-        result = fetch_url(args.url, browser=args.browser, selector=args.selector,
+        # 审查十轮（H）：--cdp/--actions 曾不自动启用浏览器模式——--cdp 忘加
+        # --browser 时登录态通道静默变成匿名直连（受限页 exit 0 假成功）。
+        # 显式 --browser 仍优先；需要浏览器的参数一律自动启用
+        _browser = args.browser or bool(args.cdp) or bool(actions) \
+            or args.screenshot or bool(args.capture)
+        result = fetch_url(args.url, browser=_browser, selector=args.selector,
                            article=args.article, table=args.table, proxy=args.proxy,
                            actions=actions, wait_selector=args.wait, links=args.links,
                            links_allow=args.links_allow, links_deny=args.links_deny,
@@ -2381,7 +2465,13 @@ def main() -> int:
             else:
                 sys.stdout.write(raw_html)
             return 0
-        content = result.get("markdown") or result.get("article") or result.get("selector") or result.get("text", "")
+        # 审查十轮（H）：--table 曾是孤儿参数——quick.fetch_url 抽出了 tables
+        # 且 --table 时跳过 markdown 生成，但 content 回退链从不读 tables，
+        # 结果把原始 HTML 当"抽取结果"打印/保存（帮助承诺的表格 JSON 不可见）
+        if args.table and result.get("tables"):
+            content = json.dumps(result["tables"], ensure_ascii=False, indent=1)
+        else:
+            content = result.get("markdown") or result.get("article") or result.get("selector") or result.get("text", "")
         # 实战反馈六#3（知乎）：200 + 壳页（markdown 0 行）曾照样 ✅——工具说谎
         # 比工具失败更误事。空/极短内容按铁律 3 大声告警并置 nodata 退出码
         # 审查八轮（MEDIUM）：200 字符硬阈值把"内容短但成功"的合法页（示例页
@@ -2485,7 +2575,10 @@ def main() -> int:
                 _cfg = json.loads((tp / "config.json").read_text(encoding="utf-8"))
                 _od = Path(str((_cfg.get("output") or {}).get("dir", tp / "out")))
                 if not Path(_od).is_absolute():
-                    _od = tp / _od
+                    # 审查十轮（M）：引擎 output.dir 按 CWD 解析（engine_v3.py），
+                    # 此处曾按任务包目录解析——数据写在 <CWD>/outputs/ 而封禁
+                    # 证据写在 tasks/<pkg>/outputs/，自动化按数据目录找证据落空
+                    _od = Path.cwd() / _od
                 _od.mkdir(parents=True, exist_ok=True)
                 (_od / "blocked.json").write_text(json.dumps(
                     {"blocked": True, "kind": e.kind, "url": e.url, "detail": e.detail,

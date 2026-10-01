@@ -175,6 +175,9 @@ def parse_search_cards(capture: Path, since_offset: int = 0) -> List[Dict[str, A
             # （爆款笔记排序沉底，--top 取到错误集合）。小数形态按 float 换算
             try:
                 like_s = str(like)
+                # 审查十轮（L）："999+" 形态（展示值截断）曾 int() ValueError → 0，
+                # 爆款笔记在 --top 排序中沉底——去 "+" 后按数值解析（"999+" 取下界 999）
+                like_s = like_s.strip().rstrip("+") or "0"
                 like_n = int(float(like_s[:-1]) * 10000) if like_s.endswith("万") else int(like_s)
             except (ValueError, TypeError):
                 like_n = 0
