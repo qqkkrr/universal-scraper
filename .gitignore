@@ -21,12 +21,13 @@ jobs_history.json
 
 # 运行时/本地产物（hy4 反馈 P2：仓库体积与垃圾目录）
 # 注意：.gitignore 不支持行内注释，注释必须独占一行
-# tasks/ 为运行时生成的任务包（历史上有 4 个文件已被提交，不回删）
-tasks/
+# 运行时自动生成的任务包（auto.py 命名 tasks/auto_<hash>/ 与 auto_precise_<host>/）
+# 只忽略自动生成名，用户手写的 tasks/<名字>/ 仍可提交
+tasks/auto_*/
+*.running.lock
 # plugins/ 是用户自放钩子的位置——提交进去会让所有人被意外改数据
 plugins/
-# fixtures/ 为本地夹具测试数据（scripts/fixture_test.py 缺目录时自动跳过）
-fixtures/
+# fixtures/sites/ 是 scripts/fixture_test.py 的夹具库，随仓库提供，不忽略
 report.html
 r.html
 dl_out/
