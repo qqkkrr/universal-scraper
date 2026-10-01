@@ -17,8 +17,23 @@
 //   node browser_session_template.cjs
 // 需要 patchright/playwright + 已登录的持久 profile（先跑 capture_daemon.cjs）。
 const fs = require('fs');
+const _path = require('path');
 let chromium;
-try { ({ chromium } = require('patchright')); } catch (e) { ({ chromium } = require('playwright')); }
+// 审查八轮（M）：本模板按用法复制到任务目录（技能树外）后，裸 require 从副本
+// 所在目录向上解析必 MODULE_NOT_FOUND，或在装了全局旧版 playwright 的机器上
+// 静默绑到版本不匹配的引擎。NODE_PATH 兜底（cli captcha start 同款注入方式），
+// 全部失败时大声退出而非静默用错引擎
+(function _loadChromium() {
+  const nps = (process.env.NODE_PATH || '').split(':').filter(Boolean);
+  const cands = [];
+  for (const np of nps) { cands.push(_path.join(np, 'patchright')); cands.push(_path.join(np, 'playwright')); }
+  cands.push('patchright'); cands.push('playwright');
+  for (const c of cands) {
+    try { chromium = require(c).chromium; return; } catch (e) {}
+  }
+  console.error('找不到 patchright/playwright——请在技能根目录运行，或 export NODE_PATH=<技能根>/node_modules');
+  process.exit(1);
+})();
 
 // ── 参数（环境变量注入，模板零硬编码）──
 const CDP = process.env.SESSION_TEMPLATE_CDP || 'http://127.0.0.1:9222';

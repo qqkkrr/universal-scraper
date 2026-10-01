@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -53,7 +54,10 @@ class PWBrowserFetcher:
                     # CDP 附加：复用用户已登录的调试 Chrome（与桥的 --cdp 同语义）
                     self._browser = self._pw.chromium.connect_over_cdp(cdp)
                 else:
-                    self._browser = self._pw.chromium.launch(headless=True)
+                    # 审查八轮（H）：曾硬编码 headless=True——用户配 headless:false
+                    # 想走有头抗检测时被静默无视（engine 现已透传该键）
+                    self._browser = self._pw.chromium.launch(
+                        headless=bool(self.source.get("headless", True)))
             except Exception:
                 # 启动失败不能留下半初始化状态：close() 只认 _browser，
                 # _pw 泄漏会让 playwright 驱动进程挂住
@@ -120,7 +124,7 @@ class PWBrowserFetcher:
                     except Exception as _ck:
                         # OCR R131（M）：单步失败不弃整页（桥同口径），但必须留痕——
                         # 静默吞掉时"点击了却没生效"无从排查
-                        print(f"[browser_pw] 点击动作失败 {sel}: {type(_ck).__name__}: {str(_ck)[:100]}")
+                        print(f"[browser_pw] 点击动作失败 {sel}: {type(_ck).__name__}: {str(_ck)[:100]}", file=sys.stderr)
                 elif t == "scroll" or t == "scroll_bottom":
                     for _ in range(int(act.get("count", 3))):
                         page.mouse.wheel(0, 20000)
@@ -149,7 +153,7 @@ class PWBrowserFetcher:
                 try:
                     out[u] = self._render(u, wait_ms, js_actions)
                 except Exception as e:
-                    print(f"[browser_pw] 渲染失败 {u}: {type(e).__name__}: {str(e)[:120]}")
+                    print(f"[browser_pw] 渲染失败 {u}: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
         return out
 
     def _fetch_pages_parallel(self, urls: List[str], wait_ms: int,
@@ -176,7 +180,7 @@ class PWBrowserFetcher:
                     try:
                         _html = sub._render(u, wait_ms, js_actions)
                     except Exception as e:
-                        print(f"[browser_pw] 渲染失败 {u}: {type(e).__name__}: {str(e)[:120]}")
+                        print(f"[browser_pw] 渲染失败 {u}: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
                         continue
                     with results_lock:  # OCR R131（H）：锁曾建未用——并发写共享 dict
                         results[u] = _html
@@ -184,7 +188,7 @@ class PWBrowserFetcher:
                 with results_lock:
                     for u in shard:
                         results.setdefault(u, "")
-                print(f"[browser_pw] 分片启动失败: {type(e).__name__}: {str(e)[:120]}")
+                print(f"[browser_pw] 分片启动失败: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
             finally:
                 sub.close()
 

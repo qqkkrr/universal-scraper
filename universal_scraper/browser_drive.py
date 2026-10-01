@@ -18,7 +18,10 @@ def check_chrome_alive(port: int = 9222) -> bool:
     """调试 Chrome 是否在运行。"""
     import urllib.request
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=3) as r:
+        # 审查八轮（L）：urlopen 曾走环境代理（http_proxy 指向 Clash 时探测被
+        # 发往代理，活着的调试 Chrome 被判死）——环回地址显式直连
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(f"http://127.0.0.1:{port}/json/version", timeout=3) as r:
             return r.status == 200
     except Exception:
         return False

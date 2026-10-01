@@ -117,7 +117,12 @@ def detect_boxes(image_bytes: bytes) -> List[Dict[str, Any]]:
 def _prompt_targets(prompt: str) -> List[str]:
     """从题面提取目标字符（OCR R131 H）："依次点击：国 家 税" 曾把指令词
     "依次点击" 也当目标——每轮多 4 个必然 unmatched 的假目标。
-    优先级：【】内字符 > 最后一个冒号后段 > 去标点全文（旧行为兜底）。"""
+    优先级：【】内字符 > 最后一个冒号后段 > 去标点全文（旧行为兜底）。
+    审查八轮（H）：指令词剔除曾用全局 re.sub 在拼接后无分隔的串上替换——
+    目标字本身是"点/击/请"（点选验证码防脚本的真实设计）时被吞掉，
+    cli 守卫（pts and not unmatched）放行 → 自动点下错误坐标并提交。
+    修法：冒号后段是明确目标，不再剔除；指令剔除只用于无冒号兜底分支，
+    且只锚定段首（剥不干净的宁可多目标走 unmatched 退人工，不吞真目标）。"""
     import re
     m = re.findall(r"【(.)】", prompt or "")
     if m:
@@ -126,10 +131,11 @@ def _prompt_targets(prompt: str) -> List[str]:
     seg = parts[-1] if len(parts) > 1 else (prompt or "")
     seg = "".join(seg.split())
     out = [ch for ch in seg if ch not in "，,。.（）()【】[]“”\"'；;、"]
-    # 冒号后仍可能残留短指令词（"请点击"）；剔除两字以上常见指令词
-    _strip = "依次点击|请点击|依序点击|按顺序点击|按顺序|依次|请|点击"
+    if len(parts) > 1:
+        return out
+    # 无冒号兜底：只剥段首的连续指令前缀
     tail = "".join(out)
-    tail = re.sub(_strip, "", tail)
+    tail = re.sub(r"^(?:依次点击|请点击|依序点击|按顺序点击|按顺序|依次|请|点击)+", "", tail)
     return list(tail) if tail else out
 
 

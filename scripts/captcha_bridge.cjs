@@ -176,6 +176,16 @@ async function main() {
   const hbTimer = setInterval(heartbeat, 2000);
   if (INIT_URL) await page.goto(INIT_URL, { timeout: 90000, waitUntil: "domcontentloaded" }).catch(() => {});
   let lastId = 0;
+  // 审查八轮（M）：桥被杀/崩溃后重启曾 lastId 归零——workdir 残留的 cmd.json
+  // （id > 0）被当新指令重放（提交类操作双击/重复导航），且覆盖 last_result。
+  // 启动即消费掉残留指令（记 id + 删文件），客户端重启会话自会写新 id
+  {
+    const _pre = readJson("cmd.json", null);
+    if (_pre && _pre.op) {
+      lastId = Number(_pre.id) || 0;
+      try { fs.unlinkSync(P("cmd.json")); } catch (e) {}
+    }
+  }
   const t0 = Date.now();
   while (!shouldExit) {
     if (fs.existsSync(P("stop"))) break;

@@ -71,6 +71,10 @@ function loadConfig() {
   if (!Array.isArray(cfg.steps) && !cfg.reuseTabPattern && !cfg.goto)
     die('steps / reuseTabPattern / goto 至少给一个');
   if (!cfg.intercept || !cfg.intercept.urlPattern) die('intercept.urlPattern 必填（要拦截的 XHR 接口特征）');
+  // 审查八轮（M）：fields 为空曾静默产出废数据——dedupKeys=[] 时 keyOf(row)
+  // 恒为 "[]"，所有行互相"去重"，多页采集塌缩成 1 行仍报 done
+  if (!cfg.fields || typeof cfg.fields !== 'object' || !Object.keys(cfg.fields).length)
+    die('fields 必填且非空（{列名: 响应字段路径}——没有它无法从拦截的响应中提取数据）');
   // 审查修复（P1）：输出目录不存在曾让成功采集后的落盘 ENOENT 崩掉、全部数据丢失
   for (const p of [cfg.outJson, cfg.outCsv]) {
     if (p) { try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch (e) {} }

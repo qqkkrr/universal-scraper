@@ -492,8 +492,21 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
             try:
                 from .browser_pw import PWBrowserFetcher, playwright_available
                 if playwright_available():
-                    _pw = PWBrowserFetcher({"cdp": detail.get("cdp") or (source or {}).get("cdp")},
-                                           anti, {}, Path("."))
+                    # 审查八轮（H）：source 曾只传 cdp——SKILL.md 承诺的
+                    # wait_until/dom_stable（browser_pw._render 从 source 读）
+                    # 与 headless 在 playwright 后端静默不生效：SPA 详情页按
+                    # domcontentloaded+固定 1200ms 渲染，接口拖尾没等到 → 空字段
+                    # 仍 detail_status=200 入库。node 桥回落路径反而透传了
+                    # detail.headless（两条后端行为不一致）。渲染键从 detail→
+                    # source 逐级取（显式 null 视同未配）
+                    _src = {"cdp": detail.get("cdp") or (source or {}).get("cdp")}
+                    for _k in ("wait_until", "dom_stable", "headless"):
+                        _v = detail.get(_k)
+                        if _v is None:
+                            _v = (source or {}).get(_k)
+                        if _v is not None:
+                            _src[_k] = _v
+                    _pw = PWBrowserFetcher(_src, anti, {}, Path("."))
                     # R101 修复（P2）：probe-launch 前置——chromium 二进制缺失时
                     # launch 失败必须在此暴露并回落 node 桥，而不是逐页静默
                     # browser_miss（曾违背 auto"能启动就用"契约）
@@ -1034,11 +1047,24 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             if resume and checkpoint:
                 old_rows = checkpoint.load_rows()
                 if old_rows:
-                    keyf = detail.get("resume_key", detail.get("url_field", "id"))
-                    old_by_key = {record_key(o, keyf): o for o in old_rows}
+                    # 审查八轮（C2）：keyf 默认曾为 "id"，与取数侧 url_field 默认
+                    # "url" 不一致——列表行通常无 id 字段，新旧行键全为 ""。而
+                    # record_key 契约明确 "" = 无键（不丢弃也不误合并），唯一
+                    # 没守这个契约的就是这里：old_by_key 坍缩成 {"": 最后一条
+                    # 旧记录}，新行全部合并进同一条旧详情且跳过重抓（静默串行）。
+                    # 修法：or 链对齐 url_field（get 的默认值不挡显式 null）+
+                    # 构建与查找两侧都跳过无键行
+                    keyf = detail.get("resume_key") or detail.get("url_field") or "url"
+                    old_by_key = {}
+                    for o in old_rows:
+                        _ok = record_key(o, keyf)
+                        if _ok:
+                            old_by_key[_ok] = o
                     merged = 0
                     for r in rows:
                         k = record_key(r, keyf)
+                        if not k:
+                            continue
                         o = old_by_key.get(k)
                         if o and (o.get("detail_body") or "").strip():
                             for kk, vv in o.items():

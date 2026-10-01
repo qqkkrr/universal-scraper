@@ -24,7 +24,8 @@ _ALLOWED_HOSTS = {"www.autohome.com.cn", "api.autohome.com.cn",
 
 # 请求预算硬闸（超过即停，防失控烧预算）
 # OCR R131 反馈 #5：全局共享 outputs/.budget.json 曾跨任务串账——侦察消耗漏进
-# 正式跑。改为按任务名分桶：BUDGET_TASK 环境变量（或模板复制时改）隔离各任务
+# 正式跑。改为按任务名分桶：US_BUDGET_TASK 环境变量（或模板复制时改）隔离各任务
+# （审查八轮：注释曾写 BUDGET_TASK——照抄注释设环境变量的分桶静默失效串回 default）
 BUDGET_TASK = os.environ.get("US_BUDGET_TASK", "default")
 BUDGET_FILE = Path("outputs") / f".budget_{BUDGET_TASK}.json"
 BUDGET_LIMIT = 4500

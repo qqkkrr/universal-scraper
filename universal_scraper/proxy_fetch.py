@@ -60,8 +60,14 @@ TARGET_TIMEOUT = 12
 # 无 marker 时的"真实页面"否定判据（审查八轮修复用）：拦截/拦截页常见特征。
 # 注意 TEST_URL=example.com 只有 559 字节——旧判据">5KB 或 JSON"对它恒假，
 # 导致 validate()/refresh（模块 docstring 的默认用法）恒判 0 可用。
+# 审查八轮（M）：b"cloudflare" 曾在此列——CF 对反代/接入站点默认在 head 注入
+# rocket-loader/email-decode 脚本（含 "cloudflare" 字样、位于前 4KB），合法 200
+# 页被全量误杀成"本轮 0 可用"（实测复现）。其拦截检测职责由 CF challenge 页
+# 专属特征（__cf_chl / challenge-platform / just a moment）承接——合法页正文
+# 含这些的概率趋零
 _BLOCK_HINTS = (b"captcha", b"forbidden", b"access denied", b"blocked",
-                b"not allowed", b"cloudflare", b"<title>error",
+                b"not allowed", b"<title>error",
+                b"__cf_chl", b"/cdn-cgi/challenge-platform/", b"just a moment",
                 "安全验证".encode("utf-8"), "访问受限".encode("utf-8"),
                 "访问过于频繁".encode("utf-8"))
 
@@ -323,6 +329,13 @@ class PoolState:
                     raise ValueError(f"代理记录非 dict: {px}")
                 if rec.get("state") not in ("fresh", "alive", "dead", "burned", None):
                     raise ValueError(f"未知代理状态: {px}={rec.get('state')}")
+                # 审查八轮（M）：旧版/手编记录缺模板字段（或值非数值，如 "1"）时
+                # mark() 的 rec["blocked"] += 1 直接 KeyError/TypeError，崩整个
+                # refresh——载入期按模板归一化（setdefault 只给新建记录用）
+                for _k, _v in (("ok", 0), ("blocked", 0), ("latency_ms", -1), ("ts", 0)):
+                    _cur = rec.get(_k)
+                    if isinstance(_cur, bool) or not isinstance(_cur, (int, float)):
+                        rec[_k] = _v
             self.data = data
         except Exception as e:
             # 损坏自动重建，但必须出声 + 带时间戳隔离（审查修复：静默清零 burned
@@ -454,7 +467,15 @@ def refresh(out: str = "outputs/proxies.txt", workers: int = 30,
                 "请先查证源站/网络再重跑")
             _kept = True
     if not _kept:
-        fp.write_text("\n".join(good) + ("\n" if good else ""), encoding="utf-8")
+        # 审查八轮（M）：曾只写本轮 good——抽样未命中的上一轮 alive 代理（免费
+        # 代理数千候选时每轮重抽率仅 ~12-20%）从 txt 消失，而账本仍记 alive：
+        # cli --status 报 N 个可用、实际 txt 持续萎缩 → 任务更多直连回退。写入时
+        # 合并账本中仍 alive 的项（fresh/dead/burned 未经本轮验证不进 txt）；
+        # good 保持验证延迟序在前，历史 alive 兜底在后
+        _alive = [px for px, rec in st.data.items()
+                  if isinstance(rec, dict) and rec.get("state") == "alive"]
+        _lines = list(dict.fromkeys(list(good) + sorted(_alive)))
+        fp.write_text("\n".join(_lines) + ("\n" if _lines else ""), encoding="utf-8")
     log(f"✅ 可用代理 {len(good)} 个 → {fp}（三态账本: {st.path}）")
     return {"total": len(all_p), "ok": len(good), "file": str(fp), "kept_previous": _kept,
             "stats": st.stats(), "state_file": str(st.path)}

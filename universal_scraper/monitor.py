@@ -36,10 +36,12 @@ def _load_snapshot(name: str) -> Dict[str, Any]:
         import sys as _sys
         print(f"⚠️ 监控快照读取失败（{type(e).__name__}: {str(e)[:60]}）: {p}",
               file=_sys.stderr)
-    # 损坏隔离（R18 cookies 同款口径）
+    # 损坏隔离（R18 cookies 同款口径）；审查八轮（L）：固定 .corrupt 后缀曾让
+    # 二次损坏覆盖前一份证据——时间戳+uuid 后缀（PoolState/QuotaLedger 同款）
     try:
         if p.exists():
-            p.rename(p.with_suffix(".corrupt"))
+            import uuid as _uuid
+            p.rename(p.with_suffix(f".corrupt.{int(time.time())}.{_uuid.uuid4().hex[:6]}"))
     except Exception:
         pass
     return {"urls": [], "ts": 0}
@@ -109,12 +111,16 @@ def fetch_sitemap_urls(url: str, timeout: int = 30,
             loc = m.group(1).strip()
             if loc in seen:
                 continue
-            # OCR R131（M）：'sitemap' in URL 曾把普通页面（/news-sitemaps-guide/
-            # ?page=sitemap 等）误判成子索引递归抓取——收紧为扩展名/路径段判定
+            # OCR R131（M）：'sitemap' in URL 曾把普通页面误判成子索引递归抓取
+            # 审查八轮（M）：收紧后仍漏两类叶子——路径段 startswith("sitemap")
+            # 命中 /article/sitemap-guide.html（末段按 - 切出 "sitemap"）；后缀
+            # 一刀切命中 /download/feed.xml、/data.xml?id=1 等真叶子。它们被
+            # 递归抓取且不进 out：监控覆盖面静默缺失 + 每轮白烧请求。收窄为
+            # "文件名以 sitemap 开头的 xml/gz"——漏判索引只少递归一层（loc 仍
+            # 进 out），误判叶子的代价是丢数据
             _path = loc.split("?", 1)[0].lower()
-            _is_index = _path.endswith((".xml", ".gz")) or any(
-                seg in ("sitemap", "sitemapindex") or seg.startswith("sitemap")
-                for seg in _path.rstrip("/").rsplit("/", 1)[-1].split("-") if seg)
+            _fname = _path.rstrip("/").rsplit("/", 1)[-1]
+            _is_index = bool(re.match(r"sitemap.*(\.xml(\.gz)?|\.gz)$", _fname))
             if _is_index:
                 _one(loc, depth + 1)
                 if len(out) >= max_urls:

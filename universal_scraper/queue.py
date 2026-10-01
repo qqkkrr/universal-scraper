@@ -154,7 +154,10 @@ def extract_links(html: str, base_url: str, allow: Optional[str] = None,
     # 收官十二轮（审查 L，实测）：只认带引号 href——HTML5 无引号属性（minify 后的
     # 现代站点大量如此，如 example.com 的 <a href=https://…>）全部漏检，
     # quick.fetch_url(links=True)/MCP scrape(links) 静默返回空。引号改可选
-    for m in re.finditer(r'href=\s*(?:"([^"]+)"|\'([^\']+)\'|([^"\'\s>]+))', _clean, re.I):
+    # 审查八轮（L）：href 前加 (?<![\w:-])——data-href（前缀 -）与 xlink:href
+    # （前缀 :）等属性名的尾段曾从中段起配（跟踪像素/预加载 URL 混进链接集
+    # 烧预算+污染去重键）
+    for m in re.finditer(r'(?<![\w:-])href=\s*(?:"([^"]+)"|\'([^\']+)\'|([^"\'\s>]+))', _clean, re.I):
         u = (m.group(1) or m.group(2) or m.group(3) or "").strip()
         if not u or u.startswith(("javascript:", "#", "mailto:", "tel:")):
             continue

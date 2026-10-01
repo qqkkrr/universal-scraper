@@ -1212,8 +1212,10 @@ def main() -> int:
             _emit(s.status())
             return 0
         if args.stop:
-            s.stop()
-            _emit({"stopped": True, "dir": str(wdir)})
+            _sr = s.stop()
+            # 审查八轮（M）：stop 现在等待桥确认退出——未确认时如实上报
+            # （is_running 仍 True，立即 start 会被守卫拒绝，防双开桥）
+            _emit({"stopped": True, "confirmed": bool(_sr.get("confirmed")), "dir": str(wdir)})
             return 0
         if args.start:
             # 双启动守卫（审查 P2）：同一 workdir 已有活桥时再 start 会双桥抢命令
