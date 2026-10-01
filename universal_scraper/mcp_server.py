@@ -186,6 +186,11 @@ def tool_auto(args: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "name": out.get("name"),
         "result": out.get("result"),
+        # 审查十一轮（M）：质量门否决/验证结果曾丢失——客户端无法区分"部分
+        # 成功"与干净成功（结构化信号只剩 log_tail 的自然语言）。显式传递
+        "quality_gate_failed": out.get("quality_gate_failed"),
+        "verify": out.get("verify"),
+        "summary": out.get("summary"),
         "sample": out.get("sample", [])[:10],
         "files": out.get("files"),
         "log_tail": (out.get("log") or "")[-1500:],

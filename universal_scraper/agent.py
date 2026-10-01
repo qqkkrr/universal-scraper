@@ -187,28 +187,26 @@ def _llm(messages: List[Dict[str, str]], timeout: int = 150) -> str:
 
 
 def _parse_action(raw: str) -> Dict[str, Any]:
-    import re
-    # OCR R131 二轮（M）：贪婪 \{.*\} 曾吞多个 JSON 块/噪声——与 llm.py 同口径：
-    # 先试最短片段，失败再回退贪婪（嵌套 JSON 保持可提取性）。
-    # 收官十二轮（审查，实测）：最短片段"解析成功但缺 action"时曾直接报错——
-    # LLM 先输出说明性 JSON（页面摘要）再给真正动作的形态被丢掉。改为遍历全部
-    # 最短块找含 action 的 dict，找不到再试贪婪（嵌套 JSON），两者皆无才报错
-    for mm in re.finditer(r"\{.*?\}", raw or "", re.S):
-        try:
-            d = json.loads(mm.group(0))
-        except Exception:
+    # 审查十一轮（H2）：最短块遍历只能解析**扁平**动作——extract 动作天然带
+    # 嵌套 schema（schema 的最短块到第一个 } 止是坏 JSON，finditer 不再切出
+    # 外层块），贪婪回退又跨了前置 JSON → 整体失败（页面摘要+动作是最常见的
+    # LLM 输出形态，任务提前 break）。改用 raw_decode 在每个 { 处取最长合法
+    # 前缀——任意嵌套/前置摘要/后置噪声都能正确解析
+    txt = raw or ""
+    decoder = json.JSONDecoder()
+    best: Dict[str, Any] = {}
+    for i, ch in enumerate(txt):
+        if ch != "{":
             continue
-        if isinstance(d, dict) and "action" in d:
-            return d
-    mm = re.search(r"\{.*\}", raw or "", re.S)
-    if mm:
         try:
-            d = json.loads(mm.group(0))
-            if isinstance(d, dict) and "action" in d:
-                return d
-        except Exception:
-            pass
-    raise AgentError("LLM 未返回含 action 的 JSON: " + (raw or "")[:120])
+            obj, _end = decoder.raw_decode(txt, i)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and "action" in obj:
+            best = obj  # 取最后一个含 action 的（LLM 常在说明后给真正动作）
+    if best:
+        return best
+    raise AgentError("LLM 未返回含 action 的 JSON: " + txt[:120])
 
 
 def _extract_items(description: str, page_text: str, schema: Dict[str, Any],
@@ -229,7 +227,9 @@ def _extract_items(description: str, page_text: str, schema: Dict[str, Any],
     # OCR R131 二轮（M）：同 _parse_action——最短优先、贪婪回退。
     # 收官十二轮（审查，实测）：最短片段"解析成功但不含 dict 条目"时曾静默 0 条
     # （LLM 回显 schema 字段名的短数组顶掉真数据；且贪婪跨两段数组解析不了）。
-    # 改为遍历全部最短块取"含 dict 条目最多"者，无则贪婪兜底，再无按 [] 处理
+    # 审查十一轮（H4）：改为"值总长优先、dict 条目数次之"——LLM 的格式示例
+    # 条目是短占位（"示例值"/"string"），真实数据信息量更大；曾按"dict 条目数
+    # 最多"选，长示例（条目多）仍会顶掉真数据（日志照打"抽取到 N 条"）
     _cands = []
     for mm in _re.finditer(r"\[.*?\]", raw or "", _re.S):
         try:
@@ -248,8 +248,14 @@ def _extract_items(description: str, page_text: str, schema: Dict[str, Any],
                     _dict_cands.append(a)
             except Exception:
                 pass
-    arr = (max(_dict_cands, key=lambda a: sum(1 for it in a if isinstance(it, dict)))
-           if _dict_cands else None)
+
+    def _score(a):
+        _vl = sum(len(str(v)) for it in a if isinstance(it, dict)
+                  for v in it.values() if v is not None)
+        _n = sum(1 for it in a if isinstance(it, dict))
+        return (_vl, _n)
+
+    arr = (max(_dict_cands, key=_score) if _dict_cands else None)
     if not isinstance(arr, list):
         return []
     items = [it for it in arr if isinstance(it, dict) and any(str(v or "").strip() for v in it.values())]
@@ -470,7 +476,11 @@ def re_need_login(text: str) -> bool:
         with _NEED_LOGIN_RE_LOCK:
             if _NEED_LOGIN_RE is None:
                 import re
-                _NEED_LOGIN_RE = re.compile(r"请登录|免费注册|拖动.*滑块|滑块.*验证|安全验证|访问过于频繁|验证码")
+                # 审查十一轮（H3）：曾含裸"免费注册"——几乎每个中文站未登录页
+                # 都有此文案（页脚/导航），CDP 路径上公开页被判登录墙，6×5s
+                # 轮询后抛"等待登录超时"中止整个任务。收窄为登录墙语义词
+                _NEED_LOGIN_RE = re.compile(r"请(?:先)?登录|登录后(?:查看|可见|才能)|需要登录|登录墙|"
+                                            r"拖动.*滑块|滑块.*验证|安全验证|访问过于频繁|验证码")
     return bool(_NEED_LOGIN_RE.search(text or ""))
 
 
