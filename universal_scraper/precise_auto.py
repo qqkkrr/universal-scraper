@@ -510,16 +510,22 @@ def generate_precise(description: str, url: str, config: Optional[Dict[str, Any]
     _wrote_meta = False
 
     try:
+        # 审查十二轮（H4）：入口候选探测的结果只进了战术决策——试跑仍拿原始失效
+        # URL 跑（原入口 404/超时时 html_engine 路径必失败、候选被完全浪费，
+        # engine 任务包的 start_urls 也由坏样本生成）。试跑统一改用探测到的可用入口
+        _use_url = str(detect.get("_url") or url)
+        if _use_url != url:
+            _lg(f"🔁 试跑改用探测到的可用入口: {_use_url}")
         if tactic == "html_engine":
             # 常规页面走 engine 任务包；_tactic_engine_probe 内部只会注册可执行的 engine 配置。
-            rows, files, detail = _tactic_engine_probe(meta, url, limit, _lg)
+            rows, files, detail = _tactic_engine_probe(meta, _use_url, limit, _lg)
             if not rows:
                 raise RuntimeError("engine 试跑 0 条")
         else:
             runner = {"cookie_click": _tactic_cookie_click_probe,
                       "pdf_attach": _tactic_pdf_probe,
                       "image_ocr": _tactic_image_probe}[tactic]
-            rows, files, detail = _repair_probe(meta, url, limit, runner, _lg)
+            rows, files, detail = _repair_probe(meta, _use_url, limit, runner, _lg)
             # 试跑成功后保存/注册；失败则保持无配置，下次自动精配重试。
             from . import sites as _sites
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -619,7 +625,13 @@ def _rows_match_task(description: str, rows) -> bool:
     kws = _extract_kws(description or "")
     if not kws:
         return True  # 无法判断时不拦
-    joined = " ".join(str(v) for r in (rows or [])[:5] for v in r.values())
+    # 审查十二轮（H2）：曾只 join 行**取值**——"抓取图书价格数据"对
+    # {"书名":"活着","价格":"28"} 判不相关（数据本身不回显描述词），
+    # cookie_click/pdf_attach/image_ocr 与 LLM 兜底全部被此闸系统性误杀
+    # （第 2 轮修复后再拒 → 精配整单丢弃）。字段名也参与匹配
+    joined = " ".join(
+        f"{k} {v}" for r in (rows or [])[:5] if isinstance(r, dict)
+        for k, v in r.items())
     # 按长度分层匹配：4 字核心词优先，2 字词兜底（如“招生”“志愿”）
     for n in (4, 3, 2):
         for w in kws:
@@ -640,8 +652,14 @@ def _repair_probe(meta: Dict[str, Any], url: str, limit: int, runner, log=None):
         rows, files, detail = runner(m, u, limit, log)
         if not rows:
             raise RuntimeError("试跑 0 条")
+        # 审查十二轮（H2）：相关性闸曾一票否决——任务语言（描述）与数据语言
+        # （字段名/值）无词表交集是常态（"统计年鉴数据" vs 字段"指标/2023"），
+        # 正确数据被系统性误杀、精配整单丢弃。规则判不准相关性——降级为告警，
+        # 结果照常接受（防假成功由 engine 的质量门/关键字段闸承担）
         if not _rows_match_task(desc, rows):
-            raise RuntimeError("试跑有行但与任务内容不相关（可能抓到导航/无关列表），需要换入口或修正选择器")
+            if log:
+                log("⚠️ 试跑数据与任务描述无关键词交集（仅供参考：可能抓到导航/无关列表）——"
+                    "已接受该结果，请抽样复核")
         return rows, files, detail
 
     try:
@@ -763,9 +781,12 @@ def _tactic_cookie_click_probe(meta: Dict[str, Any], url: str, limit: int,
             # 审查修复：推断结果曾只存局部变量——试跑成功后 meta 落盘注册时
             # url_template 恒为空，注册后的 cookie_click_run 永远生成不了"详情链接"。
             # 写回 meta.params（试跑成功路径的 meta 即调用方持久化对象）
+            # 审查十二轮（H3）：上游（503-505 行）已 setdefault 建键且值为空串——
+            # 此处再 setdefault 是 no-op（键已存在不覆盖），修复实际从未生效。
+            # 直接赋值
             _mp = meta.get("params")
             if isinstance(_mp, dict):
-                _mp.setdefault("url_template", tmpl)
+                _mp["url_template"] = tmpl
     for r in rows:
         r.pop("_site", None)
     base = f"auto_precise_{_sanitize_host(meta.get('host',''))}"
@@ -830,8 +851,10 @@ def _llm_direct_extract(meta: Dict[str, Any], url: str, limit: int,
     rows = [r for r in arr if isinstance(r, dict)]
     if not rows:
         raise RuntimeError("LLM 直抽 0 行（页面可能无相关数据）")
+    # 审查十二轮（H2 同款）：相关性规则闸降级为告警（见 _repair_probe._run_once）
     if not _rows_match_task(desc, rows):
-        raise RuntimeError("LLM 直抽结果与任务不相关")
+        if log:
+            log("⚠️ LLM 直抽结果与任务描述无关键词交集（仅供参考）——已接受，请抽样复核")
     base = f"auto_precise_{_sanitize_host(meta.get('host',''))}"
     fp = ROOT / "outputs" / f"{base}.json"
     fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")

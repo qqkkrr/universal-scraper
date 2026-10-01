@@ -131,6 +131,51 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
                 viol.append((r[H["stkcd"]], r[H["year"]]))
         if viol:
             issues.append(f"面板窗口违例 {len(viol)}: {viol[:5]}")
+        # 审查十二轮（H2）：覆盖口径曾单向——只验面板行在窗口内，不验"应有单元
+        # 是否都在"：多轮封禁中途交付/清单静默丢行/跑错目录时直接全绿。反向对账
+        # expected=universe∩年份窗 与面板实际求差，再与缺口清单（progress.json 的
+        # nodata/pdf_fail）对账——不在缺口清单的缺失才是真缺
+        _have = set()
+        for r in t:
+            _rp2 = str(r[H["stkcd"]] or "").strip()
+            if _rp2.endswith(".0"):
+                _rp2 = _rp2[:-2]
+            _c6 = "".join(ch for ch in _rp2 if ch.isdigit()).zfill(6)
+            _y2 = _safe_int(r[H["year"]], None)
+            if _y2 is not None:
+                _have.add((_c6, _y2))
+        _expect = set()
+        for c, (f_, l_) in win.items():
+            _lo = max(f_, year_from) if year_from is not None else f_
+            _hi = min(l_, year_to) if year_to is not None else l_
+            if _lo <= _hi:
+                _expect.update((c, y) for y in range(_lo, _hi + 1))
+        _miss = sorted(_expect - _have)
+        if _miss:
+            _gap_keys = set()
+            _prog_ok = False
+            try:
+                from pathlib import Path as _P
+                _prog = _P(str(texts_dir)).parent / "progress.json" if texts_dir else None
+                if _prog is not None and _prog.exists():
+                    _pd = json.loads(_prog.read_text(encoding="utf-8"))
+                    for _k, _st in (_pd.get("done") or {}).items():
+                        if str(_st) in ("nodata", "pdf_fail", "scan_fail") and "_" in str(_k):
+                            _cc, _yy = str(_k).rsplit("_", 1)
+                            try:
+                                _gap_keys.add((_cc.zfill(6), int(_yy)))
+                            except ValueError:
+                                pass
+                    _prog_ok = True
+            except Exception as _pe:
+                issues.append(f"progress.json 解析失败（覆盖对账降级）: {type(_pe).__name__}")
+            _real_miss = [k for k in _miss if k not in _gap_keys]
+            if _real_miss and not _prog_ok:
+                issues.append(f"覆盖疑似缺失 {len(_real_miss)} 个企业-年且无 progress.json 对账"
+                              f"（示例: {_real_miss[:5]}）")
+            elif _real_miss:
+                issues.append(f"面板缺 {len(_real_miss)} 个企业-年且不在缺口清单"
+                              f"（示例: {_real_miss[:5]}）")
 
     # 4) freq 公式（自动发现 组名：*_kw_count 列）
     groups = sorted({str(c)[: -len("_kw_count")] for c in h if str(c or "").endswith("_kw_count")})
@@ -205,8 +250,11 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
             flagged = 0
             _unflag = uncovered
         else:
-            _flagged_keys = {(str(r.get(H["stkcd"])), str(r.get(H["year"])))
-                             for r in real if "不可复现" in str(r.get(_note_col) or "")}
+            # 审查十二轮（C1）：iter_rows(values_only=True) 的 r 是 **tuple**——
+            # r.get() 必 AttributeError：带备注列的标准产物上本命令恒崩、已收集
+            # 的 issue 全丢（"采集→面板→审计"主链路不可用）。同 266 行
+            _flagged_keys = {(str(r[H["stkcd"]]), str(r[H["year"]]))
+                             for r in real if "不可复现" in str(r[_note_col] or "")}
             flagged = len(_flagged_keys)
             _unflag = [k for k in uncovered if k not in _flagged_keys]
         if _unflag:
@@ -262,8 +310,9 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
                 if fan > jian * 2 and fan > 10:
                     n_trad += 1
                     # 收官十二轮（审查 H）：备注列缺失时曾用 -1 取末列决定豁免
+                    # 审查十二轮（C1 同型）：r 是 tuple，.get 必 AttributeError
                     _nc = H.get("备注")
-                    if _nc is None or "繁体" not in str(r.get(_nc) or ""):
+                    if _nc is None or "繁体" not in str(r[_nc] or ""):
                         n_unflagged += 1
             if n_trad:
                 log(f"繁体披露版 {n_trad} 行（未标注 {n_unflagged}）")

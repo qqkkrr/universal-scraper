@@ -374,12 +374,16 @@ def parse_dangdang_search(html: str, url: str = "") -> List[Dict[str, Any]]:
                    else None) or re.search(r"¥\s*(\d+(?:\.\d+)?)", text)
         list_m = re.search(r"定价[：:]?\s*¥\s*(\d+(?:\.\d+)?)", text)
         return [{
-            "dangdang_title": title,
+            # 审查十二轮（H5）：模糊命中（UNMATCHED）时曾只清价格——书名/链接仍是
+            # 别的商品且该状态无任何消费方，整行以"本书数据"交付他人书名与购买
+            # 链接（端到端实测）。UNMATCHED 一律清空商品字段，只留状态诊断
+            "dangdang_title": "" if _unmatched else title,
             "dangdang_price": "" if _unmatched else (price_m.group(1) if price_m else ""),
-            "dangdang_list_price": list_m.group(1) if list_m else "",
-            "dangdang_link": href,
-            "dangdang_seller": _text(card.cssselect("a[href*='shop.dangdang.com']")[0])
-                               if card.cssselect("a[href*='shop.dangdang.com']") else "",
+            "dangdang_list_price": "" if _unmatched else (list_m.group(1) if list_m else ""),
+            "dangdang_link": "" if _unmatched else href,
+            "dangdang_seller": "" if _unmatched else (
+                _text(card.cssselect("a[href*='shop.dangdang.com']")[0])
+                if card.cssselect("a[href*='shop.dangdang.com']") else ""),
             "dangdang_status": "UNMATCHED" if _unmatched else "OK",
         }]
     return [{

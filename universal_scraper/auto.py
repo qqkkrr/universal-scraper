@@ -555,7 +555,16 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
         _src = cfg["source"]
     if _st == "http" and not (_src.get("headers") or {}).get("Cookie") \
             and any(_host.endswith(d) for d in _login_domains):
+        # 审查十二轮（H4）：整包替换 source 曾丢 AI 按提示词生成的
+        # capture_all/record_from/query/actions/scroll_count 等（与 R4 修过的
+        # "整包替换丢 query"同型，该分支漏同步）——browser 桥同款消费这些键，
+        # 可迁移键原样保留
+        _keep_keys = ("query", "actions", "scroll_count", "scroll_wait_ms",
+                      "record_from", "capture_all", "capture", "js_pre",
+                      "wait", "pagination")
+        _kept = {k: _src[k] for k in _keep_keys if k in _src}
         cfg["source"] = {
+            **_kept,
             "type": "browser", "headless": False,
             "login": {"enabled": True, "url": _su0,
                       "wait_selector": ".user-info, .avatar, .nickname, a[href*='/member/'], .nav-user"},
@@ -687,6 +696,24 @@ def _class_stats_text(html: str) -> str:
     if st:
         return "\n页面实际高频 class（写选择器时直接用这些）：" + ", ".join(st)
     return ""
+
+
+def _outbound_ok(url: str, context: str, log=None) -> bool:
+    """统一出站守卫（审查十二轮 H2）：auto 主链路的多处取数（LLM 兜底/诊断/
+    候选评分/结构探测/预检）曾只有 _probe_summary 有守卫——私网页面内容可被
+    读取并外发 LLM。US_ALLOW_PRIVATE=1 放行内网场景（与 core 同口径）。
+    返回 False = 调用方应跳过该 URL（绝不发请求）。"""
+    try:
+        from .core import assert_public_url
+        assert_public_url(url, context=context)
+        return True
+    except Exception as e:
+        if log:
+            try:
+                log(f"⛔ 出站守卫拦截（{context}）: {e}")
+            except Exception:
+                pass
+        return False
 
 
 def _probe_summary(url: str, max_chars: int = 2500) -> str:
@@ -1152,6 +1179,9 @@ def _diagnose_failure(urls, result, log) -> str:
     for u in (urls or [])[:1]:
         if not str(u).startswith("http"):
             continue
+        # 审查十二轮（H2）：诊断取数曾无出站守卫——私网页面会被读进诊断
+        if not _outbound_ok(str(u), "auto 失败诊断"):
+            continue
         st, raw = 0, ""
         try:
             req = urllib.request.Request(str(u), headers={"User-Agent": "Mozilla/5.0"})
@@ -1203,6 +1233,9 @@ def _llm_fallback_extract(description: str, cfg: dict, log,
     if rendered_html:
         raw = rendered_html
     else:
+        # 审查十二轮（H2）：LLM 兜底取数曾无出站守卫——私网页面内容被外发 LLM
+        if not _outbound_ok(str(url), "auto LLM 兜底取数", log=log):
+            return {"items": [], "total": 0, "files": {}}
         import urllib.request
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -1388,6 +1421,9 @@ def _search_official_links(query: str, limit: int = 6) -> List[str]:
 
 def _score_candidate(url: str, keywords: List[str], timeout: float = 4.0) -> int:
     """抓候选站点首页打分：能访问 +1，命中任务关键词每个 +2；0=不可用。"""
+    # 审查十二轮（H2）：候选评分取数曾无出站守卫
+    if not _outbound_ok(url, "auto 候选评分"):
+        return 0
     import urllib.request
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _DNS_SEARCH_UA})
@@ -1608,7 +1644,11 @@ def _build_config(description: str, proxy: Optional[str] = None,
         log(f"🔍 正在探测入口页结构: {urls[0]}")
         # 探测失败不阻塞配置生成（可恢复异常降级：无摘要继续让 LLM 生成）
         try:
-            summary = build_structure_summary(urls[0])
+            # 审查十二轮（H2）：结构探测（structure._fetch 裸 urllib）曾无出站守卫
+            if _outbound_ok(str(urls[0]), "auto 结构探测", log=log):
+                summary = build_structure_summary(urls[0])
+            else:
+                summary = ""
         except Exception as _e:
             log(f"⚠️ 结构探测失败（{_e}），跳过摘要")
             summary = None
@@ -1908,7 +1948,12 @@ def _drop_learned_by_start_url(start_url: str, reason: str = "", log=None) -> bo
             except Exception:
                 continue
             _su = (_d.get("config") or {}).get("start_urls") or []
-            if _su and _su[0] == start_url:
+            # 审查十二轮（H7）：R4 的"已学配置按域名换入口"会把入口换成本次描述
+            # 里的 URL——此处精确比对 _su[0] 必然不等，坏配置永远删不掉（同站
+            # 不同板块复用坏 learned 后每轮重蹈）。改为"任一 start_url 命中或
+            # source.url 命中"
+            _src_u = str(((_d.get("config") or {}).get("source") or {}).get("url") or "")
+            if (start_url in _su) or (_src_u == start_url):
                 _lf.unlink(missing_ok=True)
                 if log:
                     log(f"🧠 已删除已学配置（{reason or '网站可能改版'}），下次重新学习")
@@ -1988,7 +2033,11 @@ def _try_learned_config(description: str, log=None) -> Optional[Dict[str, Any]]:
                 try:
                     d = json.loads(fp.read_text(encoding="utf-8"))
                     host = (d.get("host") or "").lower()
-                    if host and host in _d:
+                    # 审查十二轮（H3）：纯子串匹配曾跨站误命中——"notexample.com"
+                    # 里的 "example.com"、jd.com ⊂ jd.com.cn、news.com ⊂ fakenews.com
+                    # （命中后复用错站的解析器并报成功）。加域名标签边界
+                    if host and re.search(
+                            rf"(?<![a-z0-9.-]){re.escape(host)}(?![a-z0-9.-])", _d):
                         hosts.add(host)
                 except Exception:
                     continue
@@ -2126,6 +2175,10 @@ def url_variants(url: str, max_n: int = 6) -> list:
 def _preflight_and_rescue(cfg: dict, description: str = "", log=None) -> dict:
     """入口预检 + 候选救援（治本：AI 选错入口时自动换可用入口，而不是反复改选择器）。"""
     su = cfg.get("start_urls") or []
+    if not su:
+        return cfg
+    # 审查十二轮（H2）：预检直调 sites.fetch_html（无守卫）——先过出站闸
+    su = [u for u in su if _outbound_ok(str(u), "auto 入口预检", log=log)]
     if not su:
         return cfg
     try:
@@ -2311,12 +2364,23 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         (task_dir / "config.json").write_text(
             json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
         # 每轮运行前清空旧 items（同名任务多次跑会 append 累积，污染抽样/复核）
-        _items_dir = ROOT / "outputs" / "items"
-        _items_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            (_items_dir / f"{name}.jsonl").unlink(missing_ok=True)
-        except Exception:
-            pass
+        # 审查十二轮（H1）：路径曾硬编码（ROOT/outputs/items）——storage.type≠jsonl
+        # 或 output.dir≠outputs 时读写错位（sample=[] → "total>0 但全空壳"白跑
+        # 一轮，或 LLM 兜底覆盖正确导出）。按配置解析实际路径
+        _st_cfg = cfg.get("storage") or {}
+        _stype = str(_st_cfg.get("type") or "jsonl")
+        _od = str((cfg.get("output") or {}).get("dir") or "outputs")
+        _sd = str(_st_cfg.get("dir") or "items")
+        _roots = [Path(_od) if Path(_od).is_absolute() else (ROOT / _od)]
+        if not Path(_od).is_absolute() and Path(_od).resolve() != (ROOT / _od).resolve():
+            _roots.append(Path(_od))
+        items_path = (_roots[0] / _sd / f"{name}.jsonl") if _stype in ("jsonl", "multi") else None
+        if items_path is not None:
+            items_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                items_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
         # 运行（带超时保护：单轮最多 round_timeout 秒，超时强制终止并停止重试，绝不无限转圈）
         import os as _os
@@ -2364,9 +2428,15 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         last_result = result
         last_log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
 
-        items_path = ROOT / "outputs" / "items" / f"{name}.jsonl"
+        items_path = _roots[0] / _sd / f"{name}.jsonl" if _stype in ("jsonl", "multi") else None
+        if items_path is not None and not items_path.exists():
+            for _r in _roots:
+                _c = _r / _sd / f"{name}.jsonl"
+                if _c.exists():
+                    items_path = _c
+                    break
         sample = []
-        if items_path.exists():
+        if items_path is not None and items_path.exists():
             # 从文件末尾读（最新写入在末尾），最多回看 500 行取最新 5 条
             _lines = items_path.read_text(encoding="utf-8", errors="replace").splitlines()[-500:]
             for line in reversed(_lines):
@@ -2378,6 +2448,18 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                 if len(sample) >= 5:
                     break
             sample.reverse()
+        if not sample:
+            # 审查十二轮（H1）兜底：非 jsonl 后端（csv/sqlite/multi 覆写同名文件）
+            # 或 items 未落盘时读导出 json——引擎任何 storage 后端都写标准 json
+            _ob = str((cfg.get("output") or {}).get("base_name") or name)
+            for _r in _roots:
+                try:
+                    _d = json.loads((_r / f"{_ob}.json").read_text(encoding="utf-8"))
+                    if isinstance(_d, list) and _d:
+                        sample = _d[-5:]
+                        break
+                except Exception:
+                    continue
 
         # 成功判定：必须有"真实字段"（至少一个非 _url/_parser/_ts 的字段非空），
         # 防止 AI 生成空 fields 导致 total>0 但全是空壳
