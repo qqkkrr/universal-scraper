@@ -9,6 +9,7 @@
 | **挑战壳引用 `/_fec_sbu/fec_wrapper.js` + `hxk_fec_*.js`（非 `$_ts`），HTTP 通道 406；真浏览器能过但**每次完整导航后 1-2 次内即出「Sorry, you have been blocked」+ Request-ID 封锁页，冷却约 10 分钟** | **FE 前端挑战 + 导航频控 WAF（wcjs.sbj.cnipa.gov.cn 实测 2026-09）** | L3 真实 Chrome 一次过；**每冷却窗口只做 1 次导航，把"点菜单→填条件→查询→capture_all"全部塞进同一会话动作链**；活页内 XHR 交互不重复触发；封禁窗口内连静态 /js/*.js 都 403 |
 | 200 且内容齐全在 HTML 里 | 直接可抓 | L0 |
 | 页面是 JS 应用（有界面壳、数据靠 XHR 拼，如 EUIPO eSearch） | SPA 应用 | **接口捕获（capture_all）优先**，浏览器只留交互 |
+| **页面本身被拦/是壳，但站方另有公开数据接口**（排行榜/公告/搜索的 JSONP、RSS、open API，不校验 UA/签名/登录） | **公开 API 直通型** | **L0 直通：先找接口再谈反爬**——`jsrecon`／`capture_all` 找端点，或直接查站方 open API/RSS（实战例：天天基金 `data/rankhandler.aspx`、中彩网 JSONP、Crossref/OpenAlex 开放接口）。命中时**不要**升级浏览器/代理；只有接口字段不够时才回退页面路线。判定要点：**接口能用就不算"被阻断"**，别把页面拦截误判成任务障碍 |
 | 返回"Just a moment"/Turnstile 挑战页；headless 也被卡；偶发 ERR_CONNECTION_CLOSED | Cloudflare 类 | 直接 L3：真实调试 Chrome 过一次校验 → 配置 cdp 附加（R16），headless 别硬试 |
 | **首页/老路径 302 → `captcha.eo.qq.com`/`captcha.eo.gtimg.com` 加载 TEOCaptchaWidget（腾讯云 EdgeOne），CDP 真 Chrome 也弹验证码；`diagnose` 可能只看到 302** | **腾讯云 EdgeOne 验证码关卡（kaijiang.500.com 实测 2026-09）** | **人工关卡，L4 人机协同；自主任务无人在环时直接换源**（同任务换官方行业中彩网 jc.zhcw.com JSONP 接口完成交付），别程序绕 |
 | 403 / 412 / 468 / 503，或正常 UA 也被拒 | WAF 指纹拦截 | L1 |
@@ -36,6 +37,7 @@
 | 症状（看 fetch 侦察结果） | 判型 | 起手级 |
 |---|---|---|
 | **门户整站迁移新 SPA（`/dg/website/page.html#...`，响应头 `WZWS-RAY`），旧数据接口（easyquery.htm）任何通道（含真浏览器同源 fetch）一律 403 `reason:UrlACL`；新接口 `/dg/website/publicrelease/web/external/*` 裸 HTTP 带 UA+Referer 即通、无签名无验证码** | **gov 门户改版：老接口 UrlACL 整体封死，别恋战；抓新接口** | L0：浏览器 capture_all 数据页录出真实 XHR（树/指标/数据三件套）→ 纯 HTTP 重放；注意"版别目录"机制——历史数值必须按目录 sdate/edate 推时间窗查，宽窗只回填近期数值（国家统计局 data.stats.gov.cn 实战 2026-09，配方 R38） |
+| **站方/教程声称"反爬极强"，但同域存在未加密的公开 API 变体（如网易云 weapi/eapi 加密而 `/api/v1/*` 评论/用户接口明文直通）；带 UA/Referer 的裸 HTTP 直接出数据** | **"标称强反爬"≠真强：先探公开 API 变体再升级** | 起手 L0：先试同域"另一套"端点（`/api/v1`、legacy、H5/移动端前缀、open 接口）再考虑捕获/浏览器；命中即纯 HTTP 直抓（R44 网易云 1039 请求零封锁）。反例：B站 wbi 签名、小红书登录墙是真拦（R34/R40），探一次失败就按各自配方走，别反复试变体 |
 | **HTML 表格渲染正常、有日期有 AQI 有质量等级，页面里还藏着多张同列名 `display:none` 干扰表；同一页面两次抓取，污染物数值列不同而日期/AQI/等级不变** | **aqistudy 式"随机值干扰表"：污染物列每次请求随机生成仅供展示，不是数据** | 别信该表数值列（排列检验都救不回来）；用官方存档替代（配方 R39）；其日期/AQI/等级列真实，可作跨源核对锚点 （www.aqistudy.cn 实战 2026-09，双抓对照实锤） |
 | **查票接口返回 302 到相对路径 `queryG?…`（endpoint 动态轮换，非封锁）；旧票价接口 200 但 `queryLeftNewDTO` 为空（已下线）；过去日期/超预售期返回 200+HTML 错误页（title「铁路客户服务中心」）** | **12306 余票接口端点轮换（所谓"动态签名"实为 302 指路）+ 日期口径不可查** | L0 即可：先 GET `/otn/leftTicket/init` 预热 Cookie（JSESSIONID/BIGipServerotn/SF_cookie_2）→ 手动逐跳跟随同域 302（每跳复检白名单，禁 auto-redirect）；票价+余票数在 result 行字段[39]，**官方前端 `queryLeftTicket_end_js.js` 的 `e()` 函数就是现成解码器（每10字符=席别码1+价格×10共5位+余票数4位），勿自己猜格式**（12306 实战 2026-09） |
 | **未登录访问 www.xiaohongshu.com 任何路径都渲染"安全限制 300012 IP存在风险"整页（登录页也封）；同 IP 换浏览器/profile 无效；curl 无 cookie 访问同样封** | **小红书 IP 信誉封锁（300012），先于登录态生效——不是 cookie/指纹问题** | 换出口 IP（用户本机代理/家宽→代理节点）；**Chrome `--proxy-server` 实测会被无视（指到无人监听的假端口都能上网）**——用 patchright/playwright `launchPersistentContext({proxy})` 库层代理验证出口后再开工（小红书 2026-09 实测：移动家宽 300012 封锁，香港出口正常 302 登录墙） |

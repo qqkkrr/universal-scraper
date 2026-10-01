@@ -126,7 +126,10 @@ def detect_system_proxy() -> Dict[str, Any]:
     if out["enabled"]:
         out["warning"] = ("检测到系统代理已启用（" + ", ".join(out["sources"]) +
                           "）：'直连'请求可能被劫持到代理节点出口。"
-                          "诊断配额/IP 问题前先确认真实出口（detect_ip），必要时关闭系统代理或用 no_proxy 锁定直连。")
+                          "诊断配额/IP 问题前先确认真实出口（detect_ip）。"
+                          "处置按需选择、别默认关代理：目标站/翻墙依赖它时关掉会直接连不上；"
+                          "只是想让本次请求锁直连时用 no_proxy（进程内）即可，"
+                          "改动系统代理设置属用户环境变更——由用户决定，agent 不要静默改。")
     elif out["processes"]:
         # 商标网战训（2026-09）：Clash 等进程 merely 在跑 ≠ 接管请求——
         # env/scutil 均未启用时曾报"系统代理开启"误导排查方向。降级为提示。

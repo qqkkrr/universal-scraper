@@ -542,6 +542,13 @@ class Pipeline(BasePipeline):
                     self._warn_once(f"download dir 非法（仅允许任务内相对路径）: {out_dir!r}，下载跳过")
                     item[out_field] = ""
                     continue
+                if not out_dir.strip() or out_dir != out_dir.strip():
+                    # 收官十六轮（审查）：纯空白/首尾空白的 dir 曾原样 mkdir——在 CWD 里
+                    # 留下名为 "  " 的空目录（实测 fuzz 跑出的垃圾目录）。空白目录名
+                    # 一律拒（与"非法路径"同口径），避免路径转义类垃圾
+                    self._warn_once(f"download dir 为空白串或含首尾空白: {out_dir!r}，下载跳过")
+                    item[out_field] = ""
+                    continue
                 try:
                     from pathlib import Path as _P
                     from ..core import fetch_bytes

@@ -18,3 +18,22 @@ configs/auto_precise_*.json*
 *.cookie.txt
 .cookie.txt
 jobs_history.json
+
+# 运行时/本地产物（hy4 反馈 P2：仓库体积与垃圾目录）
+# 注意：.gitignore 不支持行内注释，注释必须独占一行
+# 运行时自动生成的任务包（auto.py 命名 tasks/auto_<hash>/ 与 auto_precise_<host>/）
+# 只忽略自动生成名，用户手写的 tasks/<名字>/ 仍可提交
+tasks/auto_*/
+*.running.lock
+# plugins/ 是用户自放钩子的位置——提交进去会让所有人被意外改数据
+plugins/
+# fixtures/sites/ 是 scripts/fixture_test.py 的夹具库，随仓库提供，不忽略
+report.html
+r.html
+dl_out/
+downloads/
+.hypothesis/
+.pytest_cache/
+*.corrupt
+*.part[0-9]*
+*.manifest.json

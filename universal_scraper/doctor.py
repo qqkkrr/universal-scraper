@@ -34,13 +34,24 @@ def _py_ok(name: str) -> bool:
 
 
 def check_deps() -> List[Dict[str, str]]:
-    out = []
+    """依赖体检。网易云战训（2026-09）：用错解释器（系统 python 而非常用环境）
+    会整片报假红"缺依赖"——把当前解释器摆在明处，并在多项硬依赖缺失时直接提示
+    "先怀疑解释器选错"，别让新会话逐条 pip install 装错对象（钉死解释器纪律见 R22）。"""
+    ok_map = {m: _py_ok(m) for m in REQUIRED_PY + OPTIONAL_PY}  # OCR R131（M）：每模块只探测一次
+    missing_req = [m for m in REQUIRED_PY if not ok_map[m]]
+    exe = sys.executable or "python3"
+    out: List[Dict[str, str]] = [{"item": "python 解释器", "ok": True, "hint": exe}]
     for m in REQUIRED_PY:
-        ok = _py_ok(m)  # OCR R131（M）：importlib 探测曾每模块跑两次
-        out.append({"item": f"python 依赖 {m}", "ok": ok,
-                    "hint": "python3 -m pip install " + m if not ok else ""})
+        ok = ok_map[m]
+        hint = ""
+        if not ok:
+            hint = "python3 -m pip install " + m
+            if len(missing_req) >= 2:
+                hint += (f"；⚠️ 当前解释器缺 {len(missing_req)} 项硬依赖——若日常解释器已装齐，"
+                         f"多半是解释器选错（换解释器或按 R22 钉死绝对路径），别逐条重装")
+        out.append({"item": f"python 依赖 {m}", "ok": ok, "hint": hint})
     for m in OPTIONAL_PY:
-        ok = _py_ok(m)
+        ok = ok_map[m]
         # 审查八轮（MEDIUM）：可选依赖与硬依赖共用 ok 计数与退出码——缺 pandas 也
         # exit 1，把 doctor 当预检门禁的编排器/agent 会被恒假失败挡住。
         out.append({"item": f"python 可选 {m}", "ok": ok,
@@ -154,7 +165,16 @@ def check_network() -> List[Dict[str, str]]:
     try:
         from .net import detect_system_proxy
         sp = detect_system_proxy()
-        if sp.get("enabled"):
+        _hp = str(sp.get("http_proxy") or "")
+        _port = sp.get("port") or 0
+        # 网易云战训（2026-09）：本机代理（127.x/localhost）多为本地工具/透明代理，
+        # 与远程代理的"劫持换出口"风险不同级——分开措辞，别报惊吓式警告
+        _loopback = _hp.startswith("127.") or _hp in ("localhost", "::1")
+        if sp.get("enabled") and _loopback:
+            out.append({"item": f"网络出口（本机代理 {_hp}{':' + str(_port) if _port else ''}）",
+                        "ok": True,
+                        "hint": "疑似本地工具/透明代理——cli ip 出口正常即可忽略本提示"})
+        elif sp.get("enabled"):
             out.append({"item": "网络出口（系统代理）", "ok": True,
                         "hint": f"⚠️ 代理已启用（{', '.join(sp.get('sources') or [])}）——"
                                 f"直连请求可能被劫持，先 cli ip 确认真实出口"})

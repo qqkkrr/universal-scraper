@@ -40,9 +40,13 @@ def _is_no_data(v: Any) -> bool:
 
 def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None,
                 sample_n: int = 3, network: bool = False, timeout: int = 15,
-                declared: Optional[int] = None) -> Dict[str, Any]:
+                declared: Optional[int] = None,
+                expect_empty: Optional[List[str]] = None) -> Dict[str, Any]:
     """对 rows 复核，返回 {ok, total, checks:[...], ts}。
-    declared: 运行器声明的总条数（auto 传 result.total），用于与导出文件对比。"""
+    declared: 运行器声明的总条数（auto 传 result.total），用于与导出文件对比。
+    expect_empty: 调用方声明"源站不提供/本就应为空"的字段名列表（网易云战训 2026-09：
+    IP 属地、回复数这类字段全空是源站特性而非漏抓）——这些字段全空不判死列、
+    不计抽取缺口，只在报告里如实标注，避免把源站事实误报成交付缺陷。"""
     t0 = time.time()
     # 脏数据防线：跳过非 dict 行（jsonl 可能混入字符串/None），不因一行脏数据让复核崩溃
     rows = [r for r in (rows or []) if isinstance(r, dict)]
@@ -93,6 +97,8 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
     _KEY_FIELDS = ("title", "name", "link", "url", "date", "time", "编号", "文号",
                    "标题", "名称", "链接", "网址", "日期", "时间", "价格", "金额",
                    "数值", "数量", "指数", "id", "code", "代码", "value")
+    # 声明式空字段（网易云战训）：调用方点名"源站不提供"的列——豁免死列判定与缺口归因
+    _expect_empty = {str(f).strip() for f in (expect_empty or []) if str(f).strip()}
     if rows:
         fields = []
         for r in rows[:200]:
@@ -120,17 +126,25 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
             real_rate = n_real / len(rows)
             is_key = any(f.lower() == k.lower() or f.lower().startswith(k.lower())
                          for k in _KEY_FIELDS)
+            declared_empty = f in _expect_empty
             dead_col = (rate == 0 and len(rows) >= 3)
-            passed = (rate >= 0.9) if is_key else (not dead_col)
+            passed = True if declared_empty else ((rate >= 0.9) if is_key else (not dead_col))
+            note = ""
+            if n_nodata:
+                note += f"（其中 {n_nodata} 条为 --/N/A 占位）"
+            if declared_empty:
+                note += "（已声明源站为空，不判死列）"
+            elif dead_col:
+                note += "（死列：抽取链路断裂）"
+            elif not is_key:
+                note += "（非关键字段，仅提示）"
             report["checks"].append({
                 "name": f"字段完整率 · {f}",
                 "pass": passed,
                 "rate": round(rate, 3),
                 "real_rate": round(real_rate, 3) if n_nodata else None,
-                "value": f"{rate:.0%}（{n_ok}/{len(rows)}）"
-                         + (f"（其中 {n_nodata} 条为 --/N/A 占位）" if n_nodata else "")
-                         + ("（死列：抽取链路断裂）" if dead_col else "")
-                         + ("" if is_key or dead_col else "（非关键字段，仅提示）"),
+                "declared_empty": declared_empty or None,
+                "value": f"{rate:.0%}（{n_ok}/{len(rows)}）" + note,
             })
 
     # 2.5 稀疏矩阵双口径（R102 汽车之家战报）：宽表大量选装列本来就该为空，
@@ -158,7 +172,7 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
     #     来源确认无 = 值为 --/N/A/无 等占位符（来源方明确标注了"没有"）
     #     疑似抽取失败 = 值为空（None/""），可能是选择器漏了
     if rows and fields:
-        _gaps = {"source_confirmed": [], "possible_extraction": []}
+        _gaps = {"source_confirmed": [], "possible_extraction": [], "declared_empty": []}
         for f in fields:
             total = len(rows)
             n_filled = sum(1 for r in rows if _norm(r.get(f)))
@@ -171,16 +185,20 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
                          for k in _KEY_FIELDS)
             entry = {"field": f, "gap": gap_n, "total": total,
                      "gap_rate": round(gap_n / total, 3), "key": _is_key}
-            if n_nodata >= n_true_empty:
+            if f in _expect_empty:
+                _gaps["declared_empty"].append(entry)
+            elif n_nodata >= n_true_empty:
                 _gaps["source_confirmed"].append(entry)
             else:
                 _gaps["possible_extraction"].append(entry)
-        if _gaps["source_confirmed"] or _gaps["possible_extraction"]:
+        if any(_gaps.values()):
             report["gap_attribution"] = {
                 "source_confirmed_absent": _gaps["source_confirmed"],
                 "possible_extraction_gap": _gaps["possible_extraction"],
+                "declared_empty": _gaps["declared_empty"],
                 "note": ("source_confirmed = 来源方以 --/N/A 等标注'此项无数据'（非抽取失败）；"
-                         "possible_extraction = 字段真空值（需检查选择器是否漏了）")}
+                         "possible_extraction = 字段真空值（需检查选择器是否漏了）；"
+                         "declared_empty = 调用方已声明源站不提供该字段（--expect-empty，不计缺口）")}
 
     # 3. 去重率（主键优先级：url/link/id/shopId > 标题+链接复合 > 标题）
     #    修复：仅用 title 做主键会把"同标题不同内容"误判重复，必须复合链接/URL
@@ -370,7 +388,8 @@ def semantic_check(data: Any, expect: str) -> Dict[str, Any]:
 
 def verify_file(path: str, network: bool = False, data_key: str = "",
                 expect: str = "", require: str = "",
-                expected_count: Optional[int] = None) -> Dict[str, Any]:
+                expected_count: Optional[int] = None,
+                expect_empty: str = "") -> Dict[str, Any]:
     from pathlib import Path
     fp = Path(path)
     if not fp.exists():
@@ -415,7 +434,9 @@ def verify_file(path: str, network: bool = False, data_key: str = "",
                         data = data[k]
                         break
     rows = data if isinstance(data, list) else [data]
-    rep = verify_rows(rows, None, sample_n=3, network=network)
+    # 声明式空字段：从 CLI 串解析（中英文逗号均可），传给 verify_rows 豁免死列/缺口判定
+    _ee = [w.strip() for w in (expect_empty or "").replace("，", ",").split(",") if w.strip()]
+    rep = verify_rows(rows, None, sample_n=3, network=network, expect_empty=_ee)
     # 对账型检查（实战反馈六#1，知乎 762 回复只采到 317 的教训）：字段完整率
     # 检测不出"源站声明 N 条、实采 M<N 条"的对账缺口。expected_count 由调用方
     # 传源站计数器（common_counts/total/child_comment_count）

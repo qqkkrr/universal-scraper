@@ -498,6 +498,10 @@ def main() -> int:
     vp.add_argument("--expect-count", type=int, default=None,
                     help="对账型检查（实战反馈六）：源站声明的总数（如 common_counts/"
                          "回答总数）——实采 < 声明则 FAIL 并给出缺口率（防\"采到一半以为完了\"）")
+    vp.add_argument("--expect-empty", default="",
+                    help="声明'源站不提供/本就应为空'的字段（逗号分隔，--file 用）——"
+                         "全空不判死列、不计抽取缺口，报告如实标注。网易云战训："
+                         "IP 属地/回复数这类字段 0%% 是源站特性非漏抓，如 \"IP属地,回复数\"")
 
     args = ap.parse_args()
 
@@ -2218,7 +2222,8 @@ def main() -> int:
         from .verify import verify_file as _vf
         rep = _vf(args.file, network=args.network, data_key=args.data_key,
                   expect=args.expect, require=getattr(args, "require", ""),
-                  expected_count=getattr(args, "expect_count", None))
+                  expected_count=getattr(args, "expect_count", None),
+                  expect_empty=getattr(args, "expect_empty", ""))
         # 审查修复（P2）：文件缺失/JSON 损坏等原因曾只进 dict 不打印——
         # 用户只看到"0 条｜存在问题"却无从分辨是文件没了还是语义不匹配
         if rep.get("error"):

@@ -88,18 +88,29 @@ def fuzz_configs(n: int) -> list:
 
 
 def fuzz_pipelines(n: int) -> list:
+    """管道模糊：**在临时 CWD 里跑**——download 步骤会按 dir 建目录，此前在仓库根
+    跑出过 `dl_out/` 与名为两个空格的垃圾目录（收官十六轮审查实测）。"""
+    import os as _os
+    import tempfile as _tf
     from universal_scraper.modules.pipelines import Pipeline
     rng = random.Random(4321)
     bad = []
     row = {"标题": "x", "n": "12", "url": "https://x.test/d/1", "raw": "€ 9.9"}
-    for i in range(n):
-        steps = [rand_step(rng) for _ in range(rng.randint(1, 3))]
-        try:
-            p = Pipeline(steps, {})
-            out = p.process(dict(row))
-            json.dumps(out, default=str)      # 结果必须可序列化
-        except Exception as e:
-            bad.append(f"#{i}: {type(e).__name__}: {str(e)[:70]} steps={json.dumps(steps, default=str)[:110]}")
+    _cwd0 = _os.getcwd()
+    _tmp = _tf.mkdtemp(prefix="us_fuzz_")
+    _os.chdir(_tmp)
+    try:
+        for i in range(n):
+            steps = [rand_step(rng) for _ in range(rng.randint(1, 3))]
+            try:
+                p = Pipeline(steps, {})
+                out = p.process(dict(row))
+                json.dumps(out, default=str)      # 结果必须可序列化
+            except Exception as e:
+                bad.append(f"#{i}: {type(e).__name__}: {str(e)[:70]} "
+                           f"steps={json.dumps(steps, default=str)[:110]}")
+    finally:
+        _os.chdir(_cwd0)          # 无论成败都还原，避免影响后续用例
     return bad
 
 

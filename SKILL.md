@@ -10,7 +10,7 @@ description: >
   【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
   获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
 metadata:
-  version: "1.14.3"
+  version: "1.16.0"
   source_project: "universal-scraper (10 轮审计, 164 测试)"
 ---
 
@@ -175,6 +175,11 @@ JSON 直抓（配方 R8/R13）。浏览器渲染只留给交互复杂、接口�
 **已知公开 API 的平台（B站/GitHub/NPM 等头部站）再进一步**：直接带
 UA/Referer/必要 cookie（先 GET 主页预热拿风控 cookie）探测已知端点，命中就用
 `http_json` 直抓——浏览器 capture 只留给"猜不到接口"的站，别为已知 API 开浏览器。
+**"标称反爬极强"不是判型结论**（网易云战训 2026-09）：判词来自口碑/教程，不替代实测——
+先花 30 秒探"未加密的公开 API 变体"再决定升级：网易云 weapi/eapi 加密但在用的
+`/api/v1/*` 评论/用户接口明文直通（R44，1039 请求零封锁）；反过来 B站 wbi 签名、
+小红书登录墙是真拦（R34/R40）。探法：试同域另一套端点（`/api/v1`、legacy、H5/移动端
+前缀），失败再走捕获/浏览器升级链。
 **登录墙型站例外**（知乎实战 2026-09）：知乎的回答列表/评论带 x-zse-96 签名 +
 登录墙 + TLS 指纹三重，"公开 API 直抓"不成立——走 `xhs` 同款在场捕获打法
 （R41）；探端点前先看该站是否在登录墙例外清单里。
@@ -221,7 +226,9 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 
 目标是官方 API/统计页/月报等**数据型任务**且运行在自主模式（模式 B/并行子代理）
 时，逐个等人工确认不现实。替代验证三件套（缺一不可，全部通过等同样本门槛通过）：
-①字段完整率 ≥0.9；②数值在常识范围且报告期与任务一致；③与第二个独立来源交叉一致。
+①字段完整率 ≥0.9——**"源站不提供/本就为空"的字段先用 `verify --expect-empty "字段A,字段B"`
+声明，不算缺口**（网易云战训：IP 属地/回复数这类字段 0% 是源站特性，不声明就会把源站
+事实误报成交付缺陷）；②数值在常识范围且报告期与任务一致；③与第二个独立来源交叉一致。
 达不到 → 按第六章 0 结果分叉处置。**人工确认通道永远保留**——子代理遇到"拿不准"
 仍应停下来问。
 
@@ -313,7 +320,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | **详情页 playwright 渲染** | detail 配 `"backend": "browser", "browser_backend": "auto"`（R101：装了 playwright-python 走进程内渲染，否则自动回落 node 桥；CDP 附加用 `cdp` 字段） |
 | **分布式去重/共享前沿** | `queue: {"backend": "redis", "redis_url": "redis://host:6379/0"}`（R101/R105：多机跑**同一任务**时共享已见集+URL 队列，namespace 默认按任务名派生——不同任务互不串台，同任务多机要共享需显式传相同 namespace；连不上显式报错不静默回落）。run 时序指标自动落 `<out>/.metrics.json`，webui `/api/metrics?task=<子目录>` 读取。投递语义 **at-least-once**（R116：pop 进 processing 暂存，页成功 ack，崩溃后 `visibility_timeout` 秒自动重投；默认 300s 可配）。run 时序指标自动落 `<out>/.metrics.json`，webui `/api/metrics?task=<子目录>` 读取，首页「📈 任务走势」面板可视化 |
 | **代理提取 API** | `anti_bot.proxy_api: {"url": "https://厂商/提取接口", "format": "auto|text|json_list|json_data"}`（R116：住宅/商业代理 API adapter，启动时拉取并入代理池，300s 缓存；失败 WARN 走直连） |
-| **渲染等待策略** | ~~detail/source 配 `"wait_until"` / `"dom_stable"`~~ **（审查八轮更正：这两个键当前在所有执行器都不生效——v2 引擎只把 cdp 传给浏览器抓取器、node 桥硬编码 `domcontentloaded`，属未实现的功能承诺，勿依赖）**；并发渲染 `browser_backend: auto` + `concurrency>1` 时多实例分片并行（上限 3） |
+| **渲染等待策略** | detail/source 配 `"wait_until"`（如 `networkidle`，SPA 接口拖尾场景）/ `"dom_stable"`：**Playwright 后端（`browser_pw.py`）生效**；**node 桥（`browser_drive.py`）不生效**——桥内硬编码 `domcontentloaded`（审查更正：此前"所有执行器都不生效"的说法已过时）。走桥的任务需要等接口拖尾时，用 `scroll_count/scroll_wait_ms` 或 `actions` 里的 `wait` 步替代；并发渲染 `browser_backend: auto` + `concurrency>1` 时多实例分片并行（上限 3） |
 | **LLM pydantic 结构化抽取** | `LLMClient().extract_json_model(内容, MyPydanticModel)`（R101：jsonschema 注入+校验失败自动回喂重试） |
 | **sitemap 增量监控** | `monitor.watch_once(name, sitemap_url, webhook=...)`（R101：快照 diff 新增/消失 URL，有变化才 POST webhook；快照存 `~/.universal_scraper/monitor/`） |
 
@@ -338,6 +345,10 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
    审查八轮更正：文档里旧写法 `us xxx` 在本仓库并不存在——没有 console_scripts/alias，
    必须用 `python3 -m universal_scraper.cli` 调用）——这些是用户
    已信任的入口，且输出落盘规范。
+4. **后台/长时间跑一律加 `-u`**（2026-09 网易云战训，R34 配方同条）：
+   `nohup python3 -u 脚本.py > run.log 2>&1 &`——不加 `-u` 时 Python 缓冲 stdout，
+   日志长时间为空，会误判"卡死"并重复启动（两个采集器抢同一出口/同一队列）。
+   查看进度：`tail -f run.log`；确认只跑一个：`pgrep -fl 脚本名`。
 
 工作区可放 `.claude/settings.json`（permissions.allow 白名单）预批准常用
 命令——用户授权一次，后续任务零弹窗。会话中途改的配置对当前会话不生效，

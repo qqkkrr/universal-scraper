@@ -57,10 +57,26 @@ def check_netlink() -> list:
                 "ok": not d.get("error"),
                 "hint": "" if not d.get("error") else str(d.get("error"))[:80]})
     sp = detect_system_proxy()
-    if sp.get("enabled") or sp.get("processes"):
-        out.append({"item": f"系统代理已开启（{', '.join(sp['sources']) or '本机进程'}）",
+    # 网易云战训（2026-09）：曾把"有代理进程"与"系统代理已启用"合并报成"系统代理已开启"
+    # ——Clash 类进程常驻但未接管系统代理时是假警报。三分支 + 本机代理软化（与
+    # universal_scraper/doctor.py check_network 同口径）
+    _hp = str(sp.get("http_proxy") or "")
+    _port = sp.get("port") or 0
+    _loopback = _hp.startswith("127.") or _hp in ("localhost", "::1")
+    if sp.get("enabled") and _loopback:
+        out.append({"item": f"系统代理为本机代理（{_hp}{':' + str(_port) if _port else ''}）",
+                    "ok": True,  # 提示级：本机工具/透明代理，非劫持
+                    "hint": "疑似本地工具/透明代理——cli ip 出口正常即可忽略本提示"})
+    elif sp.get("enabled"):
+        out.append({"item": f"系统代理已开启（{', '.join(sp['sources']) or _hp}）",
                     "ok": True,  # 提示级：不算失败
-                    "hint": "直连请求可能被劫持！配额诊断前先确认真实出口，必要时关系统代理"})
+                    "hint": "直连请求可能被劫持！配额诊断前先确认真实出口（cli ip）。"
+                            "别默认关代理——目标站依赖它时关掉直接连不上；只想给本次请求锁直连用 "
+                            "no_proxy 即可；改系统代理属用户环境变更，由用户决定"})
+    elif sp.get("processes"):
+        out.append({"item": f"有代理进程（{', '.join(sp['processes'])}）但系统代理未启用",
+                    "ok": True,
+                    "hint": "当前大概率未被劫持（进程在跑 ≠ 代理接管；诊断异常时再 cli ip 查真实出口）"})
     else:
         out.append({"item": "系统代理未检出（直连出口可信）", "ok": True, "hint": ""})
     pw = power_source()
