@@ -197,6 +197,28 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 
 `pipeline` 是记录级处理步骤数组，抓完每页就执行。五种步骤：
 
+> ⚠️ **执行顺序（KLEKT 实战 2026-09 实测 + v2.0.18 修复）**：
+> `pipeline` 在 **`fetch_details` 之前**执行（见 `engine.py`：`run_pipeline` @993 行，
+> `fetch_details` @1049 行）。因此 **`pipeline` 处理不到 `detail.extract` 产出的任何字段**——
+> 在 pipeline 里对详情字段做 `regex_extract` / `cast` / `transform` 会静默拿到空值、
+> 派生列恒为 None，**且没有任何报错**（实测：raw 文本字段有值
+> `Lowest Listing Price€ 104.52...`，派生的 `lowest_ask_eur` 仍为 None）。
+>
+> ✅ **正确做法：详情字段的清洗放 `detail.post_pipeline`**（v2.0.18 新增，详情合并后执行，
+> 步骤写法与 `pipeline` 完全一致；v3 任务包用 `detail.filters` 或 `detail.post_pipeline` 均可）：
+> ```json
+> "detail": {
+>   "enabled": true, "url_field": "url",
+>   "extract": [{"name": "raw_lowest", "type": "xpath_text", "xpath": "//div[@class='price']"}],
+>   "post_pipeline": [
+>     {"type": "regex_extract", "field": "raw_lowest", "to": "lowest_ask_eur",
+>      "pattern": "€\\s*([\\d.]+)", "group": 1}
+>   ]
+> }
+> ```
+> **`validate` 会拦截这个坑**：pipeline 引用了仅在 detail 阶段产出的字段时打 WARN 并指路
+> `post_pipeline`。
+
 ```json
 [
   {"type": "filter", "field": "post_publish_time", "op": "regex", "pattern": "^2025-09-01"},
@@ -219,11 +241,15 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
   `{"type":"transform","field":"pubdate","op":"unix_to_datetime"}`。
 - `template`：用已有字段拼新字段，`tmpl` 里 `{字段名}` 占位：
   `{"type":"template","field":"视频链接","tmpl":"https://www.bilibili.com/video/{bvid}"}`。
-- `regex_extract`：正则 capture group 从既有字段派生新字段：
+- `regex_extract`：正则 capture group 从既有字段派生新字段（v2/v3 均支持，v2.0.18 起 v3 补齐）：
   `{"type":"regex_extract","field":"描述","pattern":"使用(\\d+)次","group":1,"to":"使用次数"}`。
+  输出键写 `to`（`out` 亦可）；`field` 取不到值/正则不匹配时该步静默跳过该行（不产空列）。
+- `transform`：`{"type":"transform","field":"时间戳","op":"unix_to_datetime","fmt":"%Y-%m-%d %H:%M:%S"}`
+  （`op` 还可选 `upper` / `lower`；秒/毫秒时间戳自适应）。同样 v2/v3 均支持。
 - **仅 v3 任务包（`run --task`）支持的类型**：`parse_date`、`split`、`default`、
   `download`、`validate`、`dedup_content`——这些在 `run --config` 执行器中未实现，
   validate 会给出警告且运行时跳过。词表唯一来源见 `universal_scraper/contract.py`。
+- 详情字段清洗用 `detail.post_pipeline` / `detail.filters`（见上方执行顺序警告）。
 
 ## detail（列表 → 详情两级）
 

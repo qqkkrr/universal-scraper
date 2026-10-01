@@ -9,6 +9,7 @@
 | **挑战壳引用 `/_fec_sbu/fec_wrapper.js` + `hxk_fec_*.js`（非 `$_ts`），HTTP 通道 406；真浏览器能过但**每次完整导航后 1-2 次内即出「Sorry, you have been blocked」+ Request-ID 封锁页，冷却约 10 分钟** | **FE 前端挑战 + 导航频控 WAF（wcjs.sbj.cnipa.gov.cn 实测 2026-09）** | L3 真实 Chrome 一次过；**每冷却窗口只做 1 次导航，把"点菜单→填条件→查询→capture_all"全部塞进同一会话动作链**；活页内 XHR 交互不重复触发；封禁窗口内连静态 /js/*.js 都 403 |
 | 200 且内容齐全在 HTML 里 | 直接可抓 | L0 |
 | 页面是 JS 应用（有界面壳、数据靠 XHR 拼，如 EUIPO eSearch） | SPA 应用 | **接口捕获（capture_all）优先**，浏览器只留交互 |
+| **页面本身被拦/是壳，但站方另有公开数据接口**（排行榜/公告/搜索的 JSONP、RSS、open API，不校验 UA/签名/登录） | **公开 API 直通型** | **L0 直通：先找接口再谈反爬**——`jsrecon`／`capture_all` 找端点，或直接查站方 open API/RSS（实战例：天天基金 `data/rankhandler.aspx`、中彩网 JSONP、Crossref/OpenAlex 开放接口）。命中时**不要**升级浏览器/代理；只有接口字段不够时才回退页面路线。判定要点：**接口能用就不算"被阻断"**，别把页面拦截误判成任务障碍 |
 | 返回"Just a moment"/Turnstile 挑战页；headless 也被卡；偶发 ERR_CONNECTION_CLOSED | Cloudflare 类 | 直接 L3：真实调试 Chrome 过一次校验 → 配置 cdp 附加（R16），headless 别硬试 |
 | **首页/老路径 302 → `captcha.eo.qq.com`/`captcha.eo.gtimg.com` 加载 TEOCaptchaWidget（腾讯云 EdgeOne），CDP 真 Chrome 也弹验证码；`diagnose` 可能只看到 302** | **腾讯云 EdgeOne 验证码关卡（kaijiang.500.com 实测 2026-09）** | **人工关卡，L4 人机协同；自主任务无人在环时直接换源**（同任务换官方行业中彩网 jc.zhcw.com JSONP 接口完成交付），别程序绕 |
 | 403 / 412 / 468 / 503，或正常 UA 也被拒 | WAF 指纹拦截 | L1 |
@@ -36,12 +37,34 @@
 | 症状（看 fetch 侦察结果） | 判型 | 起手级 |
 |---|---|---|
 | **门户整站迁移新 SPA（`/dg/website/page.html#...`，响应头 `WZWS-RAY`），旧数据接口（easyquery.htm）任何通道（含真浏览器同源 fetch）一律 403 `reason:UrlACL`；新接口 `/dg/website/publicrelease/web/external/*` 裸 HTTP 带 UA+Referer 即通、无签名无验证码** | **gov 门户改版：老接口 UrlACL 整体封死，别恋战；抓新接口** | L0：浏览器 capture_all 数据页录出真实 XHR（树/指标/数据三件套）→ 纯 HTTP 重放；注意"版别目录"机制——历史数值必须按目录 sdate/edate 推时间窗查，宽窗只回填近期数值（国家统计局 data.stats.gov.cn 实战 2026-09，配方 R38） |
+| **站方/教程声称"反爬极强"，但同域存在未加密的公开 API 变体（如网易云 weapi/eapi 加密而 `/api/v1/*` 评论/用户接口明文直通）；带 UA/Referer 的裸 HTTP 直接出数据** | **"标称强反爬"≠真强：先探公开 API 变体再升级** | 起手 L0：先试同域"另一套"端点（`/api/v1`、legacy、H5/移动端前缀、open 接口）再考虑捕获/浏览器；命中即纯 HTTP 直抓（R44 网易云 1039 请求零封锁）。反例：B站 wbi 签名、小红书登录墙是真拦（R34/R40），探一次失败就按各自配方走，别反复试变体 |
 | **HTML 表格渲染正常、有日期有 AQI 有质量等级，页面里还藏着多张同列名 `display:none` 干扰表；同一页面两次抓取，污染物数值列不同而日期/AQI/等级不变** | **aqistudy 式"随机值干扰表"：污染物列每次请求随机生成仅供展示，不是数据** | 别信该表数值列（排列检验都救不回来）；用官方存档替代（配方 R39）；其日期/AQI/等级列真实，可作跨源核对锚点 （www.aqistudy.cn 实战 2026-09，双抓对照实锤） |
 | **查票接口返回 302 到相对路径 `queryG?…`（endpoint 动态轮换，非封锁）；旧票价接口 200 但 `queryLeftNewDTO` 为空（已下线）；过去日期/超预售期返回 200+HTML 错误页（title「铁路客户服务中心」）** | **12306 余票接口端点轮换（所谓"动态签名"实为 302 指路）+ 日期口径不可查** | L0 即可：先 GET `/otn/leftTicket/init` 预热 Cookie（JSESSIONID/BIGipServerotn/SF_cookie_2）→ 手动逐跳跟随同域 302（每跳复检白名单，禁 auto-redirect）；票价+余票数在 result 行字段[39]，**官方前端 `queryLeftTicket_end_js.js` 的 `e()` 函数就是现成解码器（每10字符=席别码1+价格×10共5位+余票数4位），勿自己猜格式**（12306 实战 2026-09） |
 | **未登录访问 www.xiaohongshu.com 任何路径都渲染"安全限制 300012 IP存在风险"整页（登录页也封）；同 IP 换浏览器/profile 无效；curl 无 cookie 访问同样封** | **小红书 IP 信誉封锁（300012），先于登录态生效——不是 cookie/指纹问题** | 换出口 IP（用户本机代理/家宽→代理节点）；**Chrome `--proxy-server` 实测会被无视（指到无人监听的假端口都能上网）**——用 patchright/playwright `launchPersistentContext({proxy})` 库层代理验证出口后再开工（小红书 2026-09 实测：移动家宽 300012 封锁，香港出口正常 302 登录墙） |
 | **采集中途页面突然跳转 `website-login/error?...error_code=300013&error_msg=访问频繁，请稍后再试`** | **小红书频率限流（300013）：短期高频打开笔记页/评论翻页累积触发** | 立即收手冷却 5-10 分钟，勿重试硬闯；后续会话导航间隔 ≥3-5s、评论区滚动轮次按需收敛；数据已捕获部分照常解析交付，缺的等冷却后补（小红书 2026-09 实测） |
 | **采集能拿到 `window.__INITIAL_STATE__` 的站，运行时 `Object.getOwnPropertyNames(window)` 里却没有它（SSR HTML `<script>` 里有）** | **水合后删除全局状态（React/Vue SSR 消费即删）** | 别读运行时全局——直接从捕获的 SSR HTML 正文提取 `window.__INITIAL_STATE__=` 后面的字面量；注意它不是纯 JSON：`\bundefined\b`→null、`NaN`→null、`new Set(X)`/`new Map(X)`→X（配平括号替换），`</script>` 查找边界会被 JSON 内嵌 script 字符串截断，用花括号配平法取完整 blob（小红书 2026-09 实测） |
 | **拼多多 H5：搜索接口 POST `/proxy/api/search` 回 `error_code 54001`+verify_auth_token（页面弹滑块/拼图）；新号继续自动化导航后升级为全站跳 `psnl_identify.html?scene=COMMON_VERIFY`（"请前往APP完成人脸认证"，**连商品详情页都拦**）；分类页滚动静默触发 `/proxy/api/api/phantom/obtain_captcha`；但**首页信息流/分类浏览/登录后的商品评论页长期正常** | **拼多多账号级行为风控：搜索面最敏感，新设备+程序化节奏从滑块逐级升到人脸墙（升级不可逆，小号即废）** | 换有历史的账号 + **用户手工暖号**（搜索→进商品页→翻评论全程真人节奏）；自动化阶段只做页内滚动与响应捕获，**不发新导航风暴**（商品页一次探测即可暴露墙）；评论采集走 `goods_comments.html?goods_id=X`（拼多多 2026-09 实战，动线见 R43） |
+| **直连 403 Cloudflare 盾；换真浏览器渲染后 HTTP 200，但整页正文只剩一句 "Please login to continue / Please log in to verify you are not a bot / If you are looking to access data through our API, please visit our developer portal"；官方 API 门户（developer.stockx.com）只提供 Seller / Catalog / Order 类接口，面向卖家与企业** | **商业行情平台闭源化：CF 盾 + 登录墙双闸 + 官方 API 指向企业侧（StockX / GOAT 实测 2026-09；GOAT 连 robots.txt 都返回 CF 挑战页，商品页探测 404）** | **别升 ladder——登录墙是红线，升到 L3/L4 同样过不了，纯粹浪费用户时间**。直接换源三选一：①**已发表二手数据集**（学术首选，如 IEEE DataPort DOI `10.21227/mdj8-4y59`「StockX Sneaker Size-Day Dataset」，136,980 条 / 50 款鞋 / 2025-05~09 日频，颗粒度 鞋×尺码×天，含 lowest ask / highest bid / last sale + Google Trends score，DOI 可直接引用）②**平台官方 API 或数据合作邮件申请**（说明学术用途 + 承诺不公开原始数据、只发表聚合统计量）③商业托管数据服务（Apify / WebScrapingAPI 等，**外包爬取不转移法律风险，慎作论文主数据源**） |
+| **Web 端 SPA 壳可通（200），但 `jsrecon` 扫完全部 JS 包后**零数据端点**（只剩备案 PDF 之类的静态链接）；真实数据接口在 App 端且带 native 层签名** | **App 端闭源站（得物 dewu.com 实测 2026-09）：Web 侧根本没有接口可抓，取数必须逆向 App 签名 + 伪造设备指纹 + 自动过滑块 + 解密混淆字体** | **四项全部落在合规红线内（不逆向签名 / 不伪造指纹 / 不程序过滑块），直接拒单，一次都别试**。换源或改研究设计；学术场景优先已发表数据集或官方数据合作申请 |
+| **SSR 站：`fetch` 直抓只出几行壳文本（markdown 转换器扑空），但 `grep` 原始 HTML 能命中全部字段关键词；`jsrecon` 挖到 0 个端点（数据内联不走 XHR）；`--browser` 渲染能拿到完整正文** | **SvelteKit/流式 SSR 站：数据在 HTML 里但 lxml 把它解析成**两个 `<html>` 元素**——`html[0]` 含 `<head>`（canonical/title），`html[1]` 含 `<body>`（h1/价格/正文）。两者是兄弟，同一行内拿不全（KLEKT klekt.com 实测 2026-09）** | **别用 `row_xpath:"//html"` 一把梭（会命中 2 个元素 → 每页产出 2 行、其中 1 行全空，且 canonical 与 h1 分属不同行导致 url 恒空）**。正解双层：`source.row_xpath:"(//html)[1]"` **只提 url**（`css:"link[rel=canonical]"` + `attr:"href"`）→ `detail.enabled:true` + `detail.extract[{"type":"xpath_text",...}]` 提全部字段。**关键差异：`detail.extract` 的 xpath 作用于完整 HTML（head+body 都能访问），`source.fields` 的 xpath 只作用于单个 row 元素的序列化** |
+| **sitemap 文件名带 `.gz`，但 `gzip.GzipFile` 解压报 "Not a gzipped file"（内容直接是 `<?xml`）** | **服务器已按 Accept-Encoding 自动解压，文件名 .gz 名不副实** | 先嗅探魔数再决定：`raw[:2] == b"\\x1f\\x8b"` 才走 GzipFile，否则当明文解码（KLEKT sitemap 实测 2026-09） |
+
+⚠️ **接单前先确认字段在目标站是否真的存在**（得物/StockX 战训 2026-09 双踩）：
+球鞋转售类平台（StockX / GOAT）**非 UGC 平台，没有买家评论系统、没有用户主页 /
+粉丝数 / IP 属地**。任务书若含「评论 N 条 + 用户主页 N 个」，换任何合规源都拿不到，
+**必须在开工前告知用户并砍需求**，不要抓完行情才发现两块数据为零。
+另：StockX 只有聚合统计（salesLast72Hours / salesCount90Days / averagePrice90Days），
+**没有逐笔成交明细**，也没有「卖家数量」「最近成交时间」的等价字段——
+别把「近 30 天成交记录」当成可抓的逐笔流。
+
+💡 **球鞋转售行情的可抓替代源：KLEKT（klekt.com，欧洲）**（2026-09 实测通关）：
+`robots.txt` 明确 `Allow: /product`、`Allow: /catalog`，**HTTP 直抓即可，无任何防护**。
+商品 URL 从官方 sitemap 取（`klekt.com/sitemaps/products-0001.xml.gz`、`-0002`，
+合计约 1.8 万条；其中 Dunk Low 约 823 条）。
+可拿字段：SKU / 配色 / 发售日期 / 成色 / 最低挂单价+尺码 / 最高出价+尺码 /
+最近成交价 / 12 个月成交笔数 / 12 个月均价 / 价格波动率 / 12 个月最后成交价。
+配 `source.sitemap_urls` 批量喂种子 + 上文双层 xpath 方案，40 款约 80 请求 / 192 秒 / 0 错误。
+⚠️ 同样**没有买家评论与用户主页**；冷门款无成交时历史区块整个不存在（空值≠抓取失败）。
 
 **数据型任务 API 优先（batch1700 实测：400 项中约 60% 的关键数据在 JSON API 里，
 HTML 抓取反而是简单情况）**：凡目标是"数值/行情/名单/统计"类数据，侦察第一步
