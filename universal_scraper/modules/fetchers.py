@@ -862,7 +862,9 @@ class BrowserFetcher(BaseFetcher):
             # capture 契约：布尔 true=全捕获（翻译成桥的 capture_all）；列表=声明式捕获
             "capture": (self.config.get("capture")
                         if isinstance(self.config.get("capture"), list) else None),
-            "capture_all": self.config.get("capture") is True,
+            # 审查十一轮（C 同款）：capture_all 拼写也要认（auto.py 生成形态）
+            "capture_all": (self.config.get("capture") is True)
+            or (self.config.get("capture_all") is True),
         }
         wait_sel = self.config.get("wait_selector")
         wait_to = int(self.config.get("wait_timeout") or 30000)

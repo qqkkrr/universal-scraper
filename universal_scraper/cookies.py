@@ -68,8 +68,23 @@ def _cookie_expired(c: Dict[str, Any], now: Optional[float] = None) -> bool:
 def _norm_domain(d: str) -> str:
     """精确剥离开头的一个 www. 标签。此前用 lstrip 按字符集剥离，会把
     weibo.com→eibo.com、wikipedia.org→ikipedia.org 等真实域名毁掉，
-    且 mangled 名可能与其它真实域撞档导致登录态跨站外发。"""
-    return re.sub(r"^www\.", "", (d or "").lower())
+    且 mangled 名可能与其它真实域撞档导致登录态跨站外发。
+
+    审查十一轮（H）：入口主机未规范化——端口/userinfo/尾点原样进档名与域匹配
+    （engine_v3 主路径对 start_url 用字符串 split 取 host，`http://x.com:8443`
+    → `x.com:8443` 作 cookie_domain）：存不进（域树过滤全拒）、读不出（档名不
+    匹配），登录态静默全丢。auto.py 已用 urlparse.hostname 修过同型，此处统一。"""
+    s = (d or "").strip().lower()
+    if "//" in s:                        # 带 scheme/路径的整 URL → 取 host 段
+        s = s.split("//", 1)[1]
+    if "@" in s:                         # 剥 userinfo（user:pw@host）
+        s = s.rsplit("@", 1)[1]
+    if s.startswith("["):                # IPv6 字面量 [::1]:80
+        s = s[1:].split("]", 1)[0]
+    elif ":" in s:                       # 剥端口
+        s = s.split(":", 1)[0]
+    s = s.rstrip(".")                    # 剥尾点（合法 FQDN 形态 example.com.）
+    return re.sub(r"^www\.", "", s)
 
 
 def _safe_domain(domain: str) -> str:
@@ -170,12 +185,19 @@ def _load_exact(domain: str) -> List[Dict[str, Any]]:
         raw = p.read_text(encoding="utf-8")
     except FileNotFoundError:
         return []          # 并发删除：不是损坏
+    except UnicodeDecodeError as e:
+        # 审查十一轮（M）：编码损坏（旧版非原子写留下的半截多字节字符/非 UTF-8
+        # 手编档）曾穿透此处——UnicodeDecodeError 不是 OSError，隔离逻辑永不触及，
+        # 每次运行都重复裸抛。归入"内容损坏 → 隔离"路径
+        raw = None
     except OSError as e:
         print(f"[WARN] Cookie 存档暂时读取失败（domain={domain}）："
               f"{type(e).__name__}: {e}；本次按未登录处理，档案未改动，可重试",
               file=sys.stderr, flush=True)
         return []
     try:
+        if raw is None:
+            raise ValueError("编码损坏（非 UTF-8 字节序列）")
         d = json.loads(raw)
         now = time.time()
         return [c for c in d.get("cookies", [])
@@ -221,8 +243,12 @@ def load_cookies(domain: str) -> List[Dict[str, Any]]:
         out = _load_exact(domain)
         if out:
             return out
+        # 审查十一轮（M）：曾"最近优先即返回"——b.example.com.json 只有
+        # cf_clearance、example.com.json 有 SESSDATA/token 时，任务域
+        # a.b.example.com 只拿到半截登录态。改为逐层向上合并所有祖先（同名
+        # cookie 下级先加入者优先），循环结束统一返回
+        seen = set()
         for cand in _parent_domains(domain):
-            seen = set()
             for c in _load_exact(cand):
                 # RFC 6265 单向：请求域必须是 cookie 域或其子域，跨域一律丢弃
                 if not _cookie_matches_archive(c.get("domain"), domain):
@@ -231,8 +257,6 @@ def load_cookies(domain: str) -> List[Dict[str, Any]]:
                     continue
                 seen.add(c.get("name"))
                 out.append(c)
-            if out:
-                return out
     return out
 
 
@@ -258,7 +282,14 @@ def session_health(domain: str) -> Dict[str, Any]:
             out["corrupt"] = True
             return out
     now = time.time()
-    cks = [c for c in d.get("cookies", []) if isinstance(c, dict) and c.get("name")]
+    # 审查十一轮（M）：cookies 值为 null/非 list 时 was 裸 TypeError——且
+    # acquire_for_task 是先 health 后 load，load 的隔离逻辑永远跑不到，档案
+    # 永不隔离也永不提示重新登录。结构异常按损坏口径上报
+    _raw_cks = d.get("cookies", [])
+    if not isinstance(_raw_cks, list):
+        out["corrupt"] = True
+        return out
+    cks = [c for c in _raw_cks if isinstance(c, dict) and c.get("name")]
     out["total"] = len(cks)
     for c in cks:
         if _cookie_expired(c, now):
@@ -351,13 +382,18 @@ def acquire_for_task(domain: str, port: int = 9222, mode: str = "temp", log=None
     # （端口自动搜索：9222 被占时脚本可能换了端口）
     _err = ""
     _imported_domains = 0
+    _imported_list: List[str] = []
     try:
         _port = find_cdp_port(port) or port
         r = import_from_cdp_patchright(port=_port, log=log)
         _cks2 = load_cookies(domain)
+        _imported_list = [str(x) for x in (r.get("domain_list") or [])]
         if r.get("ok") and _cks2:
+            # 审查十一轮（M）：本次导入落盘的全部域随 acquired 返回——temp 模式
+            # 结束只删目标域曾把同批导入的其他站登录态永久残留（隐私契约破裂）
             return {"mode": mode, "source": "imported", "count": len(_cks2),
-                    "health": session_health(domain)}
+                    "health": session_health(domain),
+                    "imported_domains": _imported_list}
         _err = r.get("error", "")
         _imported_domains = int(r.get("domains", 0) or 0)
         if r.get("ok") and not _cks2:
@@ -381,11 +417,18 @@ def release_temp(domain: str, acquired: Dict[str, Any]) -> bool:
     """任务结束后删除"本次自动导入"的临时 cookie（用完即删）。
     - source=imported（本次从调试 Chrome 拉取的）→ 删除（不留隐私）
     - source=reused（用户长期存档）→ 保留，不误删用户资产
-    """
+
+    审查十一轮（M）：CDP 导入会按域**全量**落盘（调试 Chrome 里登录的所有站），
+    而 release 曾只删目标域——其余站登录态永久残留。改为删除本次导入的全部域
+    （imported_domains 缺失时回退删目标域，兼容旧调用）。"""
     if not domain or not acquired:
         return False
     if acquired.get("mode") == "temp" and acquired.get("source") == "imported":
-        return delete(domain)
+        _doms = acquired.get("imported_domains") or [domain]
+        _ok = True
+        for _d in _doms:
+            _ok = delete(str(_d)) and _ok
+        return _ok
     return False
 
 

@@ -38,6 +38,10 @@ def _guess_records_path(obj: Any, depth: int = 0) -> str:
         return "." if depth == 0 else ""
     if not isinstance(obj, dict):
         return ""
+    # 审查十一轮（M）：高优先键的空数组曾立即返回——{"data":[], "list":[{...}]}
+    # 的 records_path 指向空数组 → 全量 0 条（引擎"记录数组为空"break）。
+    # 空数组降为兜底候选，先找非空真记录
+    _empty_cand = ""
     for k in ("data", "list", "rows", "items", "records", "result", "resultList",
               "datas", "content", "page"):
         if k in obj:
@@ -45,17 +49,34 @@ def _guess_records_path(obj: Any, depth: int = 0) -> str:
             # 收官十二轮（审查，实测）：空数组曾返回 "" → one_config 误判
             # single_record=True → 引擎把整响应当一条记录（翻到底/被过滤的查询
             # 常捕获到空页）。空数组路径仍返回该键（空 ≠ 单对象响应）
-            if isinstance(v, list) and (not v or isinstance(v[0], dict)):
-                return k
+            if isinstance(v, list):
+                if v and isinstance(v[0], dict):
+                    return k
+                if not v and not _empty_cand:
+                    _empty_cand = k
             if isinstance(v, dict):
                 sub = _guess_records_path(v, depth + 1)
                 if sub:
-                    return f"{k}.{sub}" if sub != "." else k
+                    _full = f"{k}.{sub}" if sub != "." else k
+                    # 审查十一轮（M）：递归结果同样要判空——{'data':{'rows':[]},
+                    # 'list':[真记录]} 曾返回空路径 'data.rows' 遮蔽 list
+                    _v2 = _dig(v, sub)
+                    if isinstance(_v2, list) and not _v2:
+                        if not _empty_cand:
+                            _empty_cand = _full
+                        continue
+                    return _full
+    if _empty_cand:
+        return _empty_cand
     # 兜底：任何含 dict 列表的键（含空数组）
+    _empty2 = ""
     for k, v in obj.items():
-        if isinstance(v, list) and (not v or isinstance(v[0], dict)):
-            return k
-    return ""
+        if isinstance(v, list):
+            if v and isinstance(v[0], dict):
+                return k
+            if not v and not _empty2:
+                _empty2 = k
+    return _empty2
 
 
 def _page_param_holders(params: Dict[str, Any], _prefix: str = "") -> Dict[str, Any]:
@@ -181,6 +202,30 @@ def _detect_chains(samples: list, log=print) -> list:
                 _tmpl_url = re.sub(rf"([?&]{re.escape(pk)}=){re.escape(val)}(?=&|$)",
                                    rf"\g<1>{{{field}}}", b_url, count=1)
             if _tmpl_url and _tmpl_url != b_url:
+                # 审查十一轮（H1）：残留参数检查——详情 URL 里若还有参数的值不在
+                # 列表样本任何字段值中（如 ?cat=12&id=5 的 id=5），真正的链路参数
+                # 可能是那个残留参数，而值命中（cat=12）只是巧合：生成的模板会把
+                # 每行详情钉死在同一值上（每行同内容）。既有契约是"未匹配参数按
+                # 常量保留"（?id=1234&x=12 保留 id），故不拒绝生成——但必须大声
+                # 告警并把警告写进 scaffold._hint（从静默错数据变成明示风险）
+                _sample_vals = set()
+                for _r in a_rows[:10]:
+                    for _fv in _r.values():
+                        _sample_vals.add(str(_fv))
+                _unmatched = []
+                for _pm in re.finditer(r"[?&]([^=&]+)=([^&#]*)", b_url):
+                    _pk2, _pv2 = _pm.group(1), _pm.group(2)
+                    if _pk2 == pk:
+                        continue
+                    if _pv2 and _pv2 not in _sample_vals:
+                        _unmatched.append(f"{_pk2}={_pv2}")
+                _resid_warn = ""
+                if _unmatched:
+                    log(f"  ⚠️ 链存疑：详情 URL 的参数 {', '.join(_unmatched)} 的值不在"
+                        f"列表样本中——若它是真正的链路变量，生成的链会把每行钉死在"
+                        "同一个值上（每行同内容）。请先用 --limit 2 小样验证")
+                    _resid_warn = (f"⚠️ 注意：参数 {', '.join(_unmatched)} 的值不在样本中，"
+                                   "若每行 URL 相同说明它才是链路变量。")
                 b_url = _tmpl_url
                 scaffold = {
                     "name": f"{a_cfg.get('name','list')}_{b_cfg.get('name','detail')}_chain",
@@ -190,8 +235,8 @@ def _detect_chains(samples: list, log=print) -> list:
                     # {{page}} 是另一套引擎侧替换，勿混淆）
                     "pipeline": [{"type": "template", "field": "url", "tmpl": b_url}],
                     "detail": {"enabled": True, "url_field": "url"},
-                    "_hint": "api_chain 脚手架：先 --limit 2 验证列表；"
-                             "detail.extract 按详情响应补（契约见 SKILL.md「详情页」行）",
+                    "_hint": (_resid_warn + "api_chain 脚手架：先 --limit 2 验证列表；"
+                              "detail.extract 按详情响应补（契约见 SKILL.md「详情页」行）"),
                 }
             else:
                 scaffold = None
@@ -324,8 +369,16 @@ def generate(capture_file: str | Path, referer: str = "",
         is_single = bool(src.get("single_record"))
         if is_single:
             pag = {"strategy": "none"}
-        elif paginated:
+        elif paginated and rp:
             pag = {"strategy": "template", "max_pages": 5, "records_path": rp}
+        elif paginated and not rp:
+            # 审查十一轮（M）：有 {{page}} 但 records_path 为空（响应没解析出
+            # JSON/非标准结构）时曾生成过不了 validate 的配置
+            # （http_json 翻页抓取需要 records_path）——用户按提示跑就撞校验错。
+            # 降级为 none + 明确指路
+            pag = {"strategy": "none"}
+            log("  ⚠️ 该端点检测到翻页参数但未能确定 records_path（响应未解析出 "
+                "JSON 数组）——pagination 降级为 none，请确认响应结构后手动配置")
         else:
             pag = {"strategy": "none", "records_path": rp} if rp else {"strategy": "none"}
         cfg = {"name": urlsplit(src["url"]).path.rsplit("/", 1)[-1][:40] or "api",

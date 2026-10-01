@@ -66,6 +66,15 @@ def download_attachments(urls_file: str | Path, out_dir: str | Path,
     out = Path(out_dir).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     retries = max(1, int(retries))
+    # 审查十一轮（M）：interval 未钳制——负值 time.sleep(-1) 抛 ValueError 冲出
+    # 函数，被 CLI 的 JSONDecodeError/ValueError 兜底误报"清单不是合法 JSON"且
+    # 整批中止。mcp 有 _clamp_interval，此处对齐
+    try:
+        _iv = float(interval)
+        interval = _iv if _iv == _iv and _iv not in (float("inf"), float("-inf")) else 1.0
+        interval = max(0.1, interval)
+    except (TypeError, ValueError):
+        interval = 1.0
     client = make_http_client({"min_interval": interval, "timeout": 60,
                                "http_backend": "auto", "max_retries": 1})
     ok, skip, fail = [], [], []
@@ -224,16 +233,21 @@ def extract_tables(pdf_path: str | Path, pages: Optional[List[int]] = None) -> L
                         # 审查八轮（MEDIUM）：表头重名（两列都叫「数量」）曾让 row[key]
                         # 互相覆盖——实测 header=["项目","数量","数量"], row=["甲","1","2"]
                         # 得 {'项目':'甲','数量':'2'}，第一列的值永久丢失。同名列加数字后缀。
+                        # 审查十一轮（M）：后缀生成未检查与**既有**表头碰撞——
+                        # header=["项目","数量","数量2","数量"] 时第三个"数量"后缀得
+                        # "数量2"撞上已存在的列，值静默覆盖（第 4 列吃掉第 3 列，
+                        # 且 quality_report 不报 degraded）。循环改名直到无碰撞
                         _seen_h: Dict[str, int] = {}
                         _hdr2 = []
+                        _taken = set()
                         for _h in header:
                             _base = _h or ""
-                            if _base in _seen_h:
-                                _seen_h[_base] += 1
-                                _hdr2.append(f"{_base}{_seen_h[_base]}")
-                            else:
-                                _seen_h[_base] = 1
-                                _hdr2.append(_h)
+                            _cand = _base
+                            while _cand in _taken:
+                                _seen_h[_base] = _seen_h.get(_base, 1) + 1
+                                _cand = f"{_base}{_seen_h[_base]}"
+                            _taken.add(_cand)
+                            _hdr2.append(_cand)
                         header = _hdr2
                         rows = []
                         for raw in tb[1:]:

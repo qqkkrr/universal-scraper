@@ -60,14 +60,41 @@ def mark(domain: str, hours: float = DEFAULT_HOURS, note: str = "",
     # 审查八轮：整个"读-改-写"进进程内锁（并发记账曾互相覆盖，实测丢 86%）。
     # 关键：ledger(path) 的**读文件**也必须在锁内——只在锁内改+写而读在锁外，
     # 拿到的仍是过期快照，先写者的记录会被后写者整份覆盖（实测 4 线程 ×25 只落 30）。
-    with _LOCK:
-        led = ledger(path)
-        led.data.setdefault("domain", {})[f"domain:{_norm_domain(domain)}"] = int(time.time())
-        _meta(led)[_norm_domain(domain)] = {"hours": float(hours), "note": note[:200]}
-        led.save()
-    until = time.time() + hours * 3600
-    return {"domain": domain, "cooldown_hours": hours,
+    # 审查十一轮（H2）：进程内锁不覆盖并行子代理（AGENT_GUIDE 标准用法 ≤8 个
+    # 子进程各跑 CLI，403/421/52x 自动记账跨进程仍 last-writer-wins，实测 4 进程
+    # ×25 域只落 34/100）。与 action_budget 同款：<file>.lock 的 flock 包全程
+    _hours = float(hours)
+    if not (0 < _hours < 24 * 365 * 10):
+        # 审查十一轮（M）：inf/nan/0/负数曾原样入账（`--hours inf` 一次写入即让
+        # --check/--list 对全部域名永久 OverflowError；0/负数是静默空操作）
+        raise ValueError(f"hours 必须是 (0, 87600) 内的正数，实际 {hours!r}")
+    _p = Path(os.path.expanduser(str(path or DEFAULT_FILE))).resolve()
+    _p.parent.mkdir(parents=True, exist_ok=True)
+    import fcntl
+    with open(f"{_p}.lock", "a") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        with _LOCK:
+            led = ledger(_p)
+            led.data.setdefault("domain", {})[f"domain:{_norm_domain(domain)}"] = int(time.time())
+            _meta(led)[_norm_domain(domain)] = {"hours": _hours, "note": note[:200]}
+            led.save()
+    until = time.time() + _hours * 3600
+    return {"domain": domain, "cooldown_hours": _hours,
             "until": time.strftime("%m-%d %H:%M", time.localtime(until))}
+
+
+def _safe_hours(meta: Dict, key: str) -> float:
+    """读取 budget_meta 的 hours：类型异常（手编/旧版/外部工具写入，quota_ledger
+    对 budget_meta 维度豁免内层校验）回退 DEFAULT_HOURS——曾直接 hours*3600
+    在 "24"/None/dict 上 TypeError 崩 --check/--list。对齐 action_budget._pick。"""
+    v = (meta or {}).get(key, {}).get("hours", DEFAULT_HOURS)
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return DEFAULT_HOURS
+    if not (0 < f < 24 * 365 * 10) or f != f:  # 0/负/inf/nan 一律回退
+        return DEFAULT_HOURS
+    return f
 
 
 def check(domain: str, path: str | Path | None = None) -> Dict:
@@ -75,13 +102,13 @@ def check(domain: str, path: str | Path | None = None) -> Dict:
     # 审查修复：key 必须与 mark() 同用 _norm_domain——曾用原始域名查账，
     # www.example.com 永远查不到 example.com 的登记，幂等跳过失效、重复续期
     key = f"domain:{_norm_domain(domain)}"
-    meta = _meta(led).get(_norm_domain(domain), {})
-    hours = meta.get("hours", DEFAULT_HOURS)
+    meta = _meta(led)
+    hours = _safe_hours(meta, _norm_domain(domain))
     last_ts = led.last(key, dim="domain")
     remaining = int(last_ts + hours * 3600 - time.time())
     return {"domain": domain, "in_cooldown": remaining > 0,
             "remaining_sec": max(0, remaining),
-            "cooldown_hours": hours, "note": meta.get("note", "")}
+            "cooldown_hours": hours, "note": meta.get(_norm_domain(domain), {}).get("note", "")}
 
 
 def listing(path: str | Path | None = None) -> Dict:
@@ -89,9 +116,11 @@ def listing(path: str | Path | None = None) -> Dict:
     meta = _meta(led)
     out: Dict[str, Dict] = {}
     for key, ts in led.data.get("domain", {}).items():
-        d = key.replace("domain:", "", 1)
+        # 审查十一轮（M）：曾用原始 key——旧格式台账（domain:www.old.test）
+        # 与新口径 check 结论相反。展示键归一化（与 check 同口径）
+        d = _norm_domain(key.replace("domain:", "", 1))
         m = meta.get(d, {})
-        hours = m.get("hours", DEFAULT_HOURS)
+        hours = _safe_hours(meta, d)
         remaining = int(ts + hours * 3600 - time.time())
         out[d] = {"in_cooldown": remaining > 0,
                   "remaining_sec": max(0, remaining),

@@ -207,7 +207,12 @@ class HttpFetcher(BaseFetcher):
         if ck:
             hdrs.setdefault("Cookie", ck)
         kw = dict(params=query or None, headers=hdrs, proxy=sess.proxy,
-                  max_size=int(s.get("max_size", 20 * 1024 * 1024)))
+                  max_size=int(s.get("max_size", 20 * 1024 * 1024)),
+                  # 审查十一轮（H2）：翻页越过末页的正常 404 曾惩罚会话与代理
+                  # （errors+1 → 3 次后新建会话丢登录 jar + 代理冷却直连暴露真实
+                  # IP）。modules/fetchers.py 早已带 allow_html_404=True，根文件
+                  # 漏同步——404 交给 detect_block 判 http_error（blocked=False）
+                  allow_html_404=True)
         try:
             if method.upper() == "POST":
                 res = self.http.post(url, data=s.get("body"), json_data=s.get("json_body"), **kw)
@@ -390,8 +395,20 @@ class HttpFetcher(BaseFetcher):
                     from .protocols import BlockDetectedError
                     raise BlockDetectedError(url=url, kind=f"http_{_st}",
                                              detail=f"HTTP {_st} 且请求失败——拦截/限流硬停机")
+                # 审查十一轮（H4）：传输层失败（重试耗尽 status=0）曾静默 break——
+                # 100 页任务第 40 页断网只导出 39 页、engine 视为成功 exit 0。
+                # 出声告警（已抓部分仍保留，但用户能看到"任务不完整"）
+                if not _st:
+                    log("  ⚠️ 传输层失败（重试已耗尽，status=0）——本页未取回，"
+                        "已抓数据保留但任务不完整，请查网络/出口后重跑", "ERROR")
                 break
             body = resp.get("body", b"")
+            # 审查十一轮（H3）：响应被 max_size 截断时 fetcher 曾完全不看
+            # truncated——JSON 截断后 json=None 静默 0 条、HTML 截断后尾部记录
+            # 静默丢失（modules 已修，根文件漏同步）
+            if resp.get("truncated"):
+                log(f"  ⚠️ 响应超过 max_size 被截断（{len(body)}B）——本页记录可能不完整，"
+                    "如数据缺失请调大 source.max_size", "ERROR")
             text = smart_decode(body, resp.get("headers") or {})
 
             # 裁判文书网战训（2026-09 DeepSeek 考核）：93 字符封禁页被判"页面太短
@@ -449,6 +466,17 @@ class HttpFetcher(BaseFetcher):
                             recs = _v
                             break
                 total = jpath(obj, pagination.get("total_path", "data.total"), total)
+                # 审查十一轮（H5）：翻页参数被服务端忽略时各页返回相同内容——
+                # 每页都有"新增行"故 len 比较与"第 2 页零新增"启发式都不触发，
+                # 静默产出重复数据（3 页 6 条 unique 只有 2 个）。页级指纹相同即
+                # 判翻页无效，停机避免重复
+                _page_sig = tuple(sorted(str(r)[:200] for r in recs[:8])) \
+                    if isinstance(recs, list) and recs else ()
+                if page >= 2 and _page_sig and _page_sig == self._prev_page_sig:
+                    log("  ⚠️ 本页内容与上一页完全相同（翻页参数可能未被服务端消费，"
+                        "POST 页码在 body 时 page_param 只改 query 无效）——停机避免重复数据", "WARN")
+                    break
+                self._prev_page_sig = _page_sig
                 records.extend(recs if isinstance(recs, list) else [])
                 log(f"  page {page}: +{len(recs) if isinstance(recs, list) else 0}（累计 {len(records)}）")
                 if isinstance(recs, list) and recs:
@@ -560,7 +588,11 @@ class HttpFetcher(BaseFetcher):
             return None
         url = None
         if sel.startswith("//") or sel.startswith("xpath:"):
-            url = xpath_text(html, sel.lstrip("xpath:"), 0, " ")
+            # 审查十一轮（M）：lstrip("xpath:") 按字符集剥离——"xpath:tr[1]/…"
+            # 被啃成 "r[1]/…"（x/t/p/a/h 首字符集），相对 xpath 的下一页链接
+            # 全部静默失效（翻页止步第 1 页）；仅 "xpath://…" 侥幸正确
+            url = xpath_text(html, sel.removeprefix("xpath:") if sel.startswith("xpath:")
+                             else sel, 0, " ")
         else:
             from .selectors import css_attr
             url = css_attr(html, sel, "href", 0)
@@ -697,6 +729,16 @@ class BrowserFetcher(BaseFetcher):
                    "--headless", "0" if self.source.get("headless") is False else "1"]
             if self.source.get("cdp"):
                 cmd += ["--cdp", str(self.source["cdp"])]
+            # 审查十一轮（H6）：详情批抓曾完全绕过代理配置——列表走代理、详情
+            # 直连（真实 IP 暴露且与列表 IP 不一致易触发风控）。与 fetch_list
+            # 同款：代理池优先（全冷却时不传=直连），否则 anti.proxy
+            _pp = self.anti.get("_proxy_pool")
+            if _pp is not None and _pp.size:
+                _px = _pp.next()
+                if _px:
+                    cmd += ["--proxy", _px]
+            elif self.anti.get("proxy"):
+                cmd += ["--proxy", self.anti["proxy"]]
             env = dict(os.environ)
             env["NODE_PATH"] = NODE_PATH
             proc, errbuf = _spawn_bridge(cmd, env)
@@ -760,7 +802,11 @@ class BrowserFetcher(BaseFetcher):
             # capture 契约：布尔 true=全捕获（翻译成桥的 capture_all）；列表=声明式捕获。
             # 绝不能把布尔原样传给 spec.capture——桥会迭代它导致 TypeError 崩溃。
             "capture": (s.get("capture") if isinstance(s.get("capture"), list) else None),
-            "capture_all": s.get("capture") is True,
+            # 审查十一轮（C）：曾只认 capture is True——auto.py 自己生成的
+            # source={"record_from":"capture_all","capture_all":true} 形态被白名单
+            # 吞掉，桥永不捕获，而 record_from:"capture_all" 把已解析的行替换成
+            # 空列表（静默全丢）。两种拼写都认
+            "capture_all": (s.get("capture") is True) or (s.get("capture_all") is True),
             "login": s.get("login"),
             "verify": s.get("verify"),
         }
@@ -894,7 +940,14 @@ class BrowserFetcher(BaseFetcher):
                 # 报错保留首行（真正的异常类型常在头部）+ 尾部，避免截断导致误诊
                 _lines = [l for l in err.strip().splitlines() if l.strip()]
                 _head = _lines[0][:220] if _lines else ""
-                die(f"浏览器桥退出码 {rc}: 首行[{_head}] 尾部[{err[-300:]}]")
+                # 审查十一轮（M）：桥收尾崩溃时曾无条件 die，丢弃本次已收全部
+                # records（fetch_pages 部分页保留 + _run 保留的部分数据语义，
+                # 只有这里例外）。已收到记录时保留并出声，engine 仍能看到数据
+                if records:
+                    log(f"  ⚠️ 浏览器桥退出码 {rc}（首行[{_head}]）——已收 {len(records)} 条"
+                        "保留使用，但本次抓取可能不完整", "ERROR")
+                else:
+                    die(f"浏览器桥退出码 {rc}: 首行[{_head}] 尾部[{err[-300:]}]")
             # 记录来源 = 网络捕获（SPA 签名接口，如小红书评论）
             if self.source.get("record_from") == "capture":
                 records = self._records_from_capture(out_dir)
@@ -1042,11 +1095,16 @@ class BrowserFetcher(BaseFetcher):
                 obj = item.get("json") if isinstance(item, dict) and "json" in item else item
                 rows = jpath(obj, rp) if rp else obj
                 if not isinstance(rows, list):
-                    if rows is not None:
+                    if rows is None:
+                        # 审查十一轮（M）：jpath 未命中返回 None 时告警曾被
+                        # `if rows is not None` 吞掉——拼错的 records_path 静默 0 条
+                        # （注释声称"必须可见"完全落空）
+                        log(f"  ⚠️ capture[{cap.get('name')}] records_path='{rp}' 未命中任何值"
+                            f"（响应顶层键: {list(obj)[:8] if isinstance(obj, dict) else type(obj).__name__}）", "WARN")
+                    else:
                         # 猎聘战例：records_path 拼错时把整个响应体当一条记录、导出全空——必须可见
-                        log(f"  ⚠️ capture[{cap.get('name')}] 未命中 records_path='{rp}'"
-                            f"（响应顶层键: {list(obj)[:8] if isinstance(obj, dict) else type(obj).__name__}），"
-                            "已按整条响应记录")
+                        log(f"  ⚠️ capture[{cap.get('name')}] records_path='{rp}' 命中非列表值"
+                            f"（{type(rows).__name__}），已按整条响应记录", "WARN")
                     rows = [rows]
                 for row in rows:
                     if isinstance(row, dict):

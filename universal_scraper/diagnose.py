@@ -210,19 +210,21 @@ def classify_block(status: int, body_text: str, headers: Optional[Dict[str, str]
             _prom += re.sub(r"<[^>]+>", " ", _mh.group(1)) + " "
         _blk_words = re.search(r"访问被拒|拒绝访问|请求被拦截|Access Denied|安全验证|"
                                r"请完成验证|已被拦截|访问受限|Forbidden", _prom, re.I)
+        # 审查十一轮（H1）：拦截词检查曾在 SPA 循环**内部**——只有页面同时命中
+        # SPA 特征才读 title/h1 拦截词，无 SPA 特征的 200 拦截页直接落到末尾
+        # ok 兜底（"✅ 正常响应——可直接抓" exit 0），判型结论随无关的 SPA
+        # 特征翻转。提为前置独立判定（宁可误报拦截不可漏报）
+        if _blk_words:
+            return {
+                "is_block": True,
+                "type": "waf_plain",
+                "name": "WAF 拦截页",
+                "evidence": f"title/h1 含拦截词: {_blk_words.group(0)}",
+                "prescription": "换通道（browser/代理）或按站点处方冷却后重试",
+                "burns_budget": True,
+            }
         for pat in SPA_PATTERNS:
             if re.search(pat, body, re.I):
-                if _blk_words:
-                    # OCR R131（M）：SPA 特征曾掩盖未知 WAF 的拒绝页——拦截词
-                    # 并存时按拦截优先（宁可误报拦截不可漏报）
-                    return {
-                        "is_block": True,
-                        "type": "waf_plain",
-                        "name": "WAF 拦截页（含 SPA 壳特征）",
-                        "evidence": f"SPA 特征 {pat} 与拦截词共存",
-                        "prescription": "换通道（browser/代理）或按站点处方冷却后重试",
-                        "burns_budget": True,
-                    }
                 return {
                     "is_block": False,
                     "type": "spa_hint",
@@ -296,8 +298,10 @@ def diagnose_quick(url: str, timeout: float = 8.0, proxy: Optional[str] = None) 
         from curl_cffi import requests as creq
         resp = creq.head(url, **kw)
         _sc = int(resp.status_code)
-        if _sc >= 400 and _sc not in (405, 501, 412):
-            # 403/429/468 等判型不依赖 body——HEAD 结论直接可用（省一次 GET）
+        # 审查十一轮（H3）：403/429/468 曾 HEAD 定论不取 body——CF/阿里云/瑞数
+        # 靠 body 指纹判型，quick 把可抓站（HEAD 403/GET 200）诊成封禁、把 CF
+        # 挑战页诊成"换指纹硬闯"（恰是处方要避免的方向）。这三个码回退一次 GET
+        if _sc >= 400 and _sc not in (405, 501, 412, 403, 429, 468):
             body = b""
         else:
             # 2xx（可能是 JS 挑战壳）与 412（瑞数标志码，HEAD 指纹瞎）/405/501：
