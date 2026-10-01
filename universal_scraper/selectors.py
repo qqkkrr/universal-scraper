@@ -213,7 +213,11 @@ def css_html(html: str, selector: str, limit: int = 0) -> str:
         if isinstance(el, str):
             out.append(el)
             continue
-        s = _lxml_html.tostring(el, encoding="unicode") if HAS_LXML else str(el)
+        # 审查十二轮（M1）：曾用 HAS_LXML（= lxml **且** cssselect）决定 tostring
+        # ——lxml 有而 cssselect 缺时（doctor 不检查 cssselect，属预期存在的组合）
+        # 对 lxml 元素走 str(el)，产出 '<Element li at 0x...>' 垃圾。判据与
+        # css_elements 同用 _HAS_LXML（只看元素是不是 lxml 对象）
+        s = _lxml_html.tostring(el, encoding="unicode") if _HAS_LXML else str(el)
         if s:
             out.append(s)
     text = " ".join(out)

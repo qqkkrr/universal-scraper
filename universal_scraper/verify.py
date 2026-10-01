@@ -600,6 +600,8 @@ def verify_dir(path: str, log=print) -> Dict[str, Any]:
                          if c.get("name", "").startswith("字段完整率") and isinstance(c.get("rate"), (int, float))]
                 if rates:
                     entry["field_complete_rate"] = round(sum(rates) / len(rates), 3)
+                # 审查十二轮（H3）：逐文件校验结论存进 entry——verdict 汇总要用
+                entry["ok"] = bool(vr.get("ok", True))
                 # OCR 终审（P1）：列表 JSON 的 records 已在 _is_list 分支累加（L526）——
                 # 此处不重复累加（非列表 JSON records=0 加零无害但逻辑冗余）
             elif f.suffix.lower() == ".jsonl":
@@ -667,14 +669,22 @@ def verify_dir(path: str, log=print) -> Dict[str, Any]:
             # 损坏 ≠ 通过：证据引用无法核实，按 partial 降级并说明原因
             missing_ref = [f"<summary.json 解析失败: {type(e).__name__}>"]
     has_data = any(f.get("records", 0) > 0 for f in files_out)
+    # 审查十二轮（H3）：verdict 曾只看记录数——"有记录但抽取链全断"（选择器全空/
+    # 字段名漂移：verify_file ok=false 或字段完整率 0）被 ✅ ok 放行（exit 0），
+    # compliance 报告写"审计结论: ok"。并入逐文件 ok/完整率 → partial
+    _bad_files = [f.get("file") for f in files_out
+                  if (f.get("records") or 0) > 0
+                  and (f.get("ok") is False or f.get("field_complete_rate") == 0)]
     if not data_files:
         verdict = "no_data_files"
-    elif has_data and not missing_ref:
+    elif has_data and not missing_ref and not _bad_files:
         verdict = "ok"
     elif has_data:
         verdict = "partial"
     else:
         verdict = "empty"
+    if _bad_files:
+        log(f"⚠️ {len(_bad_files)} 个数据文件有记录但校验失败/字段完整率 0: {_bad_files[:5]}", "WARN")
     result = {"dir": str(root), "files": files_out, "total_records": total_records,
               "evidence": evidence, "missing_evidence_refs": missing_ref,
               "verdict": verdict}

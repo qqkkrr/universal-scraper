@@ -1655,6 +1655,43 @@ class EngineV3:
                         _sp = (Path(_sd) if Path(str(_sd)).is_absolute()
                                else self.out_dir / str(_sd)) / f"{self.storage_name}.jsonl"
                     _tmp = _sp.with_suffix(".jsonl.tmp_detail")
+                    # 审查十二轮（H3）：同 URL 重跑时历史行与本轮行同键，_finalize
+                    # 的按-URL 过滤天然失效 → jsonl 与导出各翻倍。且细节陷阱：
+                    # ① _url 不是行唯一键（同页多条共享请求 URL），不能按 URL 等值
+                    # 去重（会压行——第一版错误被端到端验证抓住）；
+                    # ② detail 的 todo 按详情 URL 去重——重跑时历史批次先到先得拿到
+                    # 富化，本轮新行反而没详情（第二版方向错，留下无详情行）。
+                    # 终版=**页级合并**：按 _url 分组，同页二选一（保详情信息更全
+                    # 的一方，平局保历史版），无冲突页全保留
+                    _n_new = int(self.stats.get("items") or 0)
+                    if 0 < _n_new < len(rows):
+                        _hist, _cur = rows[:-_n_new], rows[-_n_new:]
+
+                        def _pg_score(_rs):
+                            return sum(1 for _r in _rs
+                                       if str(_r.get("detail_status") or "") or str(_r.get("body") or ""))
+
+                        _h_by, _c_by = {}, {}
+                        for _r in _hist:
+                            _h_by.setdefault(str(_r.get("_url") or ""), []).append(_r)
+                        for _r in _cur:
+                            _c_by.setdefault(str(_r.get("_url") or ""), []).append(_r)
+                        _oh, _oc, _n_repl = [], [], 0
+                        for _u, _hrs in _h_by.items():
+                            if _u in _c_by:
+                                if _pg_score(_hrs) >= _pg_score(_c_by[_u]):
+                                    _oh.extend(_hrs)   # 历史版更全/平局：弃本轮重复页
+                                    _n_repl += 1
+                                else:
+                                    _oc.extend(_c_by[_u])  # 本轮更全：用本轮
+                            else:
+                                _oh.extend(_hrs)
+                        for _u, _crs in _c_by.items():
+                            if _u not in _h_by:
+                                _oc.extend(_crs)
+                        if _n_repl:
+                            self.logger.info(f"spool：{_n_repl} 个重复请求页按信息更全方保留（同 URL 重跑合并）")
+                        rows = _oh + _oc
                     _tmp.write_text("\n".join(json.dumps(r, ensure_ascii=False, default=str)
                                               for r in rows) + "\n", encoding="utf-8")
                     _tmp.replace(_sp)
@@ -1694,9 +1731,14 @@ class EngineV3:
             with self._lock:
                 # R33 修复：spool 读回可能含历史运行记录——统计只计本次运行的行，
                 # 防止 run 摘要 total 被 --resume 场景的历史行虚增
+                # 审查十二轮（H1）：曾用 _own_urls（self._all_items 内存子集，
+                # spool 时只剩阈值内前 N 条）——本轮行数超阈值时 total 与导出实际
+                # 行数不一致（total=0 还会触发假 nodata + "软封锁"误诊 + exit 3）。
+                # 改与 _finalize 同口径：本轮登记 URL 集合 _run_urls
                 if self._spooling:
+                    _own = self._run_urls or _own_urls
                     self.stats["items"] = sum(1 for r in rows
-                                              if str(r.get("_url") or r.get("url") or "") in _own_urls)
+                                              if str(r.get("_url") or r.get("url") or "") in _own)
                 else:
                     self.stats["items"] = len(rows)
         except Exception as e:
@@ -1757,6 +1799,9 @@ class EngineV3:
         if self.limit and len(rows) > self.limit:
             self.logger.info(f"limit={self.limit} 截取导出（捕获 {len(rows)} 条 → {self.limit} 条）")
             rows = rows[:self.limit]
+            # 审查十二轮（H2）：stats/返回值（声明数）曾保持超发计数——文件 5 行
+            # 而 total=10，verify 的"声明 vs 文件"对账必 fail。截断后同步
+            self.stats["items"] = len(rows)
         base = self.config.get("output", {}).get("base_name", safe_fname(self.task.name))
         # resume：合并之前已导出的记录（按 _url 去重），保证输出完整
         prev_json = self.out_dir / f"{base}.json"

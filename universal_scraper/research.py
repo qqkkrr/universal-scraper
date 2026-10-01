@@ -348,7 +348,9 @@ class ResearchRunner:
             key = f"{code}_{year}"
             try:
                 got = self.fetch_announce(code, year)
-                bad = 0
+                # 审查十二轮（H4）：bad 曾在 API 成功后立刻清零——"API 通/static 断"
+                # （下载/抽取连锁失败，正是封禁最常见形态）时计数器永远到不了熔断
+                # 阈值，以固定间隔持续打被封主机。改为**整项成功完成后**才清零
                 if got is None:
                     done[key] = "nodata"
                     nodata += 1
@@ -405,6 +407,7 @@ class ResearchRunner:
                         rows_f.flush()
                         done[key] = "ok"
                         ok += 1
+                        bad = 0  # 审查十二轮（H4）：只有整项真正完成才清熔断计数
                     except Exception as e:
                         done[key] = f"pdf_fail:{type(e).__name__}"
                         fail += 1
