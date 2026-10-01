@@ -995,7 +995,19 @@ def fetch_bytes(url: str, headers: Optional[Dict[str, str]] = None, proxy: Optio
             enc = resp.headers.get("Content-Encoding", "").lower()
             if enc == "gzip":
                 try:
-                    raw = gzip.decompress(raw)
+                    # 审查十轮（H2）：gzip.decompress 曾全量解压后才比 max_size——
+                    # 压缩体读取上限 64MB × gzip 最高压缩比 ~1032:1 = 最坏 ~64GB
+                    # 内存分配（解压炸弹）。改分块有界解压，超限立即中止
+                    _d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                    _out = _d.decompress(raw, max_size + 1) if max_size else _d.decompress(raw)
+                    if max_size and len(_out) > max_size:
+                        fetch_bytes.last_error = f"解压后超过 max_size={max_size}，已中止"
+                        return None
+                    _out += _d.flush()
+                    if _d.unused_data:
+                        fetch_bytes.last_error = "gzip 流后有残留数据（非单一 gzip 流）"
+                        return None
+                    raw = _out
                     if max_size and len(raw) > max_size:
                         fetch_bytes.last_error = f"解压后超过 max_size={max_size}，已中止"
                         return None
@@ -1112,6 +1124,10 @@ class HttpClient:
         h.update(self.extra_headers)
         if extra:
             h.update(extra)
+        # 审查十轮（M）：None 值 header 三后端统一清洗（此前只有 curl 后端有
+        # _sanitize_headers）——YAML 显式 null 曾在 putheader TypeError 后被
+        # 误诊成"连续网络失败"
+        h = {k: v for k, v in h.items() if v is not None}
         if self.cookies:
             # 收官十五轮（core 深审 M1，实测）：曾整串覆盖调用方的 Cookie 头——
             # anti_bot.cookies（文档推荐与 cookie_domain 同填）与归档/会话登录态
@@ -1235,8 +1251,10 @@ class HttpClient:
                                 except OSError:
                                     pass
                                 return cached
-                            if res and res.get("ok"):
+                            if res and res.get("ok") and not res.get("truncated"):
                                 try:  # 新内容回写缓存（条件请求带 use_cache=False）
+                                    # 审查十轮（M）：截断体曾进缓存并被当"完整"响应永久复用——
+                                    # 后续不带 max_size 的请求命中缓存拿到半截体
                                     _ct = cf.with_suffix(".json.wtmp")
                                     _ct.write_text(json.dumps(self._cache_encode(res),
                                                               ensure_ascii=False),
@@ -1431,7 +1449,9 @@ class HttpClient:
             return {"ok": False, "status": last_status, "body": b"", "text": last_err, "json": None, "url": url,
                     "headers": last_headers,
                     "hint": "连续网络失败：出口/系统代理可能已变化，可运行 scripts/doctor.py（网络链路组）复查"}
-        if use_cache and result["ok"] and self.cache_dir and method == "GET" and not body_bytes:
+        # 审查十轮（M）：截断体不进缓存——max_size 截断的半截响应曾被永久复用
+        if use_cache and result["ok"] and not result.get("truncated") \
+                and self.cache_dir and method == "GET" and not body_bytes:
             _cf = self.cache_dir / self._cache_key(url, b"", method)
             try:
                 # 审查修复（P2）：缓存写入曾在 try 外——满盘时已成功的响应被
@@ -1713,6 +1733,20 @@ class RequestsClient:
             h["User-Agent"] = random.choice(UA_POOL)
         elif "User-Agent" not in h:
             h["User-Agent"] = DEFAULT_UA
+        # 审查十轮（M）：None 值 header 只有 curl 后端清洗——YAML 显式 null 的
+        # 配置错误曾在这里发请求时 TypeError 重试耗尽后被误诊"网络故障"
+        h = {k: v for k, v in h.items() if v is not None}
+        # 审查十轮（H1）：显式 Cookie 头曾整体压制 session.cookies（requests
+        # 行为：手动 Cookie 头覆盖 cookie jar）——实例 anti.cookies 与会话登录态
+        # 并存时静默丢登录态，且随后端切换翻转。与 HttpClient._headers 同款
+        # 按名合并（调用方显式优先，jar 补齐其余）
+        if h.get("Cookie") and len(self.session.cookies):
+            _jar = {c.name: (c.value or "") for c in self.session.cookies}
+            for pair in str(h["Cookie"]).split(";"):
+                if "=" in pair:
+                    _k, _v = pair.split("=", 1)
+                    _jar[_k.strip()] = _v.strip()
+            h["Cookie"] = "; ".join(f"{k}={v}" for k, v in _jar.items() if k)
 
         last_err = "requests 请求失败"
         last_status = 0
@@ -1934,7 +1968,18 @@ class CurlCffiClient:
             # 空字符串（None 会被忽略，http_proxy 环境变量仍劫持）
             kw["proxies"] = {"http": "", "https": ""}
         if self.cookies:
-            kw["cookies"] = self.cookies
+            kw["cookies"] = dict(self.cookies)
+        # 审查十轮（H1）：curl_cffi 的 cookies 参数曾反向压制显式 Cookie 头——
+        # 与 requests 后端同族（实例 cookies 与会话登录态并存时静默丢调用方头）。
+        # 与 HttpClient._headers 同款按名合并（调用方显式优先）
+        _ck = (h or {}).get("Cookie")
+        if _ck and kw.get("cookies"):
+            _jar = dict(kw["cookies"])
+            for pair in str(_ck).split(";"):
+                if "=" in pair:
+                    _k, _v = pair.split("=", 1)
+                    _jar[_k.strip()] = _v.strip()
+            kw["cookies"] = _jar
         # ── HTTP 缓存 + 条件重验证（对齐 HttpClient，审查对标 Scrapy HttpCache）──
         # CurlCffiClient 曾收下 use_cache 却无视——两个后端缓存行为不一致。
         # 审查六轮（M4）：params 曾不进缓存键——同 URL 不同参数共键错数据复用
@@ -2104,7 +2149,8 @@ class CurlCffiClient:
                                     self.cookies[_nm] = _vl
                     except Exception:
                         pass
-                    if use_cache and self.cache_dir and method == "GET":
+                    # 审查十轮（M）：截断体不进缓存（与 urllib 写点同口径）
+                    if use_cache and self.cache_dir and method == "GET" and not res_out.get("truncated"):
                         try:
                             # 审查七轮（M）：直写曾让并发读者拿到半截 JSON 缓存——
                             # 与 HttpClient._request_once 同款 tmp+replace 原子化
