@@ -26,13 +26,26 @@ LABELS = {"http": "HTTP 直抓", "curl_cffi": "TLS 指纹伪装",
 # 丢更新）——实测两线程各存一个域名后缓存只剩后写者，先写者的策略被静默丢弃。
 # 进程内用线程锁互斥整个读改写（跨进程并发仍需外层互斥，属既有前提）。
 _SAVE_LOCK = __import__("threading").Lock()
+# 审查八轮（H）：缓存写失败的一次性告警 flag（只读技能目录下每次都告警会刷屏）
+_SAVE_WARNED = False
 
 
 def _load_strategies() -> dict:
     if STRATEGY_FILE.exists():
         try:
             data = json.loads(STRATEGY_FILE.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
+            if isinstance(data, dict):
+                # 审查八轮（M）：域值非 dict（旧版格式/手编 "domain": "browser_headless"）
+                # 曾在 get_cached_strategy/save_strategy 的 .get/.setdefault 上
+                # AttributeError——载入期剔除（与 PoolState/QuotaLedger 的载入
+                # 校验同款式）
+                bad = [k for k, v in data.items() if not isinstance(v, dict)]
+                if bad:
+                    print(f"⚠️ 策略缓存条目非 dict，剔除: {bad[:3]}", file=sys.stderr)
+                    for k in bad:
+                        del data[k]
+                return data
+            print(f"⚠️ 策略缓存顶层非 dict（{type(data).__name__}），本轮视为空缓存", file=sys.stderr)
         except Exception as e:
             # OCR R131（M）：缓存损坏曾静默当空——每次都全链路重试且无任何线索
             print(f"⚠️ 策略缓存损坏（{type(e).__name__}），本轮视为空缓存", file=sys.stderr)
@@ -55,6 +68,24 @@ def _save_strategies(data: dict):
         except OSError:
             pass
         raise
+
+
+def _save_strategies_quiet(data: dict) -> bool:
+    """审查八轮（H）：只读技能目录（site-packages/非属主用户/chmod）下
+    mkdir/mkstemp 的 PermissionError 曾从 save_strategy 原样炸出——adaptive_fetch
+    成功拿到 html 后在 save_strategy(url, strategy) 上崩溃，成功结果整体丢失；
+    失败路径同理把"所有策略均失败"的正常返回替换成 traceback。缓存写失败只
+    降级为一次性告警，不影响主流程返回契约（永不抛）。"""
+    global _SAVE_WARNED
+    try:
+        _save_strategies(data)
+        return True
+    except Exception as e:
+        if not _SAVE_WARNED:
+            _SAVE_WARNED = True
+            print(f"⚠️ 策略缓存写入失败（{type(e).__name__}: {str(e)[:60]}），本次不落缓存: {STRATEGY_FILE}",
+                  file=sys.stderr)
+        return False
 
 
 def get_cached_strategy(url: str):
@@ -81,7 +112,7 @@ def save_strategy(url: str, strategy: str):
         data.setdefault(domain, {})["updated"] = time.strftime("%Y-%m-%d %H:%M")
         # OCR R131（M）：TOCTOU 修复——prev 和 data 曾是两次独立 _load_strategies()，
         # 并发 save 时后写覆盖先写。合并为一次读（prev 直接取自 data）
-        _save_strategies(data)
+        _save_strategies_quiet(data)
 
 
 def _detect_block(text: str, status: int) -> str:

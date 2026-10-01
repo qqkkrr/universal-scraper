@@ -102,7 +102,9 @@ let browser = null, ctx = null, page = null;
 
 async function getPage() {
   if (!page || page.isClosed()) {
-    page = ctx.pages()[0] || await ctx.newPage();
+    // 审查八轮（H）：曾回退 ctx.pages()[0]——CDP 模式下 page 被关后静默改绑
+    // 用户正在用的标签页继续操作。captcha_bridge 实证纪律：CDP 模式专用 newPage
+    page = await ctx.newPage();
   }
   return page;
 }
@@ -231,7 +233,10 @@ async function main() {
     try {
       browser = await chromium.connectOverCDP(cdp);
       ctx = browser.contexts()[0] || await browser.newContext();
-      page = ctx.pages()[0] || await ctx.newPage();
+      // 审查八轮（H）：曾绑定 ctx.pages()[0]——用户当前标签页被 goto/click/type
+      // 直接操作（登录态/表单现场被毁）。captcha_bridge 已实证该事故并改为专用
+      // newPage，本桥未同步该纪律。CDP 模式一律专用标签页
+      page = await ctx.newPage();
       out({ type: "ready", mode: "cdp", url: page.url() });
     } catch (e) {
       out({ type: "error", message: "CDP 连接失败: " + (e.message||e).slice(0,120) });

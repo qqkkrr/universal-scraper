@@ -28,7 +28,13 @@ function arg(name, dflt) {
 function argJson(name, dflt) {
   const v = arg(name, null);
   if (v === null || v === true) return dflt;
-  try { return JSON.parse(v); } catch (e) { return dflt; }
+  try { return JSON.parse(v); } catch (e) {
+    // 审查八轮（M）：JSON 非法曾静默回退默认值——--actions 写坏时脚本零动作
+    // 照常 exit 0（"成功"空跑）。配置错误必须大声退出
+    process.stdout.write(JSON.stringify({ type: "error",
+      message: `--${name} 不是合法 JSON: ${String((e && e.message) || e).slice(0, 120)}` }) + "\n");
+    process.exit(1);
+  }
 }
 
 const STEALTH_INIT = `(() => {

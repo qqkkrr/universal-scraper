@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -30,6 +31,18 @@ DEFAULT_FILE = os.environ.get(
     str(Path.home() / ".universal_scraper" / "action_budget.json")
 )
 _LOCK = threading.Lock()
+# 审查八轮（H）：传入 limit/window 与持久化不一致时告警——进程内去重防刷屏
+_WARNED_MISMATCH = set()
+
+
+def _pick(b: Dict[str, Any], key: str, fallback: Any, cast) -> Any:
+    """读持久化的 limit/window：显式 null（手编/外部工具写入，quota_ledger 对
+    action_budgets 维度豁免内层校验）曾直接穿透 int(None) 崩溃——get 的默认值
+    只对"键不存在"生效。注意不能用 `or`：limit=0（禁用该动作）是合法配置。"""
+    v = b.get(key)
+    if v is None:
+        return cast(fallback)
+    return cast(v)
 
 
 def _ledger(path: str | Path | None = None) -> QuotaLedger:
@@ -60,8 +73,8 @@ def state(name: str, limit: int, window: float, path: str | Path | None = None) 
         led = _ledger(_p)
         with _LOCK:
             b = _budgets(led).get(name) or {}
-            limit = int(b.get("limit", limit))
-            window = float(b.get("window", window))
+            limit = _pick(b, "limit", limit, int)
+            window = _pick(b, "window", window, float)
             now = time.time()
             events = _prune([float(t) for t in (b.get("events") or [])], window, now)
             used = len(events)
@@ -98,8 +111,20 @@ def acquire(name: str, limit: int = 5, window: float = 3600.0, cost: int = 1,
                                       "events": []}
             # OCR R131（H）：以持久化的 limit/window 为准（与 state 同口径）——
             # 曾按调用参数记账，查询与执行两套数字互相矛盾
-            limit = int(b.get("limit", limit))
-            window = float(b.get("window", window))
+            # 审查八轮（H）：不一致时出声告警——此前调低限额（安全方向，如封号
+            # 后想收紧）被静默忽略，操作者以为已生效。进程内去重防循环刷屏
+            _sl = b.get("limit")
+            _sw = b.get("window")
+            if _sl is not None and int(_sl) != int(limit) and name not in _WARNED_MISMATCH:
+                _WARNED_MISMATCH.add(name)
+                print(f"⚠️ 动作预算 [{name}] 限额以持久化为准: {int(_sl)}（本次传入 limit={limit} 被忽略；"
+                      f"如需调整请编辑/删除台账 {path}）", file=sys.stderr)
+            if _sw is not None and float(_sw) != float(window) and (name, "w") not in _WARNED_MISMATCH:
+                _WARNED_MISMATCH.add((name, "w"))
+                print(f"⚠️ 动作预算 [{name}] 窗口以持久化为准: {float(_sw)}s（本次传入 window={window} 被忽略）",
+                      file=sys.stderr)
+            limit = _pick(b, "limit", limit, int)
+            window = _pick(b, "window", window, float)
             now = time.time()
             events = _prune([float(t) for t in (b.get("events") or [])], float(window), now)
             used = len(events)
@@ -115,7 +140,10 @@ def acquire(name: str, limit: int = 5, window: float = 3600.0, cost: int = 1,
     reset_in = 0.0
     if not allowed:
         # 时钟回拨后 events[0] 未必最早出窗——同 state() 口径取 min(events)
-        reset_in = round(max(0.0, min(events) + float(window) - now), 1) if events else 0.0
+        # 审查八轮（M）：limit<=0（禁用动作）时 events 恒空，reset_in 曾为 0.0
+        # ——按 docstring sleep(reset_in) 的调用方立即重试 = 忙循环（每轮还走
+        # flock+落盘）。无事件可等时退而等一个完整 window 再试
+        reset_in = round(max(0.0, min(events) + float(window) - now), 1) if events else float(window)
     return {"name": name, "allowed": allowed, "used": used_after, "limit": int(limit),
             "remaining": max(0, int(limit) - used_after),
             "window_sec": float(window), "reset_in_sec": reset_in,

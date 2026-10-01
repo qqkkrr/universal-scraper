@@ -60,8 +60,14 @@ async function parseDetail(page) {
 // 详情页：导航后等首屏渲染（item.taobao.com 会 302 到 detail.tmall.com），
 // 最多重试 3 次解析（并行多标签时部分页面渲染慢）。
 async function fetchDetail(page, url) {
+  let navErr = null;
   await page.goto(url, { timeout: 45000, waitUntil: "domcontentloaded" }).catch(e => {
-    if (!/ERR_ABORTED|Timeout|net::/.test(String(e && e.message || e))) throw e;
+    // 审查八轮（M）：net:: DNS/连接类错误曾被一并吞掉 → parseDetail 全空仍计
+    // 成功（done++，整批断网时输出 ok=N/fail=0 的全空数据）。只容忍 ABORTED
+    // （页面 JS 中断导航但可能已渲染）与 Timeout（重试解析兜底）；其余记下，
+    // 若解析三轮全空则如实上抛走 item_fail
+    if (/ERR_ABORTED|Timeout/.test(String(e && e.message || e))) navErr = e;
+    else throw e;
   });
   await sleep(3000);
   let data = await parseDetail(page);
@@ -71,6 +77,7 @@ async function fetchDetail(page, url) {
     await sleep(w);
     data = await parseDetail(page);
   }
+  if (navErr && !data.title && !data.params && !data.price) throw navErr;
   return data;
 }
 
@@ -86,8 +93,9 @@ async function collectShopLinks(page, shop) {
   await sleep(1000);
   const bodyTxt = await page.evaluate(() => document.body ? document.body.innerText.slice(0, 120) : "");
   if (/拖动|滑块|验证/.test(bodyTxt)) {
-    out({ type: "login", message: "店铺页要求滑块验证——请在 Chrome 里完成滑块（或先登录淘宝）后告诉我，我会继续" });
-    process.exit(0);
+    // 审查八轮（M）：曾在此 process.exit(0)——跳过所有清理。改为返回标记，
+    // 由 main 统一关自建页 + disconnect 后退出（exit 不执行 finally）
+    return { links: [], bodyTxt, slider: true };
   }
   const collected = await page.evaluate(() => {
     const clean = (s) => (s || "").replace(/\s+/g, " ").trim();
@@ -133,13 +141,28 @@ async function main() {
   let links = linksArg.map(u => ({ url: u.startsWith("//") ? "https:" + u : u, title: "" }));
   if (linksArg.length === 0) {
     out({ type: "meta", stage: "open_shop", shop });
-    const page = ctx.pages()[0] || await ctx.newPage();
-    const { links: got, bodyTxt } = await collectShopLinks(page, shop);
+    // 审查八轮（H）：曾复用 ctx.pages()[0]——CDP 附着的是用户自己的 Chrome，
+    // 用户正在用的标签页被直接导航去店铺页（登录态/表单现场被毁）。
+    // captcha_bridge 实证纪律：CDP 模式必须专用 newPage
+    const page = await ctx.newPage();
+    let r;
+    try {
+      r = await collectShopLinks(page, shop);
+    } finally {
+      await page.close().catch(() => {});
+    }
+    const { links: got, bodyTxt } = r;
     out({ type: "meta", on_page: bodyTxt.slice(0, 60) });
+    if (r.slider) {
+      out({ type: "login", message: "店铺页要求滑块验证——请在 Chrome 里完成滑块（或先登录淘宝）后告诉我，我会继续" });
+      await browser.disconnect().catch(() => {});
+      process.exit(0);
+    }
     if (got.length) links = got;
     out({ type: "meta", items_found: links.length });
     if (!links.length) {
       out({ type: "error", message: "未拿到商品链接（新版天猫店铺商品卡片无常规链接；请改用 Python 引擎 --mode shop 走移动端接口，或用 --links 提供商品链接）。页面：" + bodyTxt.slice(0,80) });
+      await browser.disconnect().catch(() => {});
       process.exit(0);
     }
   } else {
@@ -177,8 +200,10 @@ async function main() {
 
   await Promise.all(Array.from({ length: workers }, () => worker()));
   out({ type: "done", ok: done, fail });
-  // 审查修复（CRITICAL）：connectOverCDP 连的是用户自己的 Chrome——close() 会
-  // 终结用户整个浏览器会话（所有窗口全关）。disconnect() 只断开自动化连接
+  // 审查修复（CRITICAL）：connectOverCDP 连的是用户自己的 Chrome——disconnect()
+  // 只断开自动化连接。澄清（审查八轮，playwright/patchright 1.63 源码核实）：
+  // CDP 附着下 close() 现版本也只断连不杀浏览器（历史版本行为不同），但
+  // disconnect 语义明确且不依赖版本行为，保留
   await browser.disconnect().catch(()=>{});
   process.exit(0);
 }

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List
@@ -83,9 +84,16 @@ class CaptchaSession:
         # 心跳 15s 未刷新 = 桥已死（独立定时器 2s 周期；容忍 GC/负载抖动）
         return time.time() * 1000 - ts < 15_000
 
-    def stop(self) -> None:
-        """触摸 stop 文件（桥 0.4s 轮询内优雅退出：关专用 tab、删墓碑文件），
-        并清掉全部交接文件——is_running 立即转 False。
+    def stop(self, timeout: float = 95.0) -> Dict[str, Any]:
+        """触摸 stop 文件并等待桥优雅退出（关专用 tab、删墓碑文件），随后清掉
+        全部交接文件。返回 {"stopped": True, "confirmed": bool}。
+
+        审查八轮（M）：曾触摸 stop 后立即删 status.json——桥在长 op（goto 最长
+        90s）中还没走到循环顶部的 stop 检查，status.json 已没了 → is_running()
+        转 False → cli --start 的"已有桥在运行"守卫失效，spawn 第二个桥：
+        两个 node + 两个 tab 抢同一 workdir 的 cmd.json/last_result.json。
+        修法：有界等待桥自删 stop（其优雅退出的标志）；正常确认后才清交接
+        文件；超时只告警并**保留 status.json**（is_running 的判断依据，防双开）。
 
         收官十轮（审查，实测复现）：曾在本方法里挂一个"2 秒后删除 stop"的线程——
         只要有 op 在飞（goto 最长 90s），桥要等 op 结束才在循环顶部检查 stop，
@@ -97,11 +105,24 @@ class CaptchaSession:
             (self.dir / "stop").touch()
         except Exception:
             pass
-        for f in ("cmd.json", "last_result.json", "boot.json", "status.json"):
-            try:
-                (self.dir / f).unlink(missing_ok=True)
-            except Exception:
-                pass
+        confirmed = False
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if not (self.dir / "stop").exists():
+                confirmed = True
+                break
+            time.sleep(0.4)
+        if confirmed:
+            for f in ("cmd.json", "last_result.json", "boot.json", "status.json"):
+                try:
+                    (self.dir / f).unlink(missing_ok=True)
+                except Exception:
+                    pass
+        else:
+            print(f"⚠️ 验证码桥 {timeout:.0f}s 内未确认退出（可能有长操作在飞）；"
+                  f"交接文件已保留，稍后用 `captcha --status` 确认后再 start（防双开桥）",
+                  file=sys.stderr)
+        return {"stopped": True, "confirmed": confirmed}
 
     # ---- 文件协议 ----
     def send(self, op: str, timeout: float = 60.0, **kw) -> Dict[str, Any]:
@@ -146,7 +167,10 @@ class CaptchaSession:
 
     # ---- 便捷封装 ----
     def goto(self, url: str, wait_ms: int = 0) -> Dict[str, Any]:
-        return self.send("goto", url=url, waitMs=wait_ms)
+        # 审查八轮（M）：曾用 send 默认 60s——桥侧 goto 硬编码 90s 上限，慢页
+        # 在客户端先超时抛 RuntimeError（cli 的 goto 调用在 solve 循环 try 之外
+        # → 裸栈崩溃），而桥 90s 内本会完成。客户端窗口必须大于桥上限
+        return self.send("goto", timeout=100.0, url=url, waitMs=wait_ms)
 
     def html(self) -> str:
         return str(self.send("html").get("html") or "")

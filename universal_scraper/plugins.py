@@ -60,7 +60,10 @@ def _load_plugins(extra_dir: Optional[Path] = None) -> List[Dict[str, Callable]]
                 try:
                     # OCR R131（M）：spec 名只含 stem——两目录同名插件曾在 sys.modules
                     # 互覆（后载的顶掉先载的）。目录名拼进模块名保证唯一
-                    _dtag = re.sub(r"\W", "_", d.name)
+                    # 审查八轮（L）：目录 tag 曾只拼 basename——技能自带 ROOT/plugins
+                    # 与用户 extra_dir 同名（…/plugins）时两目录同名文件仍互覆。
+                    # 全路径进 tag
+                    _dtag = re.sub(r"\W", "_", str(d))
                     spec = importlib.util.spec_from_file_location(f"plugin_{_dtag}_{fp.stem}", fp)
                     mod = importlib.util.module_from_spec(spec)
                     sys.modules[spec.name] = mod

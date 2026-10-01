@@ -14,17 +14,28 @@ def classify_failure(error_text: str = "", messages: Optional[list] = None,
                      url: str = "") -> str:
     """把失败信息归类。返回 failure_type。"""
     # OCR R131（H）：messages 含非 str 元素时 join 抛 TypeError
-    txt = (error_text or "") + " " + " ".join(str(m) for m in (messages or []))[:2000] + " " + (url or "")
+    # 审查八轮（M）：状态码判定曾一把抓（错误文本+URL 同串）——"解析到 403 条
+    # 记录"（数据量数字）与 "?page=429"（页码参数）都撞状态码。拆 base（错误
+    # 文本+messages，承担状态码判定）与 url（仅路径/连接特征）；且状态码排除
+    # "数字+量词"形态（403 条 / 第 429 页）
+    _base = (error_text or "") + " " + " ".join(str(m) for m in (messages or []))[:2000]
+    txt = _base + " " + (url or "")
     t = txt.lower()
+
+    # 状态码判定统一口径：数字边界 + 量词排除 + 只搜 base（URL 里的数字是
+    # 页码/ID 语境，不参与状态码判定）
+    _q = r"(?!\s*(?:条|页|个|行|篇|家|次|名|人|万))"
+    _sc = r"(?<!\d)(?:403|412|429)(?!\d)" + _q
+    _sc404 = r"(?<!\d)404(?!\d)" + _q
 
     # 0) 返回的是整页 HTML（异常页/错误页）：先看是否被 WAF/阻断
     if re.search(r"<!doctype|<html", t):
-        if re.search(r"403|forbidden|被阻断|请求被|拦截|waf|_fec_sbu|fec_wrapper|#encoded#", t):
+        if re.search(_sc + r"|forbidden|被阻断|请求被|拦截|waf|_fec_sbu|fec_wrapper|#encoded#", t):
             return "ip_blocked"
-        if re.search(r"404|not found|找不到|无法访问|不存在", t):
+        if re.search(_sc404 + r"|not found|找不到|无法访问|不存在", t):
             return "entry_invalid"
     # 1) 入口/连接失效（404、连接拒绝、域名、入口）
-    if re.search(r"404|not found|找不到|无法连接|connection refused|connectionerror|"
+    if re.search(_sc404 + r"|not found|找不到|无法连接|connection refused|connectionerror|"
                  r"err_connection|无法访问|入口|dns\s*解析失败|域名解析失败|getaddrinfo", txt, re.I):
         # 404 也可能是页面本身不存在；若同时提到登录/验证码则优先登录
         if not re.search(r"登录|验证码|滑块|登录墙", txt, re.I):
@@ -32,11 +43,13 @@ def classify_failure(error_text: str = "", messages: Optional[list] = None,
     # 1b) 收官十二轮（审查）：`解析失败`类文本归选择器失败（check 5 的信号曾被
     # 上面的 `解析.*失败` 抢走——DNS 语义已收窄，这里把裸"解析失败"也接住）
     if re.search(r"解析失败|解析到\s*0|解析 0", txt, re.I) and \
-            not re.search(r"登录|验证码|滑块|403|412|429|waf", txt, re.I):
+            not (re.search(r"登录|验证码|滑块|waf", txt, re.I) or re.search(_sc, _base, re.I)):
         return "selector_failed"
     # 2) IP 风控 / WAF（403/412/429、请求被阻断、阿里云）
-    if re.search(r"403|412|429|请求被阻断|被阻断|forbidden|waf|antibot|安全防护|"
-                 r"访问过于频繁|被拦截|请求被拒绝", txt, re.I):
+    # 状态码只认 base；forbidden/waf 等词性证据 URL 里出现也算（/forbidden 路径）
+    if re.search(_sc, _base, re.I) or \
+            re.search(r"请求被阻断|被阻断|forbidden|waf|antibot|安全防护|"
+                      r"访问过于频繁|被拦截|请求被拒绝", txt, re.I):
         if re.search(r"登录|验证码|滑块", txt, re.I):
             return "captcha_or_login"
         return "ip_blocked"

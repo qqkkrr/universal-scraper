@@ -16,46 +16,64 @@ import json
 from typing import Any, Optional
 
 
+def _find_marker_outside_str(blob: str, marker: str, start: int) -> int:
+    """在双引号字符串区段之外查找 marker；返回位置或 -1。
+    审查八轮（C1）：blob.find 曾不感知字符串——字符串值内含 "new Set(items)"
+    字样（教程/文档类站点正文）会被整体剥成 "items"（静默数据污染，与
+    _repair_js_literals 六轮 M1 同型）。"""
+    n = len(blob)
+    i = start
+    while i < n:
+        ch = blob[i]
+        if ch == '"':
+            j = i + 1
+            while j < n:
+                if blob[j] == "\\":
+                    j += 2
+                    continue
+                if blob[j] == '"':
+                    break
+                j += 1
+            i = min(j + 1, n)
+            continue
+        if blob.startswith(marker, i):
+            return i
+        i += 1
+    return -1
+
+
 def _replace_ctor(blob: str, name: str) -> str:
     """把 new Set(X)/new Map(X) 替换为 X（X 为字面量），供 json.loads 使用。
     审查六轮（M2a）：嵌套同类 ctor（new Set(new Set(x))）一轮剥不完——
     整串反复剥直到无 marker（每轮剥最外层，层数=N 轮）。"""
     marker = "new " + name + "("
-    while marker in blob:
-        out = []
-        p = 0
-        while True:
-            k = blob.find(marker, p)
-            if k < 0:
-                out.append(blob[p:])
-                break
-            out.append(blob[p:k])
-            # 配平 marker 后的括号（字符串感知）
-            depth = 1
-            q = k + len(marker)
-            in_str = False
-            esc = False
-            while q < len(blob) and depth > 0:
-                ch = blob[q]
-                if in_str:
-                    if esc:
-                        esc = False
-                    elif ch == "\\":
-                        esc = True
-                    elif ch == '"':
-                        in_str = False
+    while True:
+        k = _find_marker_outside_str(blob, marker, 0)
+        if k < 0:
+            return blob
+        # 配平 marker 后的括号（字符串感知）
+        depth = 1
+        q = k + len(marker)
+        in_str = False
+        esc = False
+        while q < len(blob) and depth > 0:
+            ch = blob[q]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
                 elif ch == '"':
-                    in_str = True
-                elif ch in "([{":
-                    depth += 1
-                elif ch in ")]}":
-                    depth -= 1
-                q += 1
-            inner = blob[k + len(marker): q - 1]
-            out.append(inner)
-            p = q
-        blob = "".join(out)
-    return blob
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            q += 1
+        inner = blob[k + len(marker): q - 1]
+        blob = blob[:k] + inner + blob[q:]
 
 
 def _repair_js_literals(blob: str) -> str:

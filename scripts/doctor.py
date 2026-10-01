@@ -35,7 +35,10 @@ def check_cdp() -> list:
     """9222 调试 Chrome 活性：已开着就提示复用（跨任务共享登录态），没开不算失败。"""
     import urllib.request
     try:
-        with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2) as r:
+        # 审查八轮（L）：urlopen 曾走环境代理（http_proxy 开着时 9222 探测被发往
+        # 代理）——与本文件自己警告的"代理劫持"场景自相矛盾。环回显式直连
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open("http://127.0.0.1:9222/json/version", timeout=2) as r:
             if r.status == 200:
                 return [{"item": "调试 Chrome (9222)", "ok": True, "hint": "运行中——配置 cdp 可直接复用"}]
     except Exception:
@@ -104,27 +107,37 @@ def main() -> int:
         ("技能完整性", check_bridges() + check_cli() + check_cdp()),
         ("网络链路（战训新增）", check_netlink()),
     ]
-    total = ok_n = 0
+    total = ok_n = soft_n = 0
     print("🩺 万能爬虫技能 · 环境体检")
     for title, checks in groups:
         print(f"\n【{title}】")
         for c in checks:
             total += 1
-            ok_n += 1 if c["ok"] else 0
-            mark = "✅" if c["ok"] else "❌"
-            print(f"  {mark} {c['item']}" + (f"  → {c['hint']}" if c["hint"] else ""))
+            if c["ok"]:
+                ok_n += 1
+                print(f"  ✅ {c['item']}" + (f"  → {c['hint']}" if c["hint"] else ""))
+            elif c.get("optional"):
+                # 审查八轮（H）：可选依赖（缺省自动降级）曾与硬依赖共用 ❌ 和
+                # 退出码——全新机器 setup.sh 刚装完必选包，doctor 却因缺可选
+                # 包 exit 1，set -e 的 setup.sh 把成功安装判为失败（cli doctor
+                # 第八轮已修此口径，本脚本漏同步）
+                soft_n += 1
+                print(f"  ⚠️ {c['item']}（可选，缺省时自动降级）" + (f"  → {c['hint']}" if c["hint"] else ""))
+            else:
+                print(f"  ❌ {c['item']}" + (f"  → {c['hint']}" if c["hint"] else ""))
     print()
     if ok_n == total:
         print("🎉 全部就绪，可以直接开始采集任务。")
         return 0
-    print(f"🔧 {total - ok_n} 项待修复。优先跑: bash \""
+    _soft = f"（另有 {soft_n} 项可选依赖未装，不影响核心功能）" if soft_n else ""
+    print(f"🔧 {total - ok_n - soft_n} 项待修复{_soft}。优先跑: bash \""
           f"{SKILL_DIR}/scripts/setup.sh\"；剩余按上面 → 提示逐条处理。")
     # 浏览器引擎缺失不阻塞 HTTP 直抓，返回 0 让向导自行判断
     # 审查修复（H）：固定容差 ±2 曾掩盖任意两项失败（含 python 依赖/技能完整性）。
     # 收紧：仅"Node 与浏览器引擎"组允许有失败（HTTP 直抓不受影响），其余组
-    # 任一失败都如实返回 1
+    # 任一失败都如实返回 1；optional 失败不计入退出码
     for title, checks in groups:
-        if title != "Node 与浏览器引擎" and any(not c["ok"] for c in checks):
+        if title != "Node 与浏览器引擎" and any(not c["ok"] and not c.get("optional") for c in checks):
             return 1
     return 0
 
