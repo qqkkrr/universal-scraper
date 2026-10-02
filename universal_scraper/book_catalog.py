@@ -79,7 +79,20 @@ def isbn_checksum_ok(value: Any) -> bool:
 
 
 def _text(el: Any) -> str:
-    return clean_text(el.text_content()) if el is not None else ""
+    if el is None:
+        return ""
+    # 审查十三轮（M）：text_content() 曾把内联 <script>/<style> 源码混进字段值
+    # （douban_intro 实测混入 "var junk=1;"，与 selectors.py 的剔除口径对齐——
+    # R10 实证 #main 曾有 795/1012 字符是 JS）。剥后代 script/style + 自身即
+    # script/style 时返回空（drop_tree 会改文档树——提取场景一次性消费，无害）
+    try:
+        if str(getattr(el, "tag", "")) in ("script", "style"):
+            return ""
+        for _bad in el.cssselect("script, style"):
+            _bad.drop_tree()
+    except Exception:
+        pass
+    return clean_text(el.text_content())
 
 
 def _find_info(doc: Any, label: str) -> str:
@@ -105,12 +118,25 @@ def _find_info(doc: Any, label: str) -> str:
                 node = node.getnext()
             return clean_text(" ".join(parts))
     # 收官十二轮（审查 M）：第三分支曾在 clean_text（已折叠换行）上用 [^\n]+
-    # 取值——永远吃到段尾，出版年/页数/定价/装帧互相污染。改为在原始文本上
-    # 逐物理行匹配（#info 无 span.pl 的页面变体是本分支唯一场景）
+    # 取值——永远吃到段尾，出版年/页数/定价/装帧互相污染。改为逐物理行匹配
+    # （#info 无 span.pl 的页面变体是本分支唯一场景）
+    # 审查十三轮（M）：re.search 曾无锚定——"副标题: 作者: 一个写作者的自述"
+    # 行里 label="作者" 从中段命中，顶替真正的"作者: 余华"行。label 必须
+    # 锚定行首（re.match）。注意 text_content() 不产换行（<br> 是空文本）——
+    # 整段连成一行时行首锚定会全部落空，先从序列化 XML 把 <br> 还原成物理行
     _info_el = doc.cssselect("#info")
-    _info_raw = _info_el[0].text_content() if _info_el else ""
+    if not _info_el:
+        return ""
+    _info_raw = ""
+    try:
+        from lxml import html as _lhtml
+        _raw_xml = _lhtml.tostring(_info_el[0], encoding="unicode")
+        _raw_xml = re.sub(r"(?i)<br\s*/?>", "\n", _raw_xml)
+        _info_raw = re.sub(r"<[^>]+>", "", _raw_xml)
+    except Exception:
+        _info_raw = _info_el[0].text_content() if _info_el else ""
     for _line in _info_raw.splitlines():
-        m = re.search(re.escape(label) + r"\s*[:：]\s*(.+)", _line)
+        m = re.match(r"\s*" + re.escape(label) + r"\s*[:：]\s*(.+)", _line)
         if m:
             return clean_text(m.group(1))
     return ""

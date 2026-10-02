@@ -10,8 +10,8 @@ description: >
   【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
   获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
 metadata:
-  version: "1.20.0"
-  source_project: "universal-scraper (14 轮审计, 229 测试)"
+  version: "1.21.0"
+  source_project: "universal-scraper (15 轮审计, 237 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能

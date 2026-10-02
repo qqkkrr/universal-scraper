@@ -562,7 +562,12 @@ class HttpFetcher(BaseFetcher):
             row = {}
             for name, fspec in fields.items():
                 if isinstance(fspec, str):
-                    row[name] = el_html  # 简单模式：整行文本
+                    # 审查十三轮（H1）：字符串简写曾取"整行 HTML"——与 browser
+                    # 引擎（同简写=CSS 选择器取文本）语义分叉，同一配置两后端
+                    # 产出不同数据（"报成功但数据错"）。统一为 CSS 选择器取文本
+                    # （spec-schema.md 已补文档）
+                    from .selectors import css_text as _ct
+                    row[name] = _ct(el_html, fspec, 0)
                     continue
                 if isinstance(fspec.get("subs"), dict):
                     # 结构化子字段（闲鱼战例）：价格 span 与"X人想要"无缝拼接不可逆——

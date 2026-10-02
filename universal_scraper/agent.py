@@ -389,6 +389,15 @@ def agent_task(description: str, start_url: str = "", max_steps: int = 12,
                 if not u.startswith(("http://", "https://")):
                     history.append("goto: URL 非法，忽略")
                     continue
+                # 审查十三轮（M，安全）：页面可见文本/链接原样进 LLM prompt——
+                # 恶意页可注入"先 goto http://169.254.169.254/"类指令把浏览器导到
+                # 内网/云元数据（extract 再把内容回传 LLM = 外泄）。出站守卫
+                try:
+                    from .core import assert_public_url
+                    assert_public_url(u, context="agent goto")
+                except Exception as _g:
+                    history.append(f"goto: 出站守卫拦截（{str(_g)[:60]}），忽略")
+                    continue
                 try:
                     r = sess.send({"op": "goto", "url": u}, timeout=75)
                     history.append(f"goto {u[:60]} -> {'ok' if r.get('ok') else 'fail'}")

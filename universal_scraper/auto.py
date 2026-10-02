@@ -266,6 +266,27 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     cfg.setdefault("output", {"dir": "outputs", "base_name": cfg["name"]})
     cfg.setdefault("anti_bot", {"min_interval": 0.5, "max_retries": 2})
     cfg.setdefault("pipelines", [])
+    # 审查十三轮（H5d）：LLM 产出的畸形容器曾裸 .get AttributeError——R21/R131
+    # 的容器守卫在 validate_task 内、对 auto 首轮生成不可达（本函数先崩）。
+    # 类型错容器重置为与上方 setdefault 同款的缺省（source:"browser" 字符串/
+    # rules 为 str/parsers 值为 str/fields 为 list 等实测形态）
+    for _k, _dflt in (("source", {"type": "http"}), ("storage", {"type": "jsonl"}),
+                      ("output", {"dir": "outputs", "base_name": cfg["name"]}),
+                      ("anti_bot", {"min_interval": 0.5, "max_retries": 2}),
+                      ("queue", {"max_depth": 3, "max_requests": 100, "max_concurrency": 2}),
+                      ("detail", {})):
+        if not isinstance(cfg.get(_k), dict):
+            cfg[_k] = dict(_dflt)
+            if log:
+                log(f"⚠️ AI 输出的 {_k} 不是对象，已重置为缺省")
+    if not isinstance(cfg.get("rules"), list):
+        cfg["rules"] = []
+    if not isinstance(cfg.get("parsers"), dict):
+        cfg["parsers"] = {}
+    if not isinstance(cfg.get("pipelines"), list):
+        cfg["pipelines"] = []
+    if not isinstance(cfg.get("start_urls"), list):
+        cfg["start_urls"] = []
     if not cfg.get("rules"):
         cfg["rules"] = [{"match": "contains", "pattern": "/", "parser": "default"}]
     # 浏览器任务默认滚动（懒加载站不滚动=0条）：未显式配置时给 4 次
@@ -373,6 +394,13 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
                     _a[_sk] = re.sub(r':contains\(\s*["\']([^"\']+)["\']\s*\)', r':has-text("\1")', _sv)
             if _t not in _valid_actions:
                 continue
+            # 审查十三轮（H5b）：AI 写的动作常带引擎不认的键（to/delay/timeout_sec），
+            # ACTION_KEY_SPEC 的严格校验曾 ConfigError 卡死整单——按 spec 清洗
+            from .config import ACTION_KEY_SPEC as _AKS
+            _allowed_keys = _AKS.get(_t)
+            if _allowed_keys is not None:
+                _a = {k: v for k, v in _a.items()
+                      if k == "type" or k in _allowed_keys}
             if _t in ("wait", "wait_time") and not _a.get("ms") and not _a.get("milliseconds"):
                 _a["ms"] = 1000
             if _t == "click" and not _a.get("selector") and not _a.get("xpath"):
@@ -396,6 +424,17 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     if _det0.get("filters"):
         _det0["filters"] = [pl for pl in _det0["filters"]
                             if isinstance(pl, dict) and pl.get("type") in _PIPE_OK]
+        # 审查十三轮（H5c）：detail 校验比顶层 pipelines 严——filter 缺 field
+        # （或 contains 缺 value）会在 validate_task 上 ConfigError 卡死整单。
+        # 补不上的一律丢弃（宁少一步过滤，不要整单崩溃）
+        _ok_filters = []
+        for _pl in _det0["filters"]:
+            if not str(_pl.get("field") or ""):
+                continue
+            if str(_pl.get("op") or "") == "contains" and not str(_pl.get("value") or ""):
+                continue
+            _ok_filters.append(_pl)
+        _det0["filters"] = _ok_filters
 
     # detail.url_transform.prefix 规范化：纯域名前缀自动补结尾 /（否则相对链接
     # 会被拼成 https://hostforum-xxx.html 坏地址）
@@ -412,8 +451,9 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
     # 不存在的字段过滤会把整单滤成 0 条——直接丢弃这类过滤（ts 是 detail 合并后的日期字段，保留）
     _known = set()
     for _p in (cfg.get("parsers") or {}).values():
-        if isinstance(_p, dict):
-            _known.update((_p.get("fields") or {}).keys())
+        if isinstance(_p, dict) and isinstance(_p.get("fields"), dict):
+            # 审查十三轮（H5d）：fields 为 list 时 .keys() 曾 AttributeError
+            _known.update(_p["fields"].keys())
     _det = cfg.get("detail") or {}
     for _ex in (_det.get("extract") or []):
         if isinstance(_ex, dict) and _ex.get("name"):
@@ -2522,15 +2562,25 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
                 log("🧠 常规解析未命中，先对真实页面做 LLM 直接抽取（成功即收，不空转重跑）...")
                 fb = _llm_extract_from_evidence(description, cfg, task_dir, log, ev=_ev)
                 if fb.get("items"):
-                    sample = fb["items"][:5]
-                    files = fb["files"]
-                    last_result = dict(last_result or {})
-                    last_result["total"] = fb["total"]
-                    last_result["llm_extract"] = True
-                    _final_intent_bad = ""   # R31b：抽取出有效内容视为通过质量门
-                    _final_miss = ""
-                    log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
-                    break
+                    # 审查十三轮（H6）：曾无条件清质量门标志——LLM 从页面只能抽出
+                    # 部分字段（列表页缺发布日期等）时被包装成"✅ 成功 N 条"假成功。
+                    # 清空前与引擎轮次同款复核（关键字段 + 意图）
+                    _fb_miss = _missing_key_field(description, fb["items"][:5])
+                    _fb_bad = _intent_check(description, fb["items"][:5], log) \
+                        if not _fb_miss else ""
+                    if _fb_miss or _fb_bad:
+                        log(f"⚠️ LLM 直接抽取的结果缺关键字段【{_fb_miss}】"
+                            f"{'/意图不符（' + _fb_bad + '）' if _fb_bad else ''}——不采纳，继续自修复")
+                    else:
+                        sample = fb["items"][:5]
+                        files = fb["files"]
+                        last_result = dict(last_result or {})
+                        last_result["total"] = fb["total"]
+                        last_result["llm_extract"] = True
+                        _final_intent_bad = ""   # R31b：通过复核才清质量门标志
+                        _final_miss = ""
+                        log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
+                        break
 
         if round_i < rounds:
             # 🩺 首轮失败先换候选入口（不急着让 LLM 改选择器——入口错改选择器无用）
@@ -2940,15 +2990,23 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
                 log("🧠 常规解析未命中，先对真实页面做 LLM 直接抽取（成功即收，不空转重跑）...")
                 fb = _llm_extract_from_evidence(description or "", config, td, log, ev=_ev)
                 if fb.get("items"):
-                    sample = fb["items"][:5]
-                    files = fb["files"]
-                    last_result = dict(last_result or {})
-                    last_result["total"] = fb["total"]
-                    last_result["llm_extract"] = True
-                    _final_intent_bad = ""   # R31b：抽取出有效内容视为通过质量门
-                    _final_miss = ""
-                    log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
-                    break
+                    # 审查十三轮（H6 同款）：清质量门标志前先复核（关键字段 + 意图）
+                    _fb_miss = _missing_key_field(description or "", fb["items"][:5])
+                    _fb_bad = _intent_check(description or "", fb["items"][:5], log) \
+                        if not _fb_miss else ""
+                    if _fb_miss or _fb_bad:
+                        log(f"⚠️ LLM 直接抽取的结果缺关键字段【{_fb_miss}】"
+                            f"{'/意图不符（' + _fb_bad + '）' if _fb_bad else ''}——不采纳，继续自修复")
+                    else:
+                        sample = fb["items"][:5]
+                        files = fb["files"]
+                        last_result = dict(last_result or {})
+                        last_result["total"] = fb["total"]
+                        last_result["llm_extract"] = True
+                        _final_intent_bad = ""   # R31b：通过复核才清质量门标志
+                        _final_miss = ""
+                        log(f"✅ 第 {round_i} 轮 LLM 直接抽取成功：{fb['total']} 条")
+                        break
 
         if round_i < rounds:
             # 🩺 首轮失败先换候选入口（不急着让 LLM 改选择器——入口错改选择器无用）
