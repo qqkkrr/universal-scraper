@@ -442,6 +442,11 @@ def handle_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     method = msg.get("method")
     params = msg.get("params") or {}
     mid = msg.get("id")
+    # 审查十三轮（L）：JSON-RPC 通知（无 id）不得回包——此前 notifications/
+    # initialized 之外的 notification（如 notifications/cancelled）曾收到
+    # {"id": null, ...} 的错误回包，违反协议"不得回复 notification"
+    if mid is None:
+        return None
 
     if method == "initialize":
         return _result(mid, {
@@ -485,8 +490,6 @@ def handle_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return _result(mid, {"resourceTemplates": []})
     if method == "prompts/list":
         return _result(mid, {"prompts": []})
-    if mid is None:
-        return None
     return _error(mid, -32601, f"未知方法: {method}")
 
 

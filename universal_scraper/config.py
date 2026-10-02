@@ -27,7 +27,9 @@ ALL_ACTION_TYPES = {"click", "type", "write", "fill", "type_real", "fill_real",
 # R1 复查修复：wait_ms/timeout_ms 是 spec-schema 文档与 browser_generic 桥实际
 # 支持的键——曾漏收，照文档抄的配置被 validate 拒绝。
 ACTION_KEY_SPEC = {
-    "click":             {"selector", "index", "timeout", "timeout_ms", "ms", "wait_ms", "optional"},
+    # 审查十三轮（H5）：click 补 xpath——桥支持 xpath 定位，auto 兼容链也专门
+    # 保留它（370-379），校验却报"需要 selector"并删未知键，两头互相矛盾
+    "click":             {"selector", "xpath", "index", "timeout", "timeout_ms", "ms", "wait_ms", "optional"},
     "type":              {"selector", "text", "value", "index", "timeout", "timeout_ms", "wait_ms", "optional"},
     "write":             {"selector", "text", "value", "index", "timeout", "timeout_ms", "wait_ms", "optional"},
     "fill":              {"selector", "text", "value", "index", "timeout", "timeout_ms", "wait_ms", "optional"},
@@ -357,7 +359,11 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
         if a["type"] not in V3_ACTION_TYPES:
             raise ConfigError(f"source.actions[{i}].type", f"未知动作类型 '{a['type']}'",
                               f"可选: {', '.join(sorted(V3_ACTION_TYPES))}")
-        if a["type"] in ("click", "type", "write", "fill", "wait_for_selector", "waitfor", "select") and not a.get("selector"):
+        # 审查十三轮（H5）：click 支持 xpath 定位（桥同款消费）——只认 selector
+        # 曾让 auto 兼容链保留的 xpath 动作在这里被 ConfigError 卡死整单
+        if a["type"] == "click" and not (a.get("selector") or a.get("xpath")):
+            raise ConfigError(f"source.actions[{i}]", "动作 click 需要 selector 或 xpath")
+        if a["type"] in ("type", "write", "fill", "wait_for_selector", "waitfor", "select") and not a.get("selector"):
             raise ConfigError(f"source.actions[{i}]", f"动作 {a['type']} 需要 selector")
         # epub 战训（2026-09）：键名校验——错误键曾静默忽略（fill 只写 value 时
         # 桥按空串填入，失败沉在日志里无汇总提示）。跑之前就拦住。

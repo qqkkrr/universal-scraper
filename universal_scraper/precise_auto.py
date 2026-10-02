@@ -201,7 +201,11 @@ def _run_engine_probe(task_dir: Path, limit: int, log: Optional[Callable[[str], 
     out_name = (res or {}).get("name") or task_dir.name
     total = int((res or {}).get("total") or 0)
     rows = []
-    fp = ROOT / "outputs" / f"{out_name}.json"
+    # 审查十三轮（M）：engine_v3 按 **CWD 相对** 写 outputs（_finalize 的
+    # out_dir 语义），此处曾按 ROOT 解析——CLI 以任意 cwd 运行时读错位置
+    # （本轮成功被判"导出文件缺失"；或 ROOT/outputs 下同名旧导出被当本轮成功）。
+    # 与 sites.register_config_precise._run 的 Path("outputs") 口径对齐
+    fp = Path("outputs") / f"{out_name}.json"
     # 审查八轮（HIGH）：此前完全忽略 res["total"]，只看导出文件是否存在——
     # engine_v3._finalize 仅在 `if rows:` 时导出，0 条运行既不写也不删旧文件，
     # 而输出名按 host 复用（tasks/auto_precise_<host>）→ 站点改版后 0 条试跑

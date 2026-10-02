@@ -423,6 +423,16 @@ def _regex_sub_conflicts(sub, ic: bool) -> bool:
                     out.append((op, av))
             return out
 
+        # 审查十三轮：BRANCH 臂展开——任一臂自身是变长重复则整组含变长元素
+        # （(?:a{1,3}|b{1,3}) 的组体原被算作"1 个非空元素 o=BRANCH"直接放行，
+        # 而 (?:a{1,3}|b{1,3})+$ 实测 n=60 冻结）。定长臂（ab|cd）不受影响
+        def _has_variable_arm(seq) -> bool:
+            for op, av in seq:
+                if str(op) == "BRANCH":
+                    if any(_single_variable_repeat(b) for b in av[1]):
+                        return True
+            return False
+
         consuming = _nonnull(ops)
         if not consuming:
             return False            # 全体可空 → R2 已判
@@ -435,6 +445,8 @@ def _regex_sub_conflicts(sub, ic: bool) -> bool:
             return hi > lo
         if o == "SUBPATTERN":
             return _single_variable_repeat(av[-1])
+        if _has_variable_arm(ops):
+            return True             # 审查十三轮：BRANCH 臂含变长重复
         return False
 
     def _walk(ops, in_unb: bool) -> bool:
@@ -456,6 +468,15 @@ def _regex_sub_conflicts(sub, ic: bool) -> bool:
                         return True           # F2：(a?\\w)+ 可空元素邻接相交
                     if _single_variable_repeat(inner):
                         return True           # R4：(a{1,3})+ 有界变长重复套无界重复
+                elif hi >= 2:
+                    # R5/R6（审查十三轮）：**有界**外层（次数≥2）包变长/可空内层
+                    # 与无界同族——(\w+){5}$、(?:[\w.]+){3,8}$、(?:a{1,3}|b{1,3})+$、
+                    # (a?){25}a{25}$、(?:[a-z]+){20}$ 全部实测冻结进程，此前因外层
+                    # 非无界被整体跳过（注意 (\w+){5} 的外层 lo==hi=5，不能只查
+                    # hi>lo）。定长内层（(\w{2}){5}/(a{3}){5}）与首集唯一多元素体
+                    # 不受影响
+                    if _single_variable_repeat(inner) or _nullable(inner):
+                        return True
                 if _walk(inner, in_unb or unb):
                     return True
             elif o == "SUBPATTERN":

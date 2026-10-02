@@ -193,6 +193,10 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 或 embedded_json 的记录键；`from` 支持 jpath 点路径/下标/通配/按名过滤。
 **未声明时运行时自动按提取字段名映射输出列**（需改名/筛选才必须声明）。
 
+browser 型 `source.fields` 支持**字符串简写**：`{"标题": "h2.title"}` = CSS 选择器
+取该元素的纯文本（审查十三轮起 http_html 与 browser 两引擎同语义——此前 http 侧
+曾把简写当"整行 HTML"，同一配置两后端产出不同数据）。
+
 ## pipeline（记录清洗与过滤——按日期/条件筛选就在这里）
 
 `pipeline` 是记录级处理步骤数组，抓完每页就执行。五种步骤：
