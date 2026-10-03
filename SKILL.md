@@ -10,8 +10,8 @@ description: >
   【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
   获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
 metadata:
-  version: "1.22.0"
-  source_project: "universal-scraper (16 轮审计, 237 测试)"
+  version: "1.23.0"
+  source_project: "universal-scraper (16 轮审计 + 实战反馈轮, 246 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能
@@ -128,6 +128,17 @@ python3 "${SKILL_DIR}/scripts/doctor.py"
 | 数量上限 | 全部（设安全上限防失控） |
 | 输出位置 | `~/Desktop/<任务名>/` |
 | 格式 | xlsx（含 csv 备份） |
+
+**任务书 vs 源站能力对照**（实战反馈 2026-10 猫眼：任务书写"前 500 条热门短评"，
+源站实际只开放 10 条热门 + 本地排序——这类矛盾**侦察阶段就该暴露**，采完再确认=白干。
+开工前逐项对一遍，对不上的早期说）：
+
+| 任务书常见要求 | 必须先侦察的源站事实 | 对不上时的标准动作 |
+|---|---|---|
+| "前 N 条"（如前 500 条） | 排序口径与**实际可翻深度**（很多站热门页只给前 10-20 条；列表常有平台封顶，如猫眼 130、拼多多 130） | 早期明说"源站只能给 X 条"+ 给替代口径，让用户拍板 |
+| 排序口径（热门/最新） | 源站有没有该排序参数、是不是官方口径（本地按点赞重排的要声明"非官方热度榜"） | 换可用口径并让用户确认 |
+| 字段清单 | 每个字段源站**是否真的存在/公开**（用户主页/注册时长/IP 属地在很多站不存在） | 不存在的字段宁空勿错 + 早期告知 |
+| 汇总数字（评分人数等） | 汇总值与明细条数常对不上（来源口径不同） | 分别记录来源与口径 |
 
 **实体型任务**（用户给的是"某商标/某公司/某论文"而不是网址）：
 你主动找该实体的官方检索入口（知识产权局、企业信用系统、学术库、法院文书网），
@@ -281,6 +292,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | **B站视频/弹幕/评论** | `bili --video BV号`（单视频三通道）或 `bili --mid <UID> --year 2024`（UP主年度全量，R34 四通道战法已代码化含 wbi 签名；-352 时按提示 capture dm_img 原值；楼中楼只取内联首页 ≤3 条） |
 | 图书目 + 比价 | `books --spec` |
 | 大众点评 | `dianping`（cookie 直抓专用） |
+| **评论/短评/回复类任务** | **先读配方 R45**（评论任务通用骨架：热门/热度排序口径、翻页游标、展开回复、请求量估算公式）——再查对应站配方（R46 猫眼 / R40 小红书 / R41 知乎），站没有配方时按 R45 骨架自写 |
+| **猫眼电影短评/评分** | 无需 CLI 命令——直连 `m.maoyan.com/apollo/apolloapi/review/v2/comments.json`（**无签名无登录**，limit≤20 + ts 游标）；评分走移动端 SSR 绕开字体反爬。配方 **R46** |
 | SPA 找接口 | `jsrecon <url>`（下载 JS 包自动提候选端点）；挑战壳站自动降级 CDP 流量采集；`fetch --capture <路径>` 一步捕获页面 XHR/fetch JSON |
 | SPA 框架表单（Angular/React） | fill 失效时降级：`type_real` 动作（真实键盘）→ 读渲染 DOM（阶梯见 playbook 第四章） |
 | 登录站复用登录态 | `cookies`（用户登录一次 → 导出直抓串）；`cdp --login-state/--list-tabs` 查调试 Chrome |
@@ -349,6 +362,11 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
    `nohup python3 -u 脚本.py > run.log 2>&1 &`——不加 `-u` 时 Python 缓冲 stdout，
    日志长时间为空，会误判"卡死"并重复启动（两个采集器抢同一出口/同一队列）。
    查看进度：`tail -f run.log`；确认只跑一个：`pgrep -fl 脚本名`。
+5. **macOS 没有 `timeout` 命令**（实战反馈 2026-10 猫眼：文档示例里的
+   `timeout 60 jsrecon ...` 在 macOS 直接 command not found）：GNU coreutils 的
+   `timeout` 在 macOS 需 `brew install coreutils` 后用 `gtimeout`；通用写法用
+   Python 侧超时（`subprocess.run(..., timeout=N)`）或 Playwright 自带的
+   `deadlineMs`/`timeout` 参数，不要在文档示例里裸写 `timeout`。
 
 工作区可放 `.claude/settings.json`（permissions.allow 白名单）预批准常用
 命令——用户授权一次，后续任务零弹窗。会话中途改的配置对当前会话不生效，
