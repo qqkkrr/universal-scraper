@@ -177,6 +177,8 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
                         _dst.parent.mkdir(parents=True, exist_ok=True)
                         _sh.copy2(_cap_src, _dst)
                         result["capture_file"] = str(_dst)
+                        # 审查十五轮（实战反馈猫眼）：同成功路径——显式打印绝对路径
+                        print(f"📁 capture 已保存到: {_dst}")
                 except Exception:
                     pass
                 finally:
@@ -194,8 +196,14 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
                     _dst.parent.mkdir(parents=True, exist_ok=True)
                     _sh.copy2(_cap_src, _dst)
                     result["capture_file"] = str(_dst)
+                    # 审查十五轮（实战反馈猫眼，用户实测复现）：保存路径曾只在
+                    # 移动端链路的日志出现、PC 端静默——复制点统一 stdout 显式
+                    # 打印绝对路径（agent 消费 result.capture_file，人按这行找）
+                    print(f"📁 capture 已保存到: {_dst}")
                 else:
                     result["capture_error"] = "捕获文件未生成（页面可能无 XHR/fetch，或挑战未过）"
+                    import sys as _sys
+                    print(f"⚠️ {result['capture_error']}", file=_sys.stderr)
             finally:
                 # R1 复查修复（P2-4）：临时目录用完即删（重复 --capture 不再累积垃圾）
                 import shutil as _sh2

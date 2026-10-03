@@ -1154,3 +1154,66 @@ Lite 手册对应铁律 2 的三件套表述）。
 **共同坑**：①"回复数"字段不可信（见步骤 3）；②IP 属地/粉丝数/动态数大量 0/空多为源站真实取值
 （用 `--expect-empty` 声明，别拉低验收）；③注销/封禁账号 detail 404 是正常损耗，计数后在交付
 报告说明，别无限重试；④热度序随实时互动变化，交付报告标注采集时点。
+
+## R46 · 猫眼电影（maoyan.com）短评 + 评分分布（2026-09-30 实战，509 条零失败）
+
+**站点形态**：PC 与移动端详情页**都是 SPA 壳页**（HTTP 直取仅 11.7KB，无数据）；
+风控是美团 **H5guard**（`portal-portm.meituan.com/horn/*`，设备指纹 `dfpId`/`optimus_uuid`）
++ PC 端**登录墙**（`passport.maoyan.com`，手机号+短信验证码）；
+PC 电影页评分数值走**自定义字体反爬**。
+
+**判型走法（省 30 分钟）**：
+1. `fetch https://www.maoyan.com/films/{id}` → 11.7KB 且多 ID 返回同样大小 = SPA 壳页，升浏览器。
+2. `fetch --browser --capture <url>` 抓 **`https://m.maoyan.com/movie/{id}/comments`**
+   （不是 `/short-comments`、`/hot-responses`——那三个 PC 路径全是壳页，捕获里没有任何数据接口）。
+3. 捕获到唯一数据端点，即下述主接口。
+
+**★ 主接口（无签名 / 无登录 / 无 Cookie，curl_cffi 直连 200）**：
+
+```
+https://m.maoyan.com/apollo/apolloapi/review/v2/comments.json
+  ?movieId={id}&userId=-1&offset={n}&limit=20&ts={游标}&type=3
+```
+
+- `limit` **上限 20**（给 30/50/100 返回空 `data`，不是报错——易误判为封禁）
+- `ts` 首包传 0，之后用响应里的 `ts` 原样回传（服务端快照游标，前端 JS 确认的逻辑）
+- `userId` 恒 `-1`、`type` 恒 `3`；`sortType` 1~4 **全部无效**
+- `offset` 是**时间倒序**（最新→历史），**不是热度排序**——想要热门见下
+- 返回 `data`：`hotIds`(500个热门ID清单) / `total`(短评总数) / `comments`(当页20条) /
+  `hotComments`(固定10条热门全文，每条内联 `hotReply` 1条最热回复) / `paging`
+
+**热门 500 条的死路与正解**：
+`data.hotIds` 确实给 500 个热门短评 ID，但猫眼**没有开放对应的详情接口**
+（`comment.json` / `batch.json` / `hotComment.json` 等 10 种路径全 404 或 400）——
+不要在这里耗时间。**正解**：接口翻页取全量 → 合并 `hotComments` 打星标 →
+`sort(key=(非官方热门, -upCount))` → 本地生成"热度排名"，并在交付报告显式声明
+**该排名是本地按点赞数算的，不是猫眼官方热度榜**（口径必须让用户点头）。
+
+**★ 字体反爬绕过（关键，省掉 OCR 全套）**：
+PC 页 `@font-face{font-family:MaoYanHeiTi-DemiBold}`，明文里评分是空的
+（`<span class="num"></span>`），走浏览器也会撞登录墙。
+**不要 OCR**——**改走移动端 SSR**：
+`requests.get("https://m.maoyan.com/movie/{id}", impersonate="chrome")` 直取 ~149KB HTML，
+评分相关字段全是明文：
+- `"sc":9.8` 当前评分 / `"scoreLabel":"猫眼购票评分"` / 可见文本 `3,390,170 人评`
+- `"distribution":[{level,percent}×5]` 5 档细分（SCORE_LEVEL_9_10 / 7_8 / 5_6 / 3_4 / 1_2）
+- `"distributions":[{movieScoreLevel,proportion}×3]` 3 档粗分（9-10 / 5-8 / 1-4）
+即"接口 JSON 数据不经字体渲染层"这条 playbook 铁律的又一例证。
+
+**用户主页：猫眼 Web 端不存在，别考古**：
+`www.maoyan.com/films/user/{id}`、`/user/profile/{id}`、`m.maoyan.com/user/profile/{id}`
+全部 404（PC 端还撞登录墙）。粉丝数/关注数/看过电影数/注册时长/简介**Web 端全不开放**。
+短评接口里的 `nick`/`userId`/`avatarUrl`/`ipLocName`/`buyTicket`/`userLevel`/`vipType`
+**就是公开侧能拿到的全部**，按 R45 步骤 5 用 `--expect-empty` 声明后交付。
+
+**数据坑（写进交付报告，别让用户误用）**：
+- `score=0` = **只写文字未打分**，不等于 0 星。统计星级分布时必须单列"未评分"，
+  否则 509 条里会凭空多出 7 个"0 星"，把分布算歪。
+- `buyTicket` 布尔字段**实测全 false**，但 `tagList` 里 499/509 条带"购票"标签
+  —— 两字段口径不一致，**以 `tagList` 为准**，报告里写明。
+- `type` 参数只认 3；`userId` 只认 -1（扫 0/1 无效）。
+- 翻到 offset≈500 时会进入**当日最新评论**区，出现与影评无关的内容（商品好评等），
+  属正常——接口按时间排序的必然结果，报告标注采集时点即可。
+
+**实战数字**：509 条 / 25 页 / 25 次请求 / 0 错误 / 回源抽样 60 条全一致 / 11 字段 100% 完整。
+预算按 `目标数 ÷ 20 + 2` 估（500 条 ≈ 27 次），设 `max_requests=80` 硬闸绰绰有余。

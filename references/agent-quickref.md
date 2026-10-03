@@ -17,6 +17,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli <cmd> [args]
 | JSON API（已知端点） | `run --config`（http_json） | 或直接 curl_cffi |
 | 接口未知（SPA） | `fetch <url> --browser` + capture_all | 找 POST 体→改 http_json |
 | 列表+详情 | `run --config`（browser + detail） | 详情字段清洗放 `detail.post_pipeline`（`pipeline` 跑在详情**之前**） |
+| **猫眼短评+评分** | 直连 `m.maoyan.com/apollo/apolloapi/review/v2/comments.json` | 无签名无登录，limit≤20 + ts 游标；评分读移动端 SSR 明文字段（绕开字体反爬）。配方 R46 |
 | PDF 下载 | `pdf --download 清单.json --out 目录` | %PDF 校验+断点 |
 | PDF 表格 | `pdf --tables x.pdf` | pdfplumber |
 | 批量队列 | `batch --queue q.json next/claim/done/fail/nodata/retry/status` | |

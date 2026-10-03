@@ -831,7 +831,11 @@ class BrowserFetcher(BaseFetcher):
         # SPA 壳合法（另有 jsrecon/capture 处方），所以只在浏览器路线做。
         # 可用 anti_bot.empty_shell_check=false 关闭（审后修复：iframe/canvas
         # 类合法薄页会误判，给逃生门）。
-        if self.anti.get("empty_shell_check", True):
+        # 审查十五轮（实战反馈猫眼，用户实测复现）：capture 模式下**不抛**空壳
+        # RateLimitedError——空壳恰恰是 capture 的主场景（数据在 XHR 接口不在
+        # DOM），此处在桥跑完、capture_all 已落盘后抛错，调用方（fetch --capture）
+        # 收到异常走降级路径、capture 参数拿不到文件。统计照记，豁免照旧可用
+        if self.anti.get("empty_shell_check", True) and not self.config.get("capture"):
             try:
                 _bd = detect_block(int(getattr(resp, "status", 0) or 0),
                                    getattr(resp, "text", "") or "", {}, req.url, rendered=True)
