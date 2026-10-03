@@ -245,7 +245,15 @@ def _image_ranking_run(meta: Dict[str, Any], url: str, limit: int = 20,
     # 1) 抓 entry + extra_pages（浏览器渲染，图片懒加载），收集榜单图
     pages = [entry] + list(meta.get("extra_pages") or [])
     imgs = []
-    pat = re.compile(hint) if hint else None
+    # 审查十四轮（M）：hint 是 LLM 生成/手编的正则——坏正则曾裸 re.error 冲出
+    # 整个图片战术（无 lint 无提示，落盘的坏 hint 会让该 host 永久失败）。
+    # 编译失败降级为 None（不过滤=收集全部图）并出声
+    pat = None
+    if hint:
+        try:
+            pat = re.compile(hint)
+        except re.error as _re_err:
+            log(f"⚠️ img_src_hint 不是合法正则（{_re_err}），已忽略过滤收集全部图片")
     for pg in pages:
         try:
             sample = _fetch_sample(pg, browser=True, log=log)

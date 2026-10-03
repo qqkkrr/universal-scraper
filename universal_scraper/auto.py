@@ -1641,6 +1641,11 @@ def _force_browser_waf(cfg: dict) -> dict:
 def _resolve_file_refs(description: str, log=None) -> str:
     """把描述里的 @文件路径 替换为文件内容（本地输入支持：清单/关键词/企业名等）。"""
     import os as _os
+    # 审查十四轮（M）：@文件 曾无路径限制——agent/MCP 场景下不可信文本可注入
+    # "@~/.ssh/id_rsa" 把凭据内容带进 LLM 提示词外发。限制为数据文件扩展名 +
+    # 大小上限（用户合法用法=清单/关键词/企业名等文本数据）
+    _ALLOWED_EXT = {".txt", ".csv", ".tsv", ".json", ".md", ".list", ".log", ".text"}
+
     def _read(m):
         raw = m.group(1).strip()
         if not raw:
@@ -1649,6 +1654,21 @@ def _resolve_file_refs(description: str, log=None) -> str:
         if not _os.path.exists(p):
             if log:
                 log("⚠️ 引用文件不存在：" + raw)
+            return m.group(0)
+        if not _os.path.isfile(p):
+            if log:
+                log("⚠️ @引用不是常规文件，跳过：" + raw)
+            return m.group(0)
+        _ext = _os.path.splitext(p)[1].lower()
+        _low = p.lower()
+        if _ext and _ext not in _ALLOWED_EXT:
+            if log:
+                log(f"⚠️ @引用仅支持数据文件（{', '.join(sorted(_ALLOWED_EXT))}），跳过：" + raw)
+            return m.group(0)
+        if any(_seg in _low for _seg in ("/.ssh/", "/.aws/", "/.gnupg/", "/.kube/",
+                                         "/.config/gcloud", "/credentials", "/id_rsa")):
+            if log:
+                log("⚠️ @引用命中疑似凭据路径，拒绝读取：" + raw)
             return m.group(0)
         try:
             txt = Path(p).read_text(encoding="utf-8", errors="replace").strip()
@@ -2029,8 +2049,16 @@ def _save_learned(cfg: dict, description: str, log=None) -> None:
             "from_description": description[:200],
             "config": {
                 "start_urls": (cfg.get("start_urls") or [])[:5],
+                # 审查十四轮（M）：保留键曾漏 query/actions/login/verify/pagination
+                # ——登录型/带查询参数/带动作的站成功后学习，复用时配置缺登录与
+                # 参数（实测 probe1-D 只剩 type/headers/scroll_count）
                 "source": {k: _src.get(k) for k in ("type", "headless", "scroll_count", "scroll_wait_ms",
-                                                     "headers", "record_from", "capture_all", "wait_selector") if _src.get(k)},
+                                                    "query", "actions", "login", "verify",
+                                                    "pagination", "json_body", "body",
+                                                    "record_from", "capture_all", "wait_selector")
+                           if _src.get(k) is not None},
+                # 审查十四轮（M 安全）：headers 含 Cookie 时剥掉——明文登录态曾
+                # 落进 configs/learned/*.json（默认 0644，与 cookies 的 0600 口径矛盾）
                 "rules": cfg.get("rules") or [],
                 "parsers": cfg.get("parsers") or {},
                 "pipelines": _pipes,
@@ -2039,9 +2067,23 @@ def _save_learned(cfg: dict, description: str, log=None) -> None:
                 "anti_bot": {k: v for k, v in (cfg.get("anti_bot") or {}).items() if k in ("min_interval", "max_retries", "proxy")},
             },
         }
+        _hdrs = dict((_src.get("headers") or {}))
+        if _hdrs.pop("Cookie", None):
+            if log:
+                log("🔒 已学配置剥离 headers 里的 Cookie（登录态不落 learned 存档）")
+        if _hdrs:
+            keep["config"]["source"]["headers"] = _hdrs
         LEARNED_DIR.mkdir(parents=True, exist_ok=True)
         fp = LEARNED_DIR / f"{safe}.json"
-        fp.write_text(json.dumps(keep, ensure_ascii=False, indent=1), encoding="utf-8")
+        # 审查十四轮（M）：0600——存档含站点结构信息，按敏感配置对待
+        import os as _os
+        _fd = _os.open(fp, _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
+        with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
+            _f.write(json.dumps(keep, ensure_ascii=False, indent=1))
+        try:
+            _os.chmod(fp, 0o600)  # 双保险：治愈遗留 0644
+        except OSError:
+            pass
         if log:
             log(f"🧠 已学习本任务（{host}），下次同类任务直接复用配置")
     except Exception:

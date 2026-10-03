@@ -891,6 +891,10 @@ def build_catalog(
         "diagnostics": diagnostics_all,
         "coverage": {
             "total_cells": total_cells,
+            # 审查十四轮（M）：补 missing/missing_rate 别名——_write_outputs 用
+            # 这组键名，消费方 coverage["missing_rate"] 曾拿到 None
+            "missing": missing,
+            "missing_rate": f"{missing / total_cells * 100:.2f}%" if total_cells else "N/A",
             "all_missing": missing,
             "all_missing_rate": f"{missing / total_cells * 100:.2f}%" if total_cells else "N/A",
             "required_missing": required_missing,

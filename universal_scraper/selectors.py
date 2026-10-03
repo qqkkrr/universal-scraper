@@ -771,10 +771,13 @@ def extract_embedded_json_rows(html: str, spec: Any) -> List[Dict[str, Any]]:
             if val is None:
                 return []
     if isinstance(val, dict):
-        val = [val]
+        # 审查十四轮（M）：空对象 {} 曾包装成 [{}]——1 条全空记录向下游走
+        # （docstring 承诺"找不到或空壳一律返回 []"）
+        val = [val] if val else []
     if not isinstance(val, list):
         return []
-    return [r for r in val if isinstance(r, dict)]
+    # 空壳占位 dict（[{},{}]）同样过滤——与"空壳一律 []"的文档口径一致
+    return [r for r in val if isinstance(r, dict) and r]
 
 
 def _balanced_json(s: str, start: int, json_mod: Any) -> Any:
