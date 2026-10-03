@@ -1145,6 +1145,25 @@ class EngineV3:
                 continue
             if item is None:
                 continue
+            # 审查十四轮（M）：fetch_all 曾完全绕过插件钩子与中间件 on_data——
+            # webhook 告警静默失效、process_item 钩子不跑（对齐队列路径 546-530）
+            from .plugins import apply_item_hooks
+            item = apply_item_hooks(item)
+            if item is None:
+                continue
+            _dropped = False
+            for mw in self.middlewares:
+                try:
+                    item = mw.on_data(item, self.ctx)
+                except Exception as e:
+                    self.logger.warn(f"中间件 on_data 执行失败"
+                                     f"（{type(mw).__name__}）: {type(e).__name__}: {e}")
+                    continue
+                if item is None:
+                    _dropped = True
+                    break
+            if _dropped:
+                continue
             if self._seen_store is not None:
                 from .storage import record_key
                 k = record_key(item, self._inc_key)
@@ -1187,6 +1206,21 @@ class EngineV3:
             # 磁盘满等确定性故障：finalize 尽力导出 + re-raise 让上层止损
             self._finalize()
             raise _write_err
+        # 审查十四轮（M）：mw.flush 与 fetcher.close 曾漏——告警通道静默失效、
+        # 自定义取数器的浏览器/子进程资源泄漏（对齐队列路径收尾 976-946）
+        for mw in self.middlewares:
+            if hasattr(mw, "flush"):
+                try:
+                    mw.flush()
+                except Exception as e:
+                    self.logger.warn(f"中间件 flush 执行失败"
+                                     f"（{type(mw).__name__}）: {type(e).__name__}: {e}")
+        if hasattr(self.fetcher, "close"):
+            try:
+                self.fetcher.close()
+            except Exception as e:
+                self.logger.warn(f"fetcher close 失败"
+                                 f"（{type(self.fetcher).__name__}）: {type(e).__name__}: {e}")
         # 写盘全部成功后才标记已见（写失败 → 下次重跑不会被去重吞掉）
         if self._seen_store is not None:
             from .storage import record_key

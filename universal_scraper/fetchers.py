@@ -215,7 +215,15 @@ class HttpFetcher(BaseFetcher):
                   allow_html_404=True)
         try:
             if method.upper() == "POST":
-                res = self.http.post(url, data=s.get("body"), json_data=s.get("json_body"), **kw)
+                # 审查十四轮（M）：body 与 json_body 同给时三后端发出不同载荷
+                # （curl_cffi 收 JSON、requests/urllib 收表单——实测）。
+                # 择一：json_body 优先（结构化 API 常见形态），并出声
+                _b, _jb = s.get("body"), s.get("json_body")
+                if _b and _jb:
+                    log("  ⚠️ source.body 与 json_body 同时配置——已优先 json_body"
+                        "（curl_cffi 后端两者同给时才发 JSON，其余后端发表单），请删一个", "WARN")
+                    _b = None
+                res = self.http.post(url, data=_b, json_data=_jb, **kw)
             else:
                 res = self.http.get(url, **kw)
         except Exception:
@@ -1081,9 +1089,21 @@ class BrowserFetcher(BaseFetcher):
         for cap in self.source.get("capture", []):
             # 审查二轮（H）：name 曾未清洗——分享/LLM 生成的配置里 "../x" 可越出
             # out_dir 读写任意同名文件。safe_fname 剥路径分隔符
-            _cname = safe_fname(str(cap.get("name") or "capture"))
-            f = out_dir / f"{_cname}.json"
-            if not f.exists():
+            # 审查十四轮（M）：Python 的 safe_fname 与桥侧（browser_generic.cjs
+            # 476：只替换 \\/:*?\"<>|\\r\\n 并截 120）**两套净化规则**——含空格/
+            # 括号的 name 桥写成 "job list.json"、Python 找 "job_list.json"（0 条
+            # 且无日志）。按桥规则先找，safe_fname 版本兜底
+            _raw_name = str(cap.get("name") or "capture")
+            _bridged = re.sub(r'[\\/:*?"<>|\r\n]+', "_", _raw_name)[:120]
+            _cnames = [_bridged, safe_fname(_raw_name)]
+            f = None
+            for _cn in _cnames:
+                _cand = out_dir / f"{_cn}.json"
+                if _cand.exists():
+                    f = _cand
+                    break
+            if f is None:
+                log(f"  ⚠️ capture[{_raw_name}] 未捕获到文件（桥未捕获该接口或 name 不匹配）", "WARN")
                 continue
             try:
                 data = json.loads(f.read_text(encoding="utf-8", errors="replace"))
