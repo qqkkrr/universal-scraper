@@ -21,6 +21,7 @@ Claude Desktop / Cursor / Continue / Codex 等通过 stdio 配置接入。
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -449,8 +450,15 @@ def handle_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
     if method == "initialize":
+        # 审查十六轮（L）：回显服务端**实际支持**的协议版本——原样回显客户端
+        # 版本（甚至 "9999-01-01"/数字 123）会让客户端误以为协商成功
+        _pv = str(params.get("protocolVersion") or "2024-11-05")
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", _pv) and _pv <= "2024-11-05":
+            _supported = _pv      # 旧客户端：尊重其版本
+        else:
+            _supported = "2024-11-05"  # 非法形态/超出支持的版本 → 服务端实际支持的
         return _result(mid, {
-            "protocolVersion": params.get("protocolVersion", "2024-11-05"),
+            "protocolVersion": _supported,
             "capabilities": {"tools": {}},
             "serverInfo": {"name": SERVER_NAME, "version": VERSION},
             "instructions": (

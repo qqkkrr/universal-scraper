@@ -496,9 +496,12 @@ def _validate_and_fix(cfg: dict, description: str = "", log=None) -> dict:
 
     # 变量缺失检测：AI 常留 {company_name} 等占位符却没给 vars 值。
     # 收集所有未赋值变量 → cfg["_needs_input"]，plan 时给用户醒目提示，避免空转
+    # 审查十六轮（M）：扫描面曾只有 start_urls+source.query——actions[].text、
+    # detail.url_transform[].prefix、body/json_body 里的占位符漏检（浏览器里直接
+    # 键入字面量 {keyword}）。整包 JSON 序列化后扫，天然覆盖所有嵌套位置
     _need = []
     _vars = cfg.get("vars") or {}
-    _scan_txt = " ".join(str(x) for x in (cfg.get("start_urls") or [])) + " " + json.dumps((cfg.get("source") or {}).get("query") or {}, ensure_ascii=False)
+    _scan_txt = json.dumps(cfg, ensure_ascii=False, default=str)
     for _m in re.finditer(r"\{\{?(\w+)\}?\}", _scan_txt):
         _name = _m.group(1)
         if _name and _name not in _vars and _name not in _need:
@@ -1631,6 +1634,12 @@ def _force_browser_waf(cfg: dict) -> dict:
         src["actions"] = old["actions"]
     if (old.get("login") or {}).get("enabled"):
         src["login"] = old["login"]
+    # 审查十六轮（M）：曾无条件 cfg.pop("verify") 且 src 不迁移——原 http 配置
+    # 带用户明确要求的 verify（人工过盾）时，升级后 verify 消失：无头池反复
+    # 撞滑块，日志却让用户"去弹出的浏览器窗口完成验证"（弹窗根本没开）。
+    # 迁移保留（src 已有 verify 时不覆盖）
+    if old.get("verify") and not src.get("verify"):
+        src["verify"] = old["verify"]
     cfg["source"] = src
     if not (src.get("login") or {}).get("enabled"):
         cfg.pop("login", None)

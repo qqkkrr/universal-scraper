@@ -154,9 +154,17 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
                      if c.get("name", "").startswith("字段完整率") and isinstance(c.get("rate"), (int, float))]
         if all_rates:
             overall = sum(all_rates) / len(all_rates)
-            core_rates = [c["rate"] for c in report["checks"]
-                          if c.get("name", "").startswith("字段完整率")
-                          and any(k in c.get("name", "") for k in _KEY_FIELDS)]
+            # 审查十六轮（M）：核心字段判定曾用子串——字段 "video" 因含 "id" 被
+            # 判核心，core_rate 被稀疏列拉低、稀疏提示为空。提取 checks 名里的
+            # 列名部分，与 127 行 is_key 的全等/前缀口径对齐
+            def _ck_is_key(c) -> bool:
+                _nm = str(c.get("name", ""))
+                if not _nm.startswith("字段完整率"):
+                    return False
+                _col = _nm.split("·", 1)[-1].strip().lower()
+                return any(_col == k.lower() or _col.startswith(k.lower())
+                           for k in _KEY_FIELDS)
+            core_rates = [c["rate"] for c in report["checks"] if _ck_is_key(c)]
             core_rate = sum(core_rates) / len(core_rates) if core_rates else overall
             sparse_n = len(all_rates) - len(core_rates)
             report["sparse_matrix"] = {

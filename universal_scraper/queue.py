@@ -49,6 +49,14 @@ class RequestQueue:
                 self.stats["skipped_dup"] += 1
                 return False
             if len(self._seen) >= self._max_seen:
+                # 审查十六轮（L）：曾静默 return False——调用方无法区分"重复"
+                # 与"队列容量满"，容量满后所有新任务悄悄丢队列。限频大声告警
+                self.stats["skipped_capacity"] = self.stats.get("skipped_capacity", 0) + 1
+                if self.stats["skipped_capacity"] == 1 or self.stats["skipped_capacity"] % 100 == 0:
+                    import sys as _sys
+                    print(f"⛔ 队列容量已满（_max_seen={self._max_seen}）——"
+                          f"新任务无法入队（已拒绝 {self.stats['skipped_capacity']} 次）",
+                          file=_sys.stderr)
                 return False
             self._seen.add(k)
             dom = urlparse(req.url).netloc
