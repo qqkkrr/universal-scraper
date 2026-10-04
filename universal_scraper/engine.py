@@ -135,6 +135,23 @@ FETCHERS = {
 }
 
 
+def _row_keys(rows: List[Dict[str, Any]], rk) -> List[str]:
+    """按增量键取每行的去重 key（与行一一对应；无键行返回 ""）。
+
+    R22：去重循环与 limit 截断后的"待标记"必须用**同一份口径**——
+    此前截断按数量裁 `_pending_keys[:len(rows)]`，行里含无键行时会把从未导出的
+    行的 key 一并标记（实测：limit=2 冒烟后全量跑，从未出现在任何导出文件里的
+    记录被永久跳过 = 静默丢数据）。"""
+    parts = rk if isinstance(rk, list) else [rk]
+    out: List[str] = []
+    for r in rows:
+        if any(r.get(p) in (None, "") for p in parts):
+            out.append("")
+            continue
+        out.append(record_key(r, rk) or "")
+    return out
+
+
 def map_record(raw: Dict[str, Any], fields: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     if not isinstance(fields, dict):
@@ -1011,19 +1028,17 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             before = len(rows)
             kept = []
             _pending_keys = []  # 审查修复 P1：延后到导出成功再标记（镜像 v3 契约）
-            for r in rows:
+            _rk = inc.get("key", "id")
+            for r, key in zip(rows, _row_keys(rows, _rk)):
                 # 收官十三轮（审查 H，实测）：去重键为空曾整条静默丢弃（不入 kept
                 # 也不告警，日志还报"跳过已见"）；复合键各项全缺时 record_key 返回
                 # 真值 "|"，本轮全保留但导出后 mark("|") 落盘——**下一轮这批记录
                 # 全被当已见丢弃**。与 engine_v3 同口径：键不完整 = 无键，照常保留、
-                # 不判重也不标记
-                _rk = inc.get("key", "id")
-                _parts = _rk if isinstance(_rk, list) else [_rk]
-                if any(r.get(_p) in (None, "") for _p in _parts):
+                # 不判重也不标记（_row_keys 已把无键行映射为 ""）
+                if not key:
                     kept.append(r)
                     continue
-                key = record_key(r, _rk)
-                if key and not seen.is_seen(key):
+                if not seen.is_seen(key):
                     _pending_keys.append(key)
                     kept.append(r)
             rows = kept
@@ -1035,9 +1050,14 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
 
         if limit:
             rows = rows[:limit]
-            # R11 审查修复（P1）：截断曾不裁 keys——被截掉的行已标已见却从未
-            # 导出，后续全量跑会静默跳过它们
-            _pending_keys = _pending_keys[:len(rows)]
+            # R11 审查修复（P1）：截断曾不裁 keys——被截掉的行已标已见却从未导出。
+            # R22 修复（数据丢失级，实测复现）：按数量裁仍不对——行里含无键行时
+            # `_pending_keys[:len(rows)]` 裁的是"前 N 个 key"而非"前 N 行的 key"，
+            # 会把从未导出的行的 key 一并标记（limit=2 冒烟 → 全量跑时该记录被
+            # 永久跳过）。改为按截断后的实际行重算（与去重循环同一 helper）。
+            if seen is not None:
+                _pending_keys = [k for k in
+                                 _row_keys(rows, inc.get("key", "id")) if k]
             logger.info(f"--limit {limit}: 截断到 {len(rows)} 条")
 
         # 详情

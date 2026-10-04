@@ -202,6 +202,101 @@ def check_config_key_contract():
         FAIL.append(f"引擎消费了未登记配置键：{sorted(unknown)}（同步 config 已知键，防拼错静默）")
 
 
+def check_cli_flags_wired():
+    """CLI 死参数普查（R22）：add_argument 声明了但全文件无人读取 = 静默 no-op。
+
+    用户传了 --sheet 却什么都没发生，是"假成功"族最典型的一种。豁免：
+    - help 明写"（默认…）"的（如 cdp --list-tabs"列出所有标签页（默认）"）
+    - 经 vars(args) 别名（a = vars(args) 后 a.get("x")）读取的"""
+    import ast as _ast
+    import re as _re
+    src_path = ROOT / "universal_scraper" / "cli.py"
+    try:
+        src = src_path.read_text(encoding="utf-8")
+        tree = _ast.parse(src)
+    except (OSError, SyntaxError) as e:
+        FAIL.append(f"cli.py 无法解析: {e}")
+        return
+    subs = {}
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Assign) and isinstance(node.value, _ast.Call):
+            f = node.value.func
+            if isinstance(f, _ast.Attribute) and f.attr == "add_parser":
+                try:
+                    name = _ast.literal_eval(node.value.args[0])
+                except Exception:
+                    continue
+                for t in node.targets:
+                    if isinstance(t, _ast.Name):
+                        subs[t.id] = name
+    aliases = {t.id for node in _ast.walk(tree)
+               if isinstance(node, _ast.Assign) and isinstance(node.value, _ast.Call)
+               and isinstance(node.value.func, _ast.Name) and node.value.func.id == "vars"
+               for t in node.targets if isinstance(t, _ast.Name)}
+    declared = {}
+    for node in _ast.walk(tree):
+        if not (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)
+                and node.func.attr == "add_argument" and isinstance(node.func.value, _ast.Name)):
+            continue
+        v = node.func.value.id
+        if v not in subs:
+            continue
+        flags = [a.value for a in node.args if isinstance(a, _ast.Constant)]
+        dest, helpt = None, ""
+        for kw in node.keywords:
+            if kw.arg == "dest":
+                dest = _ast.literal_eval(kw.value)
+            if kw.arg == "help" and isinstance(kw.value, _ast.Constant):
+                helpt = str(kw.value.value)
+        if dest is None:
+            longs = [f for f in flags if f.startswith("--")]
+            dest = (longs[0] if longs else flags[0]).lstrip("-").replace("-", "_")
+        declared.setdefault(subs[v], {})[dest] = (flags, helpt)
+    read = set()
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Attribute) and isinstance(node.value, _ast.Name) \
+                and node.value.id == "args":
+            read.add(node.attr)
+        if isinstance(node, _ast.Call):
+            f = node.func
+            if isinstance(f, _ast.Name) and f.id == "getattr" and node.args \
+                    and isinstance(node.args[0], _ast.Name) and node.args[0].id == "args" \
+                    and len(node.args) > 1 and isinstance(node.args[1], _ast.Constant):
+                read.add(str(node.args[1].value))
+            if isinstance(f, _ast.Attribute) and f.attr in ("get", "pop") and node.args \
+                    and isinstance(node.args[0], _ast.Constant) \
+                    and isinstance(f.value, _ast.Name) and f.value.id in aliases:
+                read.add(str(node.args[0].value))
+    for sub, dests in sorted(declared.items()):
+        for dest, (flags, helpt) in sorted(dests.items()):
+            if dest in read:
+                continue
+            if _re.search(r"（默认|默认）", helpt):
+                continue          # 文档明写"默认行为"，显式传参属冗余而非谎言
+            FAIL.append(f"cli.py {sub}: 参数 {flags} 声明后无人读取（静默 no-op）")
+
+
+def check_recipe_refs_resolve():
+    """配方编号引用必须真实存在（R22）：代码/文档里写"配方 R47"而 recipes.md 无 R47 =
+    对 agent 说了假话（会去翻一个不存在的配方）。"""
+    import re as _re
+    recipes = _read("references/recipes.md")
+    if not recipes:
+        return
+    defined = set(_re.findall(r"配方\s*\*{0,2}R(\d+)", recipes)) | \
+        set(_re.findall(r"^#+\s*\**R(\d+)", recipes, _re.M))
+    targets = list((ROOT / "universal_scraper").glob("*.py")) + \
+        [ROOT / "SKILL.md"] + list((ROOT / "references").glob("*.md"))
+    for f in targets:
+        try:
+            t = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for m in _re.finditer(r"配方\s*\*{0,2}R(\d+)", t):
+            if m.group(1) not in defined:
+                FAIL.append(f"{f.name}: 引用了不存在的配方 R{m.group(1)}")
+
+
 def main(argv):
     targets = [Path(a) for a in argv] or [ROOT / "universal_scraper"]
     files = []
@@ -224,6 +319,9 @@ def main(argv):
     check_mcp_tool_registry()
     check_switch_key_parity()
     check_config_key_contract()
+    # R22 陈述真实性检查（"技能说的话必须是真的"）
+    check_cli_flags_wired()
+    check_recipe_refs_resolve()
     print(f"== 静态检查（{n} 文件）==")
     for w in WARN[:20]:
         print(f"  ⚠️  {w}")
