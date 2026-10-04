@@ -48,13 +48,10 @@ class AgentError(RuntimeError):
 
 def debug_chrome_alive() -> bool:
     """调试 Chrome（用户已登录/过验证的真实浏览器，固定 9222 端口）是否在运行。"""
-    try:
-        import urllib.request as _ur
-        # 固定本机调试端点（非用户输入），无 SSRF 面
-        with _ur.urlopen("http://127.0.0.1:9222/json/version", timeout=2) as _r:
-            return getattr(_r, "status", 200) == 200
-    except Exception:
-        return False
+    # 审查十九轮（L）：裸 urlopen 曾走环境代理——挂 Clash 时探测被劫持、
+    # 活着的调试 Chrome 误判"未运行"。固定本机端点，走统一环回探活
+    from .core import loopback_http_alive
+    return loopback_http_alive("http://127.0.0.1:9222/json/version", timeout=2)
 
 
 class AgentSession:

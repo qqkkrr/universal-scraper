@@ -547,6 +547,20 @@ def assert_http_url(url: str) -> str:
     return url
 
 
+def loopback_http_alive(url: str, timeout: float = 2.0) -> bool:
+    """环回地址探活（显式忽略环境代理），返回是否 2xx。
+
+    http_proxy 指向 Clash/V2Ray 等代理时，裸 urlopen 的环回探测会被发往代理，
+    活着的本机服务被判死（browser_drive/cookies/auto 已各自内联此写法；新代码
+    统一走这里，勿再裸 urlopen 探测 127.0.0.1）。"""
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(url, timeout=timeout) as r:
+            return 200 <= int(getattr(r, "status", 200) or 0) < 300
+    except Exception:
+        return False
+
+
 def smart_decode(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
     """公开别名：智能解码（BOM/声明/候选打分）。"""
     return _decode_body(raw, headers)
@@ -2140,7 +2154,6 @@ class CurlCffiClient:
                     try:
                         _sc = getattr(resp, "cookies", None)
                         if _sc:
-                            import http.cookies as _hcookies
                             for _ck in (_sc.jar or []):
                                 _nm = getattr(_ck, "name", None)
                                 if _nm and _nm not in self.cookies:

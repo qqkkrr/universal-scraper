@@ -254,6 +254,14 @@ def fetch_html(url: str, cookie: str = "", proxy: Optional[str] = None,
 
     extra_headers：站点必需的自定义头（如上交所/新浪行情要求 Referer——
     不带时接口直接回错误包/403，把"缺请求头"误诊为"被封"）。"""
+    # 审查十九轮（H）：协议闸——urllib 回退对 file:// 等伪协议照单全收，
+    # 实测 fetch_html("file:///etc/hosts") 返回 ok=True 且 html=本地文件内容
+    # （战术/目录/入口变体多条链路最终都汇聚到这里）。与 core.assert_http_url
+    # 同口径；但本函数契约是 {ok: False, ...}，故返回错误字典而非抛异常
+    import urllib.parse as _up  # 函数内下文有 import urllib.request，urllib 名被遮蔽
+    if (_up.urlsplit(url or "").scheme or "").lower() not in ("http", "https"):
+        return {"ok": False, "status": 0, "html": "", "final_url": url,
+                "error": f"仅支持 http/https 协议，已拒绝: {str(url)[:60]!r}"}
     from .core import smart_decode
     headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/json,*/*",
                "Accept-Language": "zh-CN,zh-Hans;q=0.9", "Accept-Encoding": "gzip, deflate"}

@@ -272,6 +272,36 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(cs, str) or cs not in CAPTCHA_STRATEGIES:
         raise ConfigError("anti_bot.captcha.strategy", f"未知验证码策略 '{cs}'",
                           f"可选: {', '.join(sorted(CAPTCHA_STRATEGIES))}")
+    # 审查十九轮（H，契约对账）：v2 校验器此前缺 v3 同款的容器类型守卫——
+    # 引擎直接消费的这几个键坏类型时 validate 放行、运行期裸崩：
+    #   vars=list/null → dict(...) ValueError/TypeError；output=list → .get AttributeError
+    #   storage=list / incremental=list / download=list 同理（engine 直接 .get）
+    # null 归一为空容器（与 v3 口径一致；引擎对空容器的默认行为本就是缺省语义）
+    for key, want in (("vars", dict), ("output", dict), ("storage", dict),
+                      ("incremental", dict), ("download", dict)):
+        val = cfg.get(key)
+        if val is None:
+            cfg[key] = want()
+        elif not isinstance(val, want):
+            raise ConfigError(key, f"{key} 应为 {want.__name__}，实际 {type(val).__name__}",
+                              '例如: {"vars": {"城市": "北京"}}' if key == "vars"
+                              else f'例如: {{"{key}": {{}}}}')
+    # iterate（v2 引擎按 iterate["var"]/["values"] 消费）：缺键/坏类型曾是裸
+    # KeyError/TypeError（list 索引）——跑之前按结构拦住
+    it = cfg.get("iterate")
+    if it is not None:
+        if not isinstance(it, dict):
+            raise ConfigError("iterate", f"iterate 应为 dict（{{var, values}}），实际 {type(it).__name__}",
+                              '例如: {"var": "城市", "values": ["北京", "上海"]}')
+        if not isinstance(it.get("var"), str) or not it.get("var"):
+            raise ConfigError("iterate.var", "iterate.var 应为非空字符串（迭代变量名）",
+                              '例如: {"var": "城市", "values": ["北京"]}')
+        if not isinstance(it.get("values"), list) or not it.get("values"):
+            raise ConfigError("iterate.values", "iterate.values 应为非空数组",
+                              '例如: {"var": "城市", "values": ["北京", "上海"]}')
+        if it.get("labels") is not None and not isinstance(it.get("labels"), dict):
+            raise ConfigError("iterate.labels", "iterate.labels 应为 dict（取值→标签名）",
+                              '例如: {"labels": {"北京": "京城"}}')
     return cfg
 
 
@@ -385,7 +415,11 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
     for key, want in (("parsers", dict), ("rules", list), ("storage", dict),
                       ("start_urls", list), ("pipelines", list),
                       ("incremental", dict), ("download", dict),
-                      ("middleware", list), ("detail", dict)):
+                      ("middleware", list), ("detail", dict),
+                      # 审查十九轮（H，契约对账）：v3 引擎同样直接消费的键，
+                      # 此前不在容器闸内（engine_v3 `dict(config.get("vars"))`
+                      # / `output.get` / `queue.get` 坏类型裸崩）
+                      ("vars", dict), ("output", dict), ("queue", dict)):
         val = cfg.get(key)
         # 审查九轮（H）：None（显式 null）曾穿透 isinstance 检查——parsers=null 时
         # 后续 `pname not in cfg.get("parsers", {})` 得 None 引发 TypeError

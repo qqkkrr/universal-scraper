@@ -1516,14 +1516,11 @@ class Handler(BaseHTTPRequestHandler):
                                    or _sh.which("chromium-browser") or "google-chrome")
                     _profile = os.path.expanduser(f"~/.codex/cdp_profile_{port}")
                     os.makedirs(_profile, exist_ok=True)
-                    # 端口被占 → 直接打开新标签
-                    _occupied = False
-                    try:
-                        import urllib.request as _ur
-                        with _ur.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2):
-                            _occupied = True
-                    except Exception:
-                        _occupied = False
+                    # 端口被占 → 直接打开新标签（审查十九轮：走统一环回探活，
+                    # 裸 urlopen 会被环境代理劫持——挂着 Clash 时活端口误判空闲，
+                    # 又去起一个 Chrome 抢同一端口）
+                    from .core import loopback_http_alive
+                    _occupied = loopback_http_alive(f"http://127.0.0.1:{port}/json/version", timeout=2)
                     if _occupied:
                         if _sys.platform.startswith("win"):
                             # 审查十轮（H2）：`cmd /c start chrome <url>` 曾命令注入

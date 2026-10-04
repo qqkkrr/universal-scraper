@@ -49,6 +49,16 @@ def _safe_float(v, default):
         return default
 
 
+def _code6(value) -> str:
+    """stkcd 归一：去浮点尾/空格 → 取数字 → zfill(6)。
+
+    与 audit 内窗口检查/文本档案文件名（\\d{6}_\\d{4}）同口径的单一入口。"""
+    _raw = str(value or "").strip()
+    if _raw.endswith(".0"):
+        _raw = _raw[:-2]
+    return "".join(ch for ch in _raw if ch.isdigit()).zfill(6)
+
+
 def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
                 year_from: int = 2010, year_to: int = 2024,
                 sample: int = 12, keywords: dict = None) -> List[str]:
@@ -234,13 +244,20 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
         # 收官十二轮（审查 M）：覆盖检查曾用原字符串拼文件名、抽验用 _safe_int——
         # year 为文本 "2015.0"（CSV→Excel 常见）时一边报缺档、一边抽验命中，结论
         # 自相矛盾。覆盖检查同样走 _safe_int 后再拼名
+        def _cov_key(_r):
+            # 收官十九轮（H，实测）：两侧键必须同源——修前 uncovered 存原始 year
+            # （数值 2021）、flagged 用 str(year)（'2021'）→ 真实面板（数值年份）
+            # 上集合差**永不匹配**：17 行"已标注不可复现"全被误报为未标注，且消息
+            # 自相矛盾（"文本源缺失 17 > 已标注不可复现 17"）。stkcd 同走 _code6
+            # （与 have 的文件名 \d{6}_\d{4} 口径对齐）
+            _y = _safe_int(_r[H["year"]], None)
+            return (_code6(_r[H["stkcd"]]), _y if _y is not None else _r[H["year"]])
+
         uncovered = []
         for r in real:
-            _stk = str(r[H['stkcd']])
-            _yy = _safe_int(r[H["year"]], None)
-            _key = f"{_stk}_{_yy}" if _yy is not None else f"{_stk}_{r[H['year']]}"
-            if _key not in have:
-                uncovered.append((_stk, r[H['year']]))
+            _stk, _yyv = _cov_key(r)
+            if f"{_stk}_{_yyv}" not in have:
+                uncovered.append((_stk, _yyv))
         # 收官十二轮（审查 H/M）：`H.get("备注", -1)` 在缺列时取**最后一列**——
         # 用无关列内容决定豁免（title 同款 bug 已修，这两处漏改）。缺列时不允许
         # 用备注豁免（保守：缺口照报）；且未标注缺口改为集合差而非数量比较
@@ -253,7 +270,7 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
             # 审查十二轮（C1）：iter_rows(values_only=True) 的 r 是 **tuple**——
             # r.get() 必 AttributeError：带备注列的标准产物上本命令恒崩、已收集
             # 的 issue 全丢（"采集→面板→审计"主链路不可用）。同 266 行
-            _flagged_keys = {(str(r[H["stkcd"]]), str(r[H["year"]]))
+            _flagged_keys = {_cov_key(r)
                              for r in real if "不可复现" in str(r[_note_col] or "")}
             flagged = len(_flagged_keys)
             _unflag = [k for k in uncovered if k not in _flagged_keys]
@@ -268,7 +285,10 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
             y = _safe_int(r[H["year"]], None)
             if y is None:
                 continue  # 年份残缺行已在"年份越界/非法"中计 issue
-            p = td / f"{r[H['stkcd']] if isinstance(r[H['stkcd']], str) else str(r[H['stkcd']]).zfill(6)}_{y}.txt.gz"
+            # 收官十九轮（H，同族）：档案名一律 _code6——修前 stkcd 为浮点尾
+            # （"600009.0"）时拼出永不存在的文件名 → 抽验静默跳过（n_have 缩小
+            # 反而全绿）。与覆盖检查的 \d{6}_\d{4} 口径对齐
+            p = td / f"{_code6(r[H['stkcd']])}_{y}.txt.gz"
             if not p.exists():
                 continue
             n_have += 1
@@ -298,7 +318,7 @@ def audit_panel(xlsx: str, texts_dir: str, universe_csv: str = "",
                 y2 = _safe_int(r[H["year"]], None)
                 if y2 is None:
                     continue
-                p2 = td2 / f"{r[H['stkcd']] if isinstance(r[H['stkcd']], str) else str(r[H['stkcd']]).zfill(6)}_{y2}.txt.gz"
+                p2 = td2 / f"{_code6(r[H['stkcd']])}_{y2}.txt.gz"  # 同族：浮点尾 stkcd 曾致繁体扫描静默漏行
                 if not p2.exists():
                     continue
                 try:
