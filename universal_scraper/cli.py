@@ -132,6 +132,9 @@ def main() -> int:
     runp.add_argument("--resume", action="store_true", help="断点续跑")
     runp.add_argument("--limit", type=int, default=None, help="只处理前 N 条（冒烟测试；0=不限，留空=不限）")
     runp.add_argument("--dry-run", action="store_true", help="只校验不抓取")
+    runp.add_argument("--replay", action="store_true",
+                      help="开发模式（R20）：只读本地响应缓存、绝不发网络——改解析规则时"
+                           "不再重打目标站（先正常跑一次生成缓存；未命中结构化失败不是空数据）")
     runp.add_argument("--url", default=None, help="覆盖入口 URL（任务包=start_urls[0]，配置=source.url）")
     runp.add_argument("--log-file", type=Path, default=None, help="日志文件路径")
     runp.add_argument("--max-requests", type=int, default=None,
@@ -236,6 +239,9 @@ def main() -> int:
 
     mcp_p = sub.add_parser("mcp", help="🤖 启动 MCP Server（stdio，供 Claude/Cursor/Codex 调用）")
     mcp_p.add_argument("--once", action="store_true", help="自测：读一次输入即退出")
+    mcp_p.add_argument("--token", default=None,
+                       help="可选：启用到具级令牌校验（等同设 US_MCP_TOKEN；"
+                            "stdio 会话被转发/共享时用，客户端须带 params._token）")
 
     wp = sub.add_parser("webui", help="启动可视化 Web 界面（零依赖本地版）")
     wp.add_argument("--port", type=int, default=8642, help="端口（默认 8642）")
@@ -452,6 +458,16 @@ def main() -> int:
     c2p.add_argument("--out", default="", help="输出 JSON（默认 <捕获文件>_configs.json）")
     c2p.add_argument("--watch", action="store_true",
                      help="👀 监听捕获文件变化，每次落盘稳定后自动重新生成配置草案（Ctrl+C 退出）")
+
+    cu_p = sub.add_parser("curl2config", help="🥟 curl 命令 → 任务配置草案（R20；只解析不执行，"
+                                              "凭据/不支持项明确提醒）")
+    # 注意 dest：不能用 args.cmd（那是子命令名本身，会被覆盖）
+    cu_p.add_argument("--cmd", dest="curl_cmd", default=None,
+                      help="curl 命令字符串（缺省从 stdin 读）")
+    cu_p.add_argument("--name", default="from_curl", help="任务名（默认 from_curl）")
+    cu_p.add_argument("--html", action="store_true",
+                      help="生成 http_html 模板（row_css/fields 待补）而非 http_json")
+    cu_p.add_argument("--out", default="", help="输出配置路径（默认打印到 stdout）")
 
     pdf_p = sub.add_parser("pdf", help="📎 附件批量下载 + 表格型 PDF 结构化（pdfplumber/pypdf）")
     pdf_p.add_argument("--download", default=None, help="下载清单 JSON（[{url,name}] 或 [url]）")
@@ -847,6 +863,9 @@ def main() -> int:
 
     if args.cmd == "mcp":
         from .mcp_server import serve_stdio
+        if getattr(args, "token", None):
+            # R20：可选令牌闸（不落日志；只设进程内环境变量）
+            os.environ["US_MCP_TOKEN"] = str(args.token)
         return serve_stdio(once=args.once)
 
     if args.cmd == "sites":
@@ -1760,6 +1779,27 @@ def main() -> int:
                          ensure_ascii=False))
         return 0
 
+    if args.cmd == "curl2config":
+        import json as _json
+        from .curl_import import build_config
+        _cmd = args.curl_cmd
+        if not _cmd:
+            _cmd = sys.stdin.read()
+        try:
+            r = build_config(_cmd, name=args.name, prefer_html=bool(args.html))
+        except ValueError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 2
+        for w in r["warnings"]:
+            print(f"⚠️ {w}", file=sys.stderr)
+        payload = _json.dumps(r["config"], ensure_ascii=False, indent=2)
+        if args.out:
+            Path(args.out).write_text(payload, encoding="utf-8")
+            print(f"✅ 配置草案 → {args.out}（先 --dry-run 校验，再 --limit 2 小样验证）")
+        else:
+            print(payload)
+        return 0
+
     if args.cmd == "capture2config":
         from .capture_gen import generate
         out = args.out or str(Path(args.capture).with_suffix("").resolve()) + "_configs.json"
@@ -2607,6 +2647,11 @@ def main() -> int:
         return 1
     if args.url:
         config["source"]["url"] = args.url
+    if getattr(args, "replay", False):
+        # R20 开发模式：注入 anti_bot.replay（客户端只读缓存、不发网络）
+        config.setdefault("anti_bot", {})["replay"] = True
+        print("🔁 replay 开发模式：只读本地响应缓存、不发网络（未命中将结构化失败）",
+              file=sys.stderr)
     overrides = {}
     for v in args.var:
         if "=" in v:

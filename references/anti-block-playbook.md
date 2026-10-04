@@ -18,6 +18,7 @@
 | **首页 200 正常，但搜索接口间歇 412「努力加载中」+ `CT_*` cookie + `ctct_bundle` JS；同会话连搜 2-3 次后变 200 空页；换 IP/换指纹几分钟内再次触发** | **CTCT 行为评分（gsxt 实测 2026-09）** | L3 真实 Chrome + 首页探针抓放行窗口；**每窗口只搜一次**；文字点选码 ddddocr det+cls 自动点，图标点选码留人工；详情页/翻页不吃配额，窗口内尽量多收 |
 | 200 但 body 极短（<2KB），含 `document.location`、`document.write`、`stoken`、`__js_challenge`、`setTimeout(...location...)` 之类脚本壳 | JS 挑战壳 | L1 → L2 |
 | **650B 壳页 `<meta id="zh-zse-ck">` + "知乎，让每一次点击都充满意义"；裸 curl 与 curl_cffi 全 403；真浏览器可过，但未登录问题页只渲染 SSR 首批 ~9-15 条回答，滚动不发任何翻页请求（前端根本不发，不是被拦）** | **知乎 zh-zse-ck 挑战 + TLS 指纹 + 未登录列表硬墙（2026-09 实测）** | L2 **有头** patchright 持久 profile 加载即过（headless 会被"安全验证"页拦）；回答列表**必须登录**（用户扫码一次，易盾滑块人工在环）；登录后 feeds 链头 cursor 由页面加载时自发一次（响应监听器须挂在 goto 之前），页内同源 fetch 重放 cursor 链免签名——动线见 R41 |
+| **GraphQL 端点可达（改字段名返回正常校验错误）但请求被 `Need captcha`；或 `Unknown operation named "x"`** | **缺浏览器风控头 / operationName 是白名单** | **借浏览器上下文同源 fetch**（不逆向签名，配方 R48）；`operationName` 与 query 文本从页面 XHR 抄 |
 | 返回验证码图片 / 滑块 / 点选 | 验证码 | L2 + 识别，失败 L4 |
 | 提示登录 / 跳登录页 / 关键字段空且需会员 | 登录墙 | L4（唯一正路） |
 | HTML 干净但没数据（列表空） | 数据走接口 | 接口捕获 |
@@ -311,3 +312,33 @@ L0-L5 解决"进不来"；配额机制是"进得来但限量"。**先判型再�
 
 Clash 等系统代理开着时，"直连"其实走代理节点出口——烧错配额、换 IP 无效、
 误诊本机额度。任何 IP/配额诊断前先跑 `cli ip`（出口 + 系统代理 + 电源三项体检）。
+
+## 八、GraphQL 型站与本机环境坑（2026-10 快手战役补充）
+
+### 8.1 GraphQL 站的判型与绕过
+
+| 症状 | 真相 | 处方 |
+|---|---|---|
+| `curl_cffi`/requests 直连 GraphQL 报 `Need captcha`，但改字段名会返回正常的 `GRAPHQL_VALIDATION_FAILED` 校验错误 | **不是签名算法问题**，是缺浏览器风控头（kuaishou 实测：页面 JS 生成 `kww` 头 + `kwssectoken`/`kwscode` cookie） | **不逆向签名**：`page.evaluate` 里同源 `fetch('/graphql', {credentials:'include'})`，浏览器自动带风控头，滑块自动过。别在 curl 侧换指纹 |
+| `operationName` 传接口名（`visionCommentList`）报 400 | operationName 是**白名单**，须用页面自己的命名（快手是 `commentListQuery`） | 从页面 XHR 捕获里抄 operationName + 完整 query 文本 |
+| 同一接口有两个游标字段（如 `pcursor` / `pcursorV2`），混用后前几页正常、第 N 页起恒 0 条 | V1 游标通道已废弃，混用致游标错乱 | 只用 V2 游标单链翻页；先"逐游标推进"诊断确认每页仍有数据 |
+| `__type` / `__schema` 报 introspection not allowed（Apollo 生产配置） | 正常，introspection 被禁 | **把校验错误当 schema 字典**：`Cannot query field "x" on type "T"` / `Did you mean "y"?` 会主动列出真实字段名。逐字段发请求 + 精确匹配该字段报错来枚举。**别 slice() 截断响应**，否则报错被截掉会全判为"合法"（本任务踩过，45 字段全误判） |
+| 字段命名风格 | **snake_case 与驼峰混用**（`user_id` / `headurl` / `pcursorV2` / `likedCount`） | 不能按单一风格推，必须逐个验证 |
+
+### 8.2 REST 搜索接口的限流信号
+
+- HTTP 200 **不代表成功**：快手 `/rest/v/search/*` 限流时返回 `{"result":2,"error_msg":"操作太快了，请稍微休息一下"}`。
+  **把 `result` 字段当状态码检查**，别看 HTTP 码。恢复需间隔 5s+ 且换关键词；连续 8 个关键词必被限流，
+  隔开后 20 关键词 0 限流。
+- 用多关键词矩阵（`X` / `X时政` / `X最新` / `X官方` …）捞全某账号全部作品，按 `author.id` 精确过滤。
+
+### 8.3 本机（macOS）环境坑 —— 不要再试有头浏览器
+
+| 现象 | 根因 | 处方 |
+|---|---|---|
+| Chrome `--remote-debugging-port=9222` 起不来，日志 `GPU process isn't usable. Goodbye.`，`--disable-gpu` 无效 | macOS seatbelt 沙箱阻止 Chrome 辅助进程 | 放弃 CDP，改 `chromium.launchPersistentContext(headless:true)` |
+| `open-debug-chrome.sh` 报"端口 9222 已被其他程序占用"但 `lsof` 无输出、curl 直连 Connection refused | 脚本用 `curl` 探测，环境代理（`HTTP_PROXY`）造成假阳性 | 探测本地端口必须设 `no_proxy=127.0.0.1,localhost` 或用 `ProxyHandler({})` |
+| **有头浏览器窗口活不过 3-5 分钟自动消失**（`nohup+disown`、`setsid`(macOS 无此命令)、FIFO 保活、PID 保活、异常兜底全试过，均被杀） | 有外部进程管理器清理 GUI/浏览器进程 | **不要依赖有头窗口做登录**。用户登录态拿不到就如实声明字段缺失，别反复消耗用户时间（用户已连续 6 次被关） |
+| 后台浏览器/采集进程被外部杀掉（本机常态） | 同上 | 采集器必须抗杀：`uncaughtException`/`unhandledRejection` 兜底 + **每页落盘** + 同进程内重开浏览器续跑（不要依赖外部守护 shell，它也会被杀） |
+| bash heredoc 里写 JS，`${...}` 模板字符串被 shell 解析报 `Bad substitution` | 未加引号的 heredoc 展开变量 | 用 Write 工具写脚本文件，别在 heredoc 里塞 JS 模板串 |
+| `sed -i ''` 改 macOS 文件报 `No such file or directory` | BSD sed 与 GNU sed 参数差异 | 用 Python `pathlib` 改文件更稳 |

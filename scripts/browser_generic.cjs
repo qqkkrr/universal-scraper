@@ -16,7 +16,7 @@
  */
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseProxy, waitCloudflare, applyResourceBlocking } = require("./browser_common.cjs");
+const { parseProxy, waitCloudflare, applyResourceBlocking, parseStealthOpts } = require("./browser_common.cjs");
 
 let chromium = null;
 // 优先 NODE_PATH 的 playwright（本地 patchright 旧版可能被 WAF 识别），再回退本地 patchright
@@ -313,6 +313,10 @@ function centerCaptcha(page) {
     const ctxOpts = (!profileDir && storageState && fs.existsSync(storageState)) ? { storageState } : {};
     const proxy = parseProxy(arg("proxy", null));
     if (proxy) ctxOpts.proxy = proxy;
+    // R20 隐身细粒度开关（anti_bot.stealth_opts → --stealthOpts JSON）：
+    // 启动参数（canvas 噪声/WebGL/WebRTC/DoH/自定义 flags）+ 上下文（时区/语言/UA）
+    // + 域名级阻断；这里先合入，下面的指纹随机化只在缺省时才填 UA/时区
+    const SO = parseStealthOpts(arg("stealthOpts", ""));
     // 指纹随机化：视口/UA/时区/语言（反检测，patchright/camoufox 思路的轻量版）
     const fp = spec.fingerprint || {};
     if (fp.enabled !== false) {
@@ -336,6 +340,10 @@ function centerCaptcha(page) {
       // 注入 WebGL/Canvas 指纹噪声（patchright 同款思路的极简实现）
       ctxOpts.extraHTTPHeaders = { "Accept-Language": "zh-CN,zh;q=0.9" };
     }
+    // R20：用户显式配置覆盖随机指纹（时区/语言/UA 三项）
+    if (SO.ctx.timezoneId) ctxOpts.timezoneId = SO.ctx.timezoneId;
+    if (SO.ctx.locale) ctxOpts.locale = SO.ctx.locale;
+    if (SO.ctx.userAgent) ctxOpts.userAgent = SO.ctx.userAgent;
     if (cdpUrl) {
       // CDP 直连：附着到用户已开的真实 Chrome（--remote-debugging-port=9222）。
       // 真实浏览器 = 真实指纹 + 真实登录态，是 MediaCrawler/DrissionPage CDP 模式的思路，
@@ -364,7 +372,7 @@ function centerCaptcha(page) {
         ...ctxOpts,
         headless: arg("headless", "0") !== "0",
         executablePath: CHROME_EXE,
-        args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-blink-features=AutomationControlled", "--lang=zh-CN"],
+        args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-blink-features=AutomationControlled", "--lang=zh-CN", ...SO.args],
       });
       persistentCtx = context;  // R8 修复：持久上下文必须被 finish/finally 关闭
       ownCtx = true;
@@ -374,7 +382,7 @@ function centerCaptcha(page) {
       // batch1401 战训：headless-shell 缺失时池直接崩，而 9222 调试 Chrome 往往可用。
       // 启动失败 → 自动探测本机 9222 CDP，活着就降级附加（真实浏览器反而更稳）。
       try {
-        browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox", "--ignore-certificate-errors"] });
+        browser = await chromium.launch({ headless, executablePath: EXE, args: ["--no-sandbox", "--ignore-certificate-errors", ...SO.args] });
         context = await browser.newContext(ctxOpts);
         ownCtx = true;
         page = await context.newPage();
@@ -406,7 +414,7 @@ function centerCaptcha(page) {
     }
     // 资源拦截（Crawlee blockRequests 对标，font/media 默认阻断）：仅对自建 context
     // 启用——CDP 附加的是宿主真实浏览器，route 会拦截用户自己的请求，必须跳过
-    if (ownCtx) await applyResourceBlocking(context);
+    if (ownCtx) await applyResourceBlocking(context, { blockedDomains: SO.blocked, blockAds: SO.blockAds });
     // 控制台/页面错误捕获（诊断"页面为什么没加载数据"的关键）
     // 节流：每类最多输出 50 条，防止 JS 重页面刷爆协议流
     const diagBudget = { console: 50, pageerror: 50, reqfailed: 50, http4xx: 50 };

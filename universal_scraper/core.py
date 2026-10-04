@@ -193,6 +193,73 @@ def _bump_request_count() -> None:
         _HTTP_REQUEST_STATS["count"] += 1
 
 
+def parse_retry_after(headers) -> Optional[float]:
+    """解析 Retry-After 响应头（秒数或 HTTP 日期），无法解析返回 None。
+
+    秒数形态 "120" / 日期形态 "Wed, 21 Oct 2026 07:28:00 GMT" 都支持；
+    日期换算为与当前 UTC 的差值并钳 >=0。"""
+    if not headers:
+        return None
+    raw = ""
+    try:
+        for k in headers:
+            if str(k).lower() == "retry-after":
+                raw = str(headers[k] or "").strip()
+                break
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        return max(float(raw), 0.0)
+    except (TypeError, ValueError):
+        pass
+    try:
+        from datetime import datetime, timezone
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(raw)
+        return max((dt - datetime.now(timezone.utc)).total_seconds(), 0.0)
+    except Exception:
+        return None
+
+
+def _replay_miss(url: str, hint: str = "") -> Dict[str, Any]:
+    """回放模式（R20 开发模式）未命中：**绝不发网络**，结构化失败。
+
+    缺数据优于"以为在回放、其实打了真站"——后者会污染目标站访问记录，
+    也让"解析规则迭代不动网"的承诺失效。"""
+    return {"ok": False, "status": 0, "body": b"", "text": "", "json": None,
+            "url": url, "headers": {}, "replay_miss": True,
+            "error": (f"replay 模式缓存未命中：{url}"
+                      "（先正常跑一次生成缓存，再 --replay 回放）"
+                      + (f"；{hint}" if hint else ""))}
+
+
+def _throttle_domain(url: str) -> str:
+    """节流分域键：URL → 主机名（解析失败回落 "" 单桶）。"""
+    try:
+        return (urllib.parse.urlsplit(str(url or "")).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def _tl_domain(client) -> str:
+    """当前请求的域（_throttle 写入 threading.local；并发 worker 互不串扰）。"""
+    return getattr(getattr(client, "_tl", None), "domain", "")
+
+
+def _thr_note_ok(client) -> float:
+    return client._at.note_ok(_tl_domain(client))
+
+
+def _thr_note_latency(client, latency: float) -> float:
+    return client._at.note_latency(latency, domain=_tl_domain(client))
+
+
+def _thr_note_block(client, kind: str = "", retry_after: Optional[float] = None) -> float:
+    return client._at.note_block(kind, _tl_domain(client), retry_after=retry_after)
+
+
 # ---- 自适应限速（深度改进②，对标 Scrapy AutoThrottle）----
 # 自适应降速此前只活在 v3 HttpFetcher 一层，v1 路径 / api_session / 脚本直用
 # 客户端都享受不到。现在状态挂在 HTTP 客户端实例上，三后端共用同一实现。
@@ -219,75 +286,162 @@ class AdaptiveThrottle:
     各自持独立小锁（不与客户端 _throttle_lock 嵌套，避免锁序问题）。"""
 
     def __init__(self, base_interval: float, enabled: bool = True,
-                 floor: float = 2.0, cap: float = 8.0, speedup_streak: int = 3):
+                 floor: float = 2.0, cap: float = 8.0, speedup_streak: int = 3,
+                 per_domain: bool = True, respect_retry_after: bool = True):
         self.base = max(float(base_interval or 0.0), 0.0)
         self.enabled = bool(enabled)
         self.floor = float(floor)
         self.cap = float(cap)
         self.speedup_streak = max(1, int(speedup_streak))
-        self.ok_streak = 0
-        self.current = self.base
+        # 审查二十轮（R20）：分域桶——多域任务（sitemap/爬取）里 A 站被封不再
+        # 拖慢 B 站；单域任务行为与旧实现完全一致（全部落 "" 桶）。
+        self.per_domain = bool(per_domain)
+        self.respect_retry_after = bool(respect_retry_after)
+        self._states: Dict[str, Dict[str, float]] = {}
+        self._floors: Dict[str, float] = {}     # 域级下限（robots Crawl-delay 等）
         self.last_restore = 0.0    # 最近一次恢复的新间隔（供 fetcher 层播报后清零）
         self.last_block = 0.0      # 最近一次拦截后的新间隔（客户端静默写，fetcher 播报后清零）
-        self._slow_streak = 0
         self._lock = threading.Lock()
 
-    def note_block(self, kind: str = "") -> float:
+    # ---- 分域状态 ----
+    def _key(self, domain: Optional[str]) -> str:
+        return (domain or "") if self.per_domain else ""
+
+    def _state(self, domain: Optional[str]) -> Dict[str, float]:
+        """取域状态（调用方须持锁）。"""
+        k = self._key(domain)
+        st = self._states.get(k)
+        if st is None:
+            base = max(self.base, self._floors.get(k, 0.0))
+            st = {"current": base, "ok_streak": 0, "slow_streak": 0}
+            self._states[k] = st
+        return st
+
+    def _eff_floor(self, k: str) -> float:
+        return max(self.floor, self._floors.get(k, 0.0))
+
+    def set_floor(self, domain: Optional[str], floor: float) -> float:
+        """设置域级下限（robots Crawl-delay / 站点礼貌要求），只抬不降。
+
+        返回生效后的下限；对已存在状态立即生效（current 不足则抬到下限）。"""
+        k = self._key(domain)
+        new = max(float(floor or 0.0), 0.0)
         with self._lock:
-            self.ok_streak = 0
-            self._slow_streak = 0  # 拦截事件重置慢响应计数（防跨事件残留放大）
+            if new <= self._floors.get(k, 0.0):
+                return self._floors.get(k, 0.0)
+            self._floors[k] = new
+            st = self._states.get(k)
+            if st is None:
+                if new > 0:
+                    self._state(k)
+            elif st["current"] < new:
+                st["current"] = new
+            return new
+
+    @property
+    def current(self) -> float:
+        """默认桶当前间隔（向后兼容；分域后请用 wait_seconds(domain)）。"""
+        with self._lock:
+            return self._state("")["current"]
+
+    @property
+    def ok_streak(self) -> int:
+        with self._lock:
+            return int(self._state("")["ok_streak"])
+
+    def snapshot(self) -> Dict[str, Dict[str, float]]:
+        """只读快照（报告/审计用）：{域: {current, floor, ok_streak}}。"""
+        with self._lock:
+            out = {}
+            for k, st in self._states.items():
+                out[k or "(default)"] = {"current": round(st["current"], 3),
+                                         "floor": round(self._eff_floor(k), 3),
+                                         "ok_streak": int(st["ok_streak"])}
+            for k, fl in self._floors.items():
+                if k not in self._states:
+                    out[k or "(default)"] = {"current": round(max(self.base, fl), 3),
+                                             "floor": round(fl, 3), "ok_streak": 0}
+            return out
+
+    def note_block(self, kind: str = "", domain: Optional[str] = None,
+                   retry_after: Optional[float] = None) -> float:
+        """拦截信号 → 间隔抬升（翻倍；服务端给了 Retry-After 则按它抬，取大者）。
+
+        与 Scrapling AutoThrottle 同口径：**封锁事件永不允许提速**（上限钳制
+        不低于当前值），Retry-After 贡献钳在 [0, 600] 秒。"""
+        with self._lock:
+            st = self._state(domain)
+            st["ok_streak"] = 0
+            st["slow_streak"] = 0  # 拦截事件重置慢响应计数（防跨事件残留放大）
             if not self.enabled:
                 return 0.0
-            cur = self.current
-            nxt = min(max(cur * 2.0, self.floor), max(self.cap, cur))
+            cur = st["current"]
+            target = cur * 2.0
+            upper = max(self.cap, cur)
+            if self.respect_retry_after and retry_after:
+                try:
+                    ra = min(max(float(retry_after), 0.0), 600.0)
+                except (TypeError, ValueError):
+                    ra = 0.0
+                target = max(target, ra)
+                # 服务端明确要求等待时，允许越过自适应 cap（硬上限 600s）——
+                # 曾被 max(cap,cur) 钳到 8s，等于无视 Retry-After
+                upper = max(upper, ra)
+            nxt = min(max(target, self._eff_floor(self._key(domain))), upper)
             if nxt <= cur + 1e-9:
                 return 0.0
-            self.current = nxt
+            st["current"] = nxt
             self.last_block = nxt
             return nxt
 
-    def note_ok(self) -> float:
+    def note_ok(self, domain: Optional[str] = None) -> float:
         with self._lock:
+            st = self._state(domain)
             if not self.enabled:
                 return 0.0
-            self.ok_streak += 1
-            # 注意：这里不清 _slow_streak——调用方对同一响应成对调用
+            st["ok_streak"] += 1
+            # 注意：这里不清 slow_streak——调用方对同一响应成对调用
             # note_latency+note_ok（先记后清会把慢计数永远归零，×1.5 机制灭活）；
             # 慢计数的清零只发生在 note_latency 的快响应分支与 note_block。
-            if self.ok_streak >= self.speedup_streak and self.current > self.base + 1e-9:
-                self.current = max((self.current + self.base) / 2.0, self.base)
-                self.ok_streak = 0
-                self.last_restore = self.current
-                return self.current
+            if st["ok_streak"] >= self.speedup_streak and st["current"] > self.base + 1e-9:
+                st["current"] = max((st["current"] + self.base) / 2.0, self.base)
+                st["ok_streak"] = 0
+                self.last_restore = st["current"]
+                return st["current"]
             return 0.0
 
-    def note_latency(self, latency: float, slow_floor: float = 5.0) -> float:
+    def note_latency(self, latency: float, slow_floor: float = 5.0,
+                     domain: Optional[str] = None) -> float:
         """延迟感知降速（Scrapy AutoThrottle 补充，2026-09 精读采纳）：
         连续慢响应在被风控掐住之前就温和放缓。3 连超阈值 → 间隔 ×1.5
         （仍受 cap 约束，复用 last_block 播报通道）。成功快响应清零计数。"""
         with self._lock:
+            st = self._state(domain)
             # base=0（min_interval=0）也保留延迟感知：慢阈值退化为纯 slow_floor。
             # 此前 `self.base <= 0` 门把延迟感知关死而 note_block 仍活跃（门控不对称）。
             if not self.enabled:
                 return 0.0
             thr = max(slow_floor, self.base * 3.0)
             if float(latency or 0.0) >= thr:
-                self._slow_streak += 1
-                if self._slow_streak >= 3:
-                    self._slow_streak = 0
-                    cur = self.current
+                st["slow_streak"] += 1
+                if st["slow_streak"] >= 3:
+                    st["slow_streak"] = 0
+                    cur = st["current"]
                     nxt = min(max(cur * 1.5, cur + 0.5), max(self.cap, cur))
                     if nxt > cur + 1e-9:
-                        self.current = nxt
+                        st["current"] = nxt
                         self.last_block = nxt
                         return nxt
             else:
-                self._slow_streak = 0
+                st["slow_streak"] = 0
             return 0.0
 
-    def wait_seconds(self) -> float:
+    def wait_seconds(self, domain: Optional[str] = None) -> float:
         """本次请求前应等待的间隔（_throttle 消费）。禁用时回落静态基准。"""
-        return self.current if self.enabled else self.base
+        if not self.enabled:
+            return self.base
+        with self._lock:
+            return self._state(domain)["current"]
 
     def pop_block(self) -> float:
         """取走并清除待播报的拦截事件（锁内原子读清，多 worker 不丢不重）。"""
@@ -1111,21 +1265,30 @@ class HttpClient:
     def __post_init__(self) -> None:
         self.max_retries = _clamp_retries(self.max_retries)
         self.cookies = _norm_cookies(self.cookies)
-        self._last_ts = 0.0
+        self._last_ts: Dict[str, float] = {}    # 域 → 上次请求时刻（R20 分域节流）
         self._throttle_lock = threading.Lock()
+        self._tl = threading.local()          # 每线程当前请求域（R20 分域节流归属）
         self._at = AdaptiveThrottle(self.min_interval)
+        self.replay_mode = False              # R20 开发模式：只读缓存、不发网络
+        # R20 附带修复：cache_dir 为字符串（配置里写 "…/cache"）时 .mkdir 裸崩
+        # AttributeError——另两后端都做 Path() 归一，本后端漏了
         if self.cache_dir:
+            self.cache_dir = Path(self.cache_dir)
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     # -- 限速 --
-    def _throttle(self) -> None:
+    def _throttle(self, url: str = "") -> None:
         # 多 worker 并发调用：必须加锁，否则限速形同虚设（可 2 倍突发）
+        # 审查二十轮（R20）：按域分桶——A 站被限速不再拖慢 B 站；单域任务
+        # 行为与旧实现一致（同一桶）
+        dom = _throttle_domain(url) if self._at.per_domain else ""
+        self._tl.domain = dom          # note_* 据此归属同一域（线程局部，防并发串扰）
         with self._throttle_lock:
-            wait = self._at.wait_seconds()
-            elapsed = time.time() - self._last_ts
+            wait = self._at.wait_seconds(dom)
+            elapsed = time.time() - self._last_ts.get(dom, 0.0)
             if elapsed < wait:
                 time.sleep(wait - elapsed)
-            self._last_ts = time.time()
+            self._last_ts[dom] = time.time()
         _bump_request_count()
 
     def _headers(self, extra: Optional[Dict[str, str]]) -> Dict[str, str]:
@@ -1204,6 +1367,8 @@ class HttpClient:
         _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
         if _blk is not None:
             return _blk
+        if getattr(self, "replay_mode", False):
+            use_cache = True                    # R20 回放：强制走缓存读（无缓存=未命中）
         if params:
             url = url + ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
         # 非 ASCII URL（中文参数等）自动百分号编码，urllib 才能请求
@@ -1242,6 +1407,8 @@ class HttpClient:
                 except Exception:
                     cached = None
                 if cached is not None:
+                    if getattr(self, "replay_mode", False):
+                        return cached          # R20 回放：忽略 TTL，绝不做条件请求
                     if self._cache_valid(cf):
                         return cached
                     # 对标 Scrapy HttpCache / Crawlee：TTL 过期但有验证器
@@ -1281,6 +1448,9 @@ class HttpClient:
                             return cached
                         except Exception:
                             return cached
+        # R20 回放模式：命中在上方已返回——走到这里 = 未命中，结构化失败且不发网络
+        if getattr(self, "replay_mode", False):
+            return _replay_miss(url)
 
         result: Optional[Dict[str, Any]] = None
         # 注意：不要用 socket.setdefaulttimeout 改进程级全局超时——多线程 worker
@@ -1306,7 +1476,7 @@ class HttpClient:
         last_status = 0
         result: Optional[Dict[str, Any]] = None
         for attempt in range(1, max(self.max_retries, 1) + 1):
-            self._throttle()
+            self._throttle(url)
             req = urllib.request.Request(
                 url, data=body_bytes or None,
                 headers=self._headers(headers), method=method,
@@ -1378,8 +1548,8 @@ class HttpClient:
                         # fetcher 再比 `len(body) > max_size` 恒 False，半截响应被当完整
                         "truncated": _trunc1,
                     }
-                    self._at.note_latency(time.time() - _t0)
-                    self._at.note_ok()
+                    _thr_note_latency(self, time.time() - _t0)
+                    _thr_note_ok(self)
                     break
             except RedirectBlockedError as e:
                 # 审查八轮（HIGH）：重定向逐跳复检命中——结构化失败，不重试
@@ -1427,19 +1597,22 @@ class HttpClient:
                     }
                     # 与另两后端成功路径对齐：完成了一次 HTTP 往返即记成功+延迟
                     # （漏记会让 ok_streak 永不增长 → 降速后永不恢复）
-                    self._at.note_ok()
-                    self._at.note_latency(time.time() - _t0)
+                    _thr_note_ok(self)
+                    _thr_note_latency(self, time.time() - _t0)
                     break
                 if status in (429, 403, 500, 502, 503, 504):
                     last_err = f"HTTP {status}"
                     last_status = status
                     last_headers = {k.lower(): v for k, v in e.headers.items()} if e.headers else {}
-                    self._at.note_block(f"http{status}")
+                    _thr_note_block(self, f"http{status}",
+                                    retry_after=parse_retry_after(last_headers))
                     if status == 429 and last_headers.get("retry-after"):
                         # 429 + Retry-After：不内部退避，立即交还引擎按服务端要求调度（避免耗掉窗口）
+                        # R20：把服务端要求带上（引擎按它延迟重试；节流器按它抬间隔）
                         result = {"ok": False, "status": status, "body": raw,
                                   "text": _decode_body(raw, last_headers),
-                                  "json": None, "url": url, "headers": last_headers}
+                                  "json": None, "url": url, "headers": last_headers,
+                                  "retry_after": parse_retry_after(last_headers)}
                         break
                     wait = self.backoff_base ** attempt + random.uniform(0, 1)
                     log(f"  请求失败 {status}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
@@ -1694,7 +1867,7 @@ class RequestsClient:
         self.cache_dir = Path(cache_dir) if cache_dir else None
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self._last_ts = 0.0
+        self._last_ts: Dict[str, float] = {}    # 域 → 上次请求时刻（R20 分域节流）
         self.session = _guarded_requests_session(requests)
         # R112 修复（P2）：显式直连不读环境代理（http_proxy/https_proxy 环境变量
         # 会把 B站风控敏感流量劫进用户代理）——在会话创建后立即设置
@@ -1708,20 +1881,24 @@ class RequestsClient:
         if cookies:
             self.session.cookies.update(_norm_cookies(cookies))
         self._throttle_lock = threading.Lock()
+        self._tl = threading.local()          # 每线程当前请求域（R20 分域节流归属）
         # 连接池
         adapter = requests.adapters.HTTPAdapter(pool_connections=8, pool_maxsize=16, max_retries=0)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
         self._at = AdaptiveThrottle(min_interval)
+        self.replay_mode = False              # R20 开发模式：只读缓存、不发网络
 
-    def _throttle(self) -> None:
+    def _throttle(self, url: str = "") -> None:
         # 多 worker 并发调用：必须加锁，否则限速形同虚设（可 2 倍突发）
+        dom = _throttle_domain(url) if self._at.per_domain else ""   # R20：分域桶
+        self._tl.domain = dom          # note_* 据此归属同一域（线程局部，防并发串扰）
         with self._throttle_lock:
-            wait = self._at.wait_seconds()
-            elapsed = time.time() - self._last_ts
+            wait = self._at.wait_seconds(dom)
+            elapsed = time.time() - self._last_ts.get(dom, 0.0)
             if elapsed < wait:
                 time.sleep(wait - elapsed)
-            self._last_ts = time.time()
+            self._last_ts[dom] = time.time()
         _bump_request_count()
 
     def request(self, url: str, method: str = "GET", params=None, data=None,
@@ -1734,6 +1911,10 @@ class RequestsClient:
         if use_cache:
             _warn_once("requests 后端暂不支持 use_cache（本次请求照常发出，未读写缓存）"
                        "——需要缓存请用默认 curl_cffi 后端或 urllib 后端")
+        # R20 回放模式：requests 后端无缓存实现——结构化失败且不发网络
+        # （工厂层在 replay 开启时会优先改选可缓存后端，正常不会走到这里）
+        if getattr(self, "replay_mode", False):
+            return _replay_miss(url, "requests 后端不支持缓存，请用 curl_cffi/urllib 后端")
         _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
         if _blk is not None:
             return _blk
@@ -1765,7 +1946,7 @@ class RequestsClient:
         last_err = "requests 请求失败"
         last_status = 0
         for attempt in range(1, max(self.max_retries, 1) + 1):
-            self._throttle()
+            self._throttle(url)
             try:
                 kw = {"params": params, "data": data, "json": json_data,
                       "headers": h, "timeout": self.timeout, "allow_redirects": True}
@@ -1794,7 +1975,8 @@ class RequestsClient:
                     except Exception:
                         pass
                     if resp.status_code == 429:
-                        self._at.note_block("http429")
+                        _ra = parse_retry_after(resp.headers)   # R20：服务端要求带进节流与重试
+                        _thr_note_block(self, "http429", retry_after=_ra)
                         # HTTP 往返已完整走通（非网络层失败）——清零连击计数，
                         # 防止"网络失败→404/429→网络失败"误触发换线告警
                         _note_net_result(True)
@@ -1802,11 +1984,12 @@ class RequestsClient:
                         return {"ok": False, "status": 429, "body": raw, "text": _t,
                                 "json": None, "url": resp.url,
                                 "headers": {k.lower(): v for k, v in resp.headers.items()},
+                                "retry_after": _ra,
                                 "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None)}
                     if resp.status_code in (403, 500, 502, 503, 504):
                         last_status = resp.status_code
                         last_err = f"HTTP {resp.status_code}"
-                        self._at.note_block(f"http{resp.status_code}")
+                        _thr_note_block(self, f"http{resp.status_code}")
                         wait = self.backoff_base ** attempt + random.uniform(0, 1)
                         log(f"  请求失败 {resp.status_code}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
                         time.sleep(wait)
@@ -1835,8 +2018,8 @@ class RequestsClient:
                     _text = (smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()})
                              if raw else (resp.text or ""))
                     _note_net_result(True)
-                    self._at.note_latency(time.time() - _t0)
-                    self._at.note_ok()
+                    _thr_note_latency(self, time.time() - _t0)
+                    _thr_note_ok(self)
                     return {"ok": True, "status": resp.status_code, "body": raw,
                             "text": _text, "json": parsed, "url": resp.url,
                             "headers": {k.lower(): v for k, v in resp.headers.items()},
@@ -1916,22 +2099,26 @@ class CurlCffiClient:
         self.backoff_base = backoff_base
         self.impersonate_pool = ["chrome", "safari17_0", "firefox133", "edge101"]  # impersonate="auto" 时轮换
         self._throttle_lock = threading.Lock()
+        self._tl = threading.local()          # 每线程当前请求域（R20 分域节流归属）
         self.extra_headers = dict(extra_headers or {})
         self.cookies = _norm_cookies(cookies)
         self.cache_dir = Path(cache_dir) if cache_dir else None
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self._last_ts = 0.0
+        self._last_ts: Dict[str, float] = {}    # 域 → 上次请求时刻（R20 分域节流）
         self._at = AdaptiveThrottle(min_interval)
+        self.replay_mode = False              # R20 开发模式：只读缓存、不发网络
 
-    def _throttle(self) -> None:
+    def _throttle(self, url: str = "") -> None:
         # 多 worker 并发调用：必须加锁，否则限速形同虚设（可 2 倍突发）
+        dom = _throttle_domain(url) if self._at.per_domain else ""   # R20：分域桶
+        self._tl.domain = dom          # note_* 据此归属同一域（线程局部，防并发串扰）
         with self._throttle_lock:
-            wait = self._at.wait_seconds()
-            elapsed = time.time() - self._last_ts
+            wait = self._at.wait_seconds(dom)
+            elapsed = time.time() - self._last_ts.get(dom, 0.0)
             if elapsed < wait:
                 time.sleep(wait - elapsed)
-            self._last_ts = time.time()
+            self._last_ts[dom] = time.time()
         _bump_request_count()
 
     def request(self, url: str, method: str = "GET", params=None, data=None,
@@ -1941,6 +2128,8 @@ class CurlCffiClient:
         _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
         if _blk is not None:
             return _blk
+        if getattr(self, "replay_mode", False):
+            use_cache = True                    # R20 回放：强制走缓存读（无缓存=未命中）
         import curl_cffi.requests as cffi
         h = {"Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"}
         h.update(self.extra_headers)
@@ -2011,6 +2200,8 @@ class CurlCffiClient:
                 except Exception:
                     cached = None
                 if cached is not None:
+                    if getattr(self, "replay_mode", False):
+                        return cached          # R20 回放：忽略 TTL，绝不发条件请求
                     if _cache_valid(cf):
                         return cached
                     ch = cached.get("headers") or {}
@@ -2021,10 +2212,13 @@ class CurlCffiClient:
                     if _reval_cond:
                         _revalidating = True
                         h.update(_reval_cond)
+        # R20 回放模式：命中在上方已返回——走到这里 = 未命中，结构化失败且不发网络
+        if getattr(self, "replay_mode", False):
+            return _replay_miss(url)
         last_err = ""
         last_status = 0
         for attempt in range(1, max(self.max_retries, 1) + 1):
-            self._throttle()
+            self._throttle(url)
             try:
                 _t0 = time.time()
                 # 审查八轮（HIGH→补完）：改用手动跟随 + 逐跳事前复检——libcurl 内部
@@ -2080,7 +2274,8 @@ class CurlCffiClient:
                         pass
                     if resp.status_code == 429:
                         # 429 不内部重试：立即交回，让引擎按 Retry-After 调度（保留状态码）
-                        self._at.note_block("http429")
+                        _ra = parse_retry_after(resp.headers)   # R20：服务端要求带进节流与重试
+                        _thr_note_block(self, "http429", retry_after=_ra)
                         # HTTP 往返已完整走通（非网络层失败）——清零连击计数，
                         # 防止"网络失败→404/429→网络失败"误触发换线告警
                         _note_net_result(True)
@@ -2088,11 +2283,12 @@ class CurlCffiClient:
                         return {"ok": False, "status": 429, "body": raw, "text": _t,
                                 "json": None, "url": str(resp.url),
                                 "headers": {k.lower(): v for k, v in resp.headers.items()},
+                                "retry_after": _ra,
                                 "raw_headers": resp.headers}
                     if resp.status_code in (403, 500, 502, 503, 504):
                         last_err = f"HTTP {resp.status_code}"
                         last_status = resp.status_code
-                        self._at.note_block(f"http{resp.status_code}")
+                        _thr_note_block(self, f"http{resp.status_code}")
                         wait = self.backoff_base ** attempt + random.uniform(0, 1)
                         log(f"  curl_cffi 请求失败 {resp.status_code}，{wait:.1f}s 后重试", "WARN")
                         time.sleep(wait)
@@ -2122,8 +2318,8 @@ class CurlCffiClient:
                     _text = (smart_decode(raw, {k.lower(): v for k, v in resp.headers.items()})
                              if raw else (resp.text or ""))
                     _note_net_result(True)
-                    self._at.note_latency(time.time() - _t0)
-                    self._at.note_ok()
+                    _thr_note_latency(self, time.time() - _t0)
+                    _thr_note_ok(self)
                     if _revalidating and resp.status_code == 304:
                         # 条件重验证命中：内容未变——刷新 TTL 续期并复用旧缓存。
                         # 审查六轮（M3）：读缓存失败曾落到 res_out（ok=True+空体
@@ -2211,6 +2407,48 @@ class CurlCffiClient:
         return self.request(url, "POST", **kw)
 
 
+_AUTOTHROTTLE_KEYS = {"enabled", "floor", "cap", "speedup_streak",
+                      "per_domain", "respect_retry_after"}
+
+
+def _apply_autothrottle_opts_early(anti: Dict[str, Any]) -> bool:
+    """解析 anti.autothrottle（bool 或 dict）为 enabled 布尔；dict 形态先校验键名。"""
+    opt = anti.get("autothrottle", True)
+    if isinstance(opt, dict):
+        _unknown = {str(k) for k in opt} - _AUTOTHROTTLE_KEYS
+        if _unknown:
+            log(f"  ⚠️ anti_bot.autothrottle 未知键 {sorted(_unknown)}（已忽略；可用: "
+                f"{'/'.join(sorted(_AUTOTHROTTLE_KEYS))}）", "WARN")
+        return bool(opt.get("enabled", True))
+    return bool(opt) if opt is not None else True
+
+
+def _apply_autothrottle_opts(client: Any, anti: Dict[str, Any], enabled: bool) -> None:
+    """把 anti.autothrottle 调参应用到客户端节流器（R20 扩展，bool 形态向后兼容）。"""
+    at = getattr(client, "_at", None)
+    if at is None:
+        return
+    at.enabled = enabled
+    opt = anti.get("autothrottle")
+    if not isinstance(opt, dict):
+        return
+    for k in ("floor", "cap"):
+        if k in opt:
+            try:
+                setattr(at, k, float(opt[k]))
+            except (TypeError, ValueError):
+                log(f"  ⚠️ anti_bot.autothrottle.{k}={opt[k]!r} 非数值，忽略", "WARN")
+    if "speedup_streak" in opt:
+        try:
+            at.speedup_streak = max(1, int(opt["speedup_streak"]))
+        except (TypeError, ValueError):
+            log(f"  ⚠️ anti_bot.autothrottle.speedup_streak={opt['speedup_streak']!r} 非法，忽略", "WARN")
+    if "per_domain" in opt:
+        at.per_domain = bool(opt["per_domain"])
+    if "respect_retry_after" in opt:
+        at.respect_retry_after = bool(opt["respect_retry_after"])
+
+
 def make_http_client(anti: Dict[str, Any], **kw) -> Any:
     """按 anti.http_backend 选择 HTTP 客户端：curl_cffi（伪装指纹）→ requests → urllib。
     anti 可含: http_backend("auto"/"curl_cffi"/"requests"/"urllib"), impersonate,
@@ -2244,13 +2482,20 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
         verify=bool(anti.get("verify", True)),
     )
     common.update(kw)
-    # 自适应限速开关（深度改进②）：默认开；anti.autothrottle=false 可关（回静态限速）
-    _at_enabled = bool(anti.get("autothrottle", True))
+    # 自适应限速开关（深度改进②）：默认开；anti.autothrottle=false 可关（回静态限速）。
+    # R20：也接受 dict 形态调参（floor/cap/speedup_streak/per_domain/respect_retry_after）
+    _at_enabled = _apply_autothrottle_opts_early(anti)
+    # R20 回放模式：requests 后端无缓存 → 改选 urllib（有缓存实现），保证"不动网"承诺
+    _replay = bool(anti.get("replay"))
+    if _replay and backend == "requests":
+        log("  ⚠️ replay 模式与 requests 后端不兼容（无缓存实现）——本次改用 urllib 后端", "WARN")
+        backend = "urllib"
     if backend in ("auto", "curl_cffi"):
         try:
             client = CurlCffiClient(impersonate=anti.get("impersonate", "chrome"), **common)
             client._backend_name = "curl_cffi"
-            client._at.enabled = _at_enabled
+            _apply_autothrottle_opts(client, anti, _at_enabled)
+            client.replay_mode = _replay
             return client
         except Exception as _e:
             # 降级必须可诊断（TLS 指纹伪装静默失效曾导致被反爬拦截却查不到原因）
@@ -2260,7 +2505,8 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
             __import__("requests")  # 可用性探测：未安装则抛 ImportError
             client = RequestsClient(**common)
             client._backend_name = "requests"
-            client._at.enabled = _at_enabled
+            _apply_autothrottle_opts(client, anti, _at_enabled)
+            client.replay_mode = _replay
             return client
         except Exception as _e:
             log(f"⚠️ HTTP 后端降级: requests 不可用({_e})，改用 urllib", "WARN")
@@ -2273,5 +2519,6 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
                         cache_dir=common.get("cache_dir"),
                         use_system_proxy=bool(anti.get("use_system_proxy", False)))
     client._backend_name = "urllib"
-    client._at.enabled = _at_enabled
+    _apply_autothrottle_opts(client, anti, _at_enabled)
+    client.replay_mode = _replay
     return client

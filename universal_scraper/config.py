@@ -272,6 +272,55 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(cs, str) or cs not in CAPTCHA_STRATEGIES:
         raise ConfigError("anti_bot.captcha.strategy", f"未知验证码策略 '{cs}'",
                           f"可选: {', '.join(sorted(CAPTCHA_STRATEGIES))}")
+    # R20：autothrottle 支持 bool（开关）或 dict（调参）——dict 未知键直接拦，
+    # 防"调参键拼错→静默用默认值"（与 ACTION_KEY_SPEC 同口径）
+    _at = ab.get("autothrottle")
+    if _at is not None and not isinstance(_at, (bool, dict)):
+        raise ConfigError("anti_bot.autothrottle",
+                          f"autothrottle 应为 bool 或 dict，实际 {type(_at).__name__}",
+                          '例如: false 或 {"floor": 2, "cap": 8, "per_domain": true, '
+                          '"respect_retry_after": true}')
+    if isinstance(_at, dict):
+        _at_allowed = {"enabled", "floor", "cap", "speedup_streak",
+                       "per_domain", "respect_retry_after"}
+        _at_unk = {str(k) for k in _at} - _at_allowed
+        if _at_unk:
+            raise ConfigError("anti_bot.autothrottle", f"未知键: {sorted(_at_unk)}",
+                              f"合法键: {sorted(_at_allowed)}")
+    # R20 开发模式回放：anti_bot.replay 须为布尔
+    if ab.get("replay") is not None and not isinstance(ab.get("replay"), bool):
+        raise ConfigError("anti_bot.replay",
+                          f"replay 应为布尔值，实际 {type(ab.get('replay')).__name__}",
+                          '例如: "anti_bot": {"replay": true}（只读缓存、不发网络）')
+    # R20 隐身细粒度开关：anti_bot.stealth_opts（浏览器启动参数/上下文/域名阻断）
+    _so = ab.get("stealth_opts")
+    if _so is not None:
+        if not isinstance(_so, dict):
+            raise ConfigError("anti_bot.stealth_opts",
+                              f"stealth_opts 应为 dict，实际 {type(_so).__name__}",
+                              '例如: {"hide_canvas": true, "block_webrtc": true, '
+                              '"timezone": "Asia/Shanghai", "block_ads": true}')
+        _SO_BOOLS = {"hide_canvas", "block_webrtc", "dns_over_https", "block_ads", "allow_webgl"}
+        _SO_STRS = {"timezone", "locale", "user_agent"}
+        _SO_LISTS = {"extra_flags", "blocked_domains"}
+        _so_unk = {str(k) for k in _so} - _SO_BOOLS - _SO_STRS - _SO_LISTS
+        if _so_unk:
+            raise ConfigError("anti_bot.stealth_opts", f"未知键: {sorted(_so_unk)}",
+                              f"合法键: {sorted(_SO_BOOLS | _SO_STRS | _SO_LISTS)}")
+        for k in _SO_BOOLS & set(_so):
+            if not isinstance(_so[k], bool):
+                raise ConfigError(f"anti_bot.stealth_opts.{k}",
+                                  f"{k} 应为布尔值，实际 {type(_so[k]).__name__}")
+        for k in _SO_STRS & set(_so):
+            if not isinstance(_so[k], str):
+                raise ConfigError(f"anti_bot.stealth_opts.{k}",
+                                  f"{k} 应为字符串，实际 {type(_so[k]).__name__}",
+                                  '例如: "timezone": "Asia/Shanghai"')
+        for k in _SO_LISTS & set(_so):
+            if not isinstance(_so[k], list) or not all(isinstance(x, str) for x in _so[k]):
+                raise ConfigError(f"anti_bot.stealth_opts.{k}",
+                                  f"{k} 应为字符串数组",
+                                  '例如: "blocked_domains": ["ads.example.com"]')
     # 审查十九轮（H，契约对账）：v2 校验器此前缺 v3 同款的容器类型守卫——
     # 引擎直接消费的这几个键坏类型时 validate 放行、运行期裸崩：
     #   vars=list/null → dict(...) ValueError/TypeError；output=list → .get AttributeError
@@ -545,4 +594,18 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
     if st.get("type") == "multi" and not st.get("backends"):
         raise ConfigError("storage.backends", "multi 存储需要 backends 数组",
                           '[{"type": "jsonl"}, {"type": "sqlite"}]')
+    # R20：autothrottle 形状校验（与 v2 同口径；v3 此前完全不校验 anti_bot）
+    _at3 = (cfg.get("anti_bot") or {}).get("autothrottle") \
+        if isinstance(cfg.get("anti_bot") or {}, dict) else None
+    if _at3 is not None and not isinstance(_at3, (bool, dict)):
+        raise ConfigError("anti_bot.autothrottle",
+                          f"autothrottle 应为 bool 或 dict，实际 {type(_at3).__name__}",
+                          '例如: false 或 {"floor": 2, "cap": 8}')
+    if isinstance(_at3, dict):
+        _at3_allowed = {"enabled", "floor", "cap", "speedup_streak",
+                        "per_domain", "respect_retry_after"}
+        _at3_unk = {str(k) for k in _at3} - _at3_allowed
+        if _at3_unk:
+            raise ConfigError("anti_bot.autothrottle", f"未知键: {sorted(_at3_unk)}",
+                              f"合法键: {sorted(_at3_allowed)}")
     return cfg

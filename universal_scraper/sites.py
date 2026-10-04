@@ -62,8 +62,10 @@ HIGH_FREQUENCY_SITES = [
      "desc": "搜索结果（标题/链接/摘要）", "difficulty": "中·有反爬"},
     {"name": "抖音", "domain": "douyin.com", "module": "douyin", "status": "🔧 浏览器模式·需登录调优",
      "desc": "视频列表", "difficulty": "高·需登录"},
-    {"name": "快手", "domain": "kuaishou.com", "module": "kuaishou", "status": "🔧 浏览器模式·需登录调优",
-     "desc": "视频列表", "difficulty": "高·需登录"},
+    {"name": "快手", "domain": "kuaishou.com", "module": "kuaishou", "status": "✅ 评论/API·免登录",
+     "desc": "视频评论+用户主页（GraphQL）", "difficulty": "中·接口需浏览器上下文",
+     "url_tips": "评论走 operationName=commentListQuery + 只用 pcursorV2 翻页；直连必 Need captcha；"
+                 "定位账号用 /rest/v/search/user|feed。配方 R47"},
     {"name": "沈阳体育学院学报", "domain": "stxb.magtech.com.cn", "module": "sytyxb", "status": "✅ 已精配",
      "desc": "期刊全文/PDF（magtech 系统，2024 起免费）", "difficulty": "低·公开全文",
      "url_tips": "期次: /CN/Y<年>/V<卷>/I<期>；文章: /CN/<DOI>；PDF 由 showArticleFile.do 换取直链"},

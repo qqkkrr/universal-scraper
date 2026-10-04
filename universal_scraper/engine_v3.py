@@ -1037,6 +1037,18 @@ class EngineV3:
             _bs = f"反爬拦截统计: {block_summary(blocks)}"
             self.logger.info(_bs)
             self._notify(_bs)
+        # R20：按域节流状态进统计（机器可读，喂 WebUI/报告；只报被自适应抬过的域）
+        try:
+            _at = getattr(getattr(self.fetcher, "http", None), "_at", None)
+            if _at is not None and hasattr(_at, "snapshot"):
+                _snap = {k: v for k, v in _at.snapshot().items()
+                         if isinstance(v, dict) and v.get("current", 0) > max(v.get("floor", 0), 0) + 1e-9}
+                if _snap:
+                    self.stats["throttle"] = _snap
+                    _slow = "；".join(f"{k}→{v['current']:.1f}s" for k, v in list(_snap.items())[:4])
+                    self.logger.info(f"自适应节流：{_slow}")
+        except Exception:
+            pass
         # 代理池战况（深度改进①）：直连回退次数必须让用户看见——裸奔要可审计
         _pp = getattr(self.fetcher, "proxy_pool", None)
         if _pp is not None and getattr(_pp, "size", 0):
@@ -1492,6 +1504,15 @@ class EngineV3:
             return
         url_field = detail.get("url_field", "url")
         extract = detail.get("extract", []) or []
+        # R20 自适应：任务级指纹库（改版后按元素指纹找回字段）；失败静默降级
+        _adaptive = bool(detail.get("adaptive", True))
+        _fpstore = None
+        if _adaptive:
+            try:
+                from .fingerprint import FingerprintStore, store_path_for
+                _fpstore = FingerprintStore(store_path_for(self.task.root))
+            except Exception:
+                _fpstore = None
         max_pages = int(detail.get("max_pages", 0)) or len(rows)
         concurrency = max(1, int(detail.get("concurrency", 2)))
         interval = float(detail.get("interval", 0.5))
@@ -1618,6 +1639,22 @@ class EngineV3:
                             _v = ConfigParser._guess_field(_doc, _n)
                         except Exception:
                             _v = ""
+                    # R20 自适应：空值→指纹找回（验证门：元素自身取值非空）、
+                    # 非空→保存指纹；闭环策略在 fingerprint.rescue_field（不在引擎里
+                    # 复制），非空抽取绝不被覆盖
+                    if _adaptive and _fpstore is not None:
+                        from .core import _throttle_domain
+                        from .fingerprint import rescue_field
+                        try:
+                            _v, _act = rescue_field(
+                                _fpstore, f"{_throttle_domain(u)}|{_n}", html, spec,
+                                current=_v)
+                            if _act == "rescued":
+                                self.logger.warn(
+                                    f"  🔁 字段 {_n} 选择器失效但按元素指纹找回成功（结构疑似改版）")
+                        except Exception as _re:
+                            self.logger.warn(f"  ⚠️ 指纹找回异常（按原值继续）: "
+                                             f"{type(_re).__name__}: {str(_re)[:80]}")
                     # R33 修复：详情页空壳/验证码时提取为空——此前无条件 r[_n]=_v
                     # 会把列表页已有的非空值（如 publish_time）覆盖成 ""（字段级
                     # 数据丢失且 detail_status 还显示 200）。契约是"缺失才补全"
@@ -1667,6 +1704,12 @@ class EngineV3:
                     pass
             raise
         ex.shutdown(wait=True)
+        # R20：指纹库一次落盘（脏才写；失败静默，不阻断交付）
+        if _fpstore is not None:
+            try:
+                _fpstore.flush()
+            except Exception:
+                pass
 
         # 详情后过滤/后处理（如按发布日期区间、从详情文本派生新列）：对合并后的
         # 记录再跑一次完整管道。收官十五轮：新增 post_pipeline 键（与 v2 跨引擎

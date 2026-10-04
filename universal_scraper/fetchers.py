@@ -15,7 +15,8 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from .core import log, die, smart_decode, update_cookie_jar, jar_cookie_header, safe_fname, _budget_auto_mark
+from .core import (log, die, smart_decode, update_cookie_jar, jar_cookie_header, safe_fname,
+                   _budget_auto_mark, _throttle_domain)
 from .antibot import solve_captcha_file, detect_block
 from .session import SessionPool
 from .selectors import jpath, css_text, xpath_text
@@ -273,7 +274,11 @@ class HttpFetcher(BaseFetcher):
             if bd["kind"] in ("cloudflare", "verify", "captcha", "rate_limit", "anti_bot",
                               "session_flagged", "waf", "429", "403"):
                 from .protocols import RateLimitedError
-                raise RateLimitedError(url, retry_after=None, detail=f"反爬拦截[{bd['kind']}] {bd['detail']}")
+                # R20：内核解析出的 Retry-After 透传给引擎——v3 据此延迟重试
+                # （engine_v3 消费 error.retry_after）；此前恒 None = 无视服务端窗口
+                _ra = float(res.get("retry_after") or 0.0) or None
+                raise RateLimitedError(url, retry_after=_ra,
+                                       detail=f"反爬拦截[{bd['kind']}] {bd['detail']}")
         return res
 
     def fetch_list(self, pagination: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -291,6 +296,13 @@ class HttpFetcher(BaseFetcher):
             for _k, _v in _orig.items():
                 if _v is not None or _k in self.source:
                     self.source[_k] = _v
+            # R20：指纹库一次落盘（脏才写，失败静默——不阻断主流程）
+            _st = getattr(self, "_fp_store_cache", None)
+            if _st is not None:
+                try:
+                    _st.flush()
+                except Exception:
+                    pass
 
     def _fetch_list_impl(self, pagination: Dict[str, Any]) -> List[Dict[str, Any]]:
         s = self.source
@@ -309,6 +321,15 @@ class HttpFetcher(BaseFetcher):
                     raise PermissionError(
                         f"robots.txt 禁止抓取 {url0}——请更换目标或确认你有合法访问权"
                     )
+                # R20：robots Crawl-delay 抬为本域节流下限（只抬不降）——
+                # 此前只解析不消费，等于忽略站点的礼貌要求
+                try:
+                    _cd = float(self._robots_checker.crawl_delay(url0) or 0.0)
+                    if _cd > 0 and getattr(self, "http", None) is not None:
+                        self.http._at.set_floor(_throttle_domain(url0), _cd)
+                        log(f"  🤝 robots Crawl-delay {_throttle_domain(url0)}: {_cd:.1f}s（本域下限）")
+                except Exception:
+                    pass
             except PermissionError:
                 raise
             except Exception:
@@ -553,16 +574,62 @@ class HttpFetcher(BaseFetcher):
                 page += 1
         return records
 
+    def _fp_store(self):
+        """任务级指纹库（R20 自适应；懒建，失败静默降级为 None）。
+
+        source.adaptive=false 在此统一闸掉（不靠调用方记得判断）。"""
+        if getattr(self, "_fp_store_cache", "unset") != "unset":
+            return self._fp_store_cache
+        store = None
+        if not bool(self.source.get("adaptive", True)):
+            self._fp_store_cache = None
+            return None
+        try:
+            from .fingerprint import FingerprintStore, store_path_for
+            _dir = getattr(self.http, "cache_dir", None) or os.getcwd()
+            store = FingerprintStore(store_path_for(_dir))
+        except Exception:
+            store = None
+        self._fp_store_cache = store
+        return store
+
     def _extract_html_rows(self, html: str) -> List[Dict[str, Any]]:
         s = self.source
         row_css = s.get("row_css") or s.get("row_xpath")
         fields = s.get("fields", {})
+        _sel_key = str(row_css or "tr")
+        _adaptive = bool(s.get("adaptive", True))
+        _store = self._fp_store() if _adaptive else None
+        _rk = f"{_throttle_domain(s.get('url') or '')}|{_sel_key}"
         if s.get("row_xpath"):
             from .selectors import xpath_elements
             rows = xpath_elements(html, s["row_xpath"])
         else:
             from .selectors import css_elements
             rows = css_elements(html, row_css or "tr")
+        # R20 自适应：选择器 0 行 ≠ 没数据（改版常见）——按元素指纹找回；
+        # 只在 0 行时触发，非空抽取绝不被覆盖（静默错数据比缺数据更糟）
+        _relocated = False
+        if not rows and _store is not None:
+            fp = _store.get_row(_rk)
+            if fp:
+                try:
+                    from .fingerprint import DEFAULT_THRESHOLD, relocate_in_html
+                    cand = relocate_in_html(html, fp, threshold=DEFAULT_THRESHOLD)
+                except Exception:
+                    cand = []
+                if cand:
+                    log(f"  🔁 选择器 0 行但按元素指纹找回 {len(cand)} 行（结构疑似改版）: {_sel_key}", "WARN")
+                    rows = cand
+                    _relocated = True
+                else:
+                    log(f"  ⚠️ 选择器 0 行且指纹找回失败（{_sel_key}）——需重学选择器", "WARN")
+        if rows and _store is not None:
+            try:
+                from .fingerprint import element_fingerprint
+                _store.put_row(_rk, element_fingerprint(rows[0]))
+            except Exception:
+                pass
         out = []
         from .selectors import _lxml_html_tostring  # 函数内延迟导入（lxml 可选依赖）
         for el in rows:
@@ -594,6 +661,15 @@ class HttpFetcher(BaseFetcher):
                 else:
                     row[name] = el_html
             out.append(row)
+        # R20 验证门：指纹找回的行若字段全空（字段选择器也随改版失效），不产出
+        # "有行无值"的假成功——交回 0 结果诊断链（缺数据优于错数据）
+        if _relocated and out and fields:
+            _any_val = any(str(v or "").strip() for row in out for v in row.values()
+                           if not isinstance(v, dict))
+            if not _any_val:
+                log("  ⚠️ 指纹找回的行字段全空（字段选择器也已失效）——需重学字段选择器，"
+                    "本次按 0 结果交回诊断链", "WARN")
+                return []
         return out
 
     def _next_url(self, html: str, sel: Optional[str]) -> Optional[str]:
