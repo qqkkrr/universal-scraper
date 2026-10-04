@@ -12,8 +12,6 @@
 - xhs：liked_count "999+"
 """
 import gzip
-import json
-import os
 import re
 import sys
 import threading

@@ -2025,46 +2025,14 @@ def _col_fields(vxs, header_fields):
             fields[ci] = f
     return fields
 
-def _line_field_text(line, vxs, col_fields):
-    """字符级分列：返回 {field: text}（T 对齐保留词间空格）。"""
-    T = line.get_text()
-    chars = [c for c in line if isinstance(c, LTChar) and c.get_text()]
-    cells = {}
-    ti = 0
-    for c in chars:
-        while ti < len(T) and T[ti] in (" ", "\u3000"):
-            # 空格归到“下一个字符”的列（列间隙空格会在 strip 时去掉）
-            ti += 1
-            # 记录空格给当前列? 简化：先只记字符，最后统一处理
-            pass
-        ci = bisect.bisect(vxs, c.x0) - 1
-        f = col_fields[ci] if 0 <= ci < len(col_fields) else None
-        ct = c.get_text()
-        if f in FIELDS:
-            cells[f] = cells.get(f, "") + ct
-        ti += len(ct)
-    # 用 T 里的空格恢复词间空格：按列边界在字符流位置插入
-    # （上面已按字符拼，这里再对每列做 T 对齐重建）
-    return _restore_spaces(line, vxs, col_fields)
+# 审查十八轮（L）：_line_field_text 曾在此——死代码（无调用方，
+# 其返回直接是 _restore_spaces 的结果），删除
 
 def _restore_spaces(line, vxs, col_fields):
     """更稳做法：一次遍历，按 T 的空格插入到当前列文本末尾。"""
     T = line.get_text()
     chars = [c for c in line if isinstance(c, LTChar) and c.get_text()]
-    cells = {}
-    ti = 0
-    for c in chars:
-        # 处理当前字符前的空格（T 对齐）
-        while ti < len(T) and T[ti] in (" ", "\u3000"):
-            # 空格属于哪个列？它后面的第一个可见字符所在列
-            # 先记 pending，等下一个字符定列后加空格
-            ti += 1
-        ci = bisect.bisect(vxs, c.x0) - 1
-        f = col_fields[ci] if 0 <= ci < len(col_fields) else None
-        if f in FIELDS:
-            cells[f] = cells.get(f, "") + c.get_text().replace("\u3000", " ")
-        ti += len(c.get_text())
-    # 重新用 T 对齐插入空格（简化：T 中空格对应的位置由 char 流定位）
+    # 审查十八轮（L）：第一遍 cells 计算被下方 cells2 完全取代——死体删除
     cells2 = {}
     ti = 0
     pending_space = False
@@ -3664,7 +3632,11 @@ def _unpaywall_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> l
     doi = _pq(_up(url).query).get("doi", [""])[0]
     if not doi:
         raise RuntimeError("URL 需含 ?doi=10.xxxx/xxxxx 参数")
-    api = f"{_UNPAYWALL_BASE}/{doi}?email=user@example.com"
+    # 审查十八轮（L）：硬编码 user@example.com——Unpaywall 要求真实联系邮箱，
+    # 示例邮箱可能被接口方拉黑。支持 UNPAYWALL_EMAIL 环境变量覆盖
+    import os as _os
+    _email = _os.environ.get("UNPAYWALL_EMAIL", "user@example.com")
+    api = f"{_UNPAYWALL_BASE}/{doi}?email={_email}"
     r = fetch_html(api, timeout=20, proxy=proxy)
     if not r.get("ok"):
         raise RuntimeError("Unpaywall 请求失败")  # pyflakes：f 无占位符
@@ -3749,9 +3721,18 @@ def _nfra_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
         raise RuntimeError("金融监管总局处罚请求失败")
     data = json.loads(r.get("html", "{}"))
     rows = []
+    # 审查十八轮（M）：字段名（partyName 等）是纯臆测且无 fallback——线上键名
+    # 不符时产出全空行（被 run_site 空壳行防线滤掉后报"解析 0 条"，无从区分
+    # "站点没数据"与"键名猜错"）。全空时出声指路
     for it in data.get("data", [])[:limit or 20]:
         rows.append({"当事人": it.get("partyName", ""), "处罚文号": it.get("punishmentNumber", ""),
                      "处罚日期": it.get("punishmentDate", ""), "金额": it.get("amount", "")})
+    if rows and all(not any(str(v or "").strip() for v in r0.values()) for r0 in rows):
+        _first = data.get("data", [])[0] if data.get("data") else {}
+        import sys as _sys
+        print(f"⚠️ nfra 罚单字段名未命中（响应键: "
+              f"{list(_first)[:8] if isinstance(_first, dict) else type(_first).__name__}）"
+              "——线上结构可能已变", file=_sys.stderr)
     return rows
 
 register("nfra_penalty", match_nfra_penalty, lambda h, u: [], run=_nfra_run,
@@ -4220,20 +4201,11 @@ register("xueqiu_quote", match_xueqiu, lambda h, u: [], run=_xueqiu_run,
          desc="雪球股票行情（匿名可查基本报价）")
 
 
-# --- 网易云音乐（公开 API，歌单/评论）---
-def match_netease_music(url: str) -> bool:
-    return "music.163.com" in (url or "").lower() or "netease_music" in (url or "").lower()
-
-# --- 豆瓣电影（SSR HTML，同豆瓣基座）---
-def match_douban_movie(url: str) -> bool:
-    u = (url or "").lower()
-    return "movie.douban.com" in u
-
-# --- 汇率查询（公开 API，exchangerate-api）---
+# 审查十八轮（L）：此处曾有三处与上方逐字重复的 match_netease_music/
+# match_douban_movie/match_exchange_rate 定义（R50 批次复制粘贴产物）——
+# register 已绑定上方定义，这些副本纯死代码误导阅读。删除；_EXRATE_BASE
+# 是全文件唯一赋值（活代码）保留
 _EXRATE_BASE = "https://open.er-api.com/v6/latest"
-
-def match_exchange_rate(url: str) -> bool:
-    return "exchange_rate" in (url or "").lower() or "er-api" in (url or "").lower()
 
 # ===========================================================================
 # R50 批量新增（第四批）：热搜/热榜/生活聚合
@@ -4248,7 +4220,10 @@ def match_weibo_hot(url: str) -> bool:
             or "s.weibo.com/top" in u)
 
 def _weibo_hot_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
-    r = fetch_html("https://weibo.com/ajax/side/hotSearch", timeout=15, proxy=proxy)
+    # 审查十八轮（M）：曾不带 cookie——weibo ajax 接口无 Cookie 常 403/418，
+    # run_site 传入的 cookie 被丢弃（对照同文件 sse/douban_movie 都透传）
+    r = fetch_html("https://weibo.com/ajax/side/hotSearch", timeout=15,
+                   proxy=proxy, cookie=cookie)
     if not r.get("ok"):
         raise RuntimeError("微博热搜请求失败")
     data = json.loads(r.get("html", "{}"))
@@ -4282,12 +4257,20 @@ def _zhihu_hot_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> l
     # 真实名次信息丢失——按列表顺序生成
     for idx, it in enumerate(data.get("data", []), 1):
         target = it.get("target", {})
+        # 审查十八轮（L）：非问题类条目（视频/直播/answer）曾拼出
+        # question/ 断链——只认 question 类型，其余用 API 自带 url 兜底
+        _tid = str(target.get("id") or "")
+        _ttype = str(target.get("type") or "question")
+        if _ttype == "question" and _tid:
+            _url = f"https://www.zhihu.com/question/{_tid}"
+        else:
+            _url = str(target.get("url") or "")
         rows.append({
             "排名": idx,
             "标题": target.get("title", ""),
             "热度": it.get("detail_text", ""),
             "摘录": (target.get("excerpt", "") or "")[:100],
-            "URL": f"https://www.zhihu.com/question/{target.get('id','')}",
+            "URL": _url,
         })
     return rows[:limit or 50]
 
@@ -4368,9 +4351,14 @@ def _aqi_run(url: str, cookie: str = "", proxy=None, limit: int = 20) -> list:
         return [{"城市": city, "AQI": "无数据", "提示": "该城市可能不在监测范围"}]
     rows = [{"城市": city, "AQI": d.get("aqi", ""),
              "主要污染物": d.get("dominentpol", ""),
+             # 审查十八轮（L）：fromtimestamp 用本地时区——AQI 时间戳按站点
+             # 所在时区（北京）显示，本机非 +8 时区会偏移，标注明确
              "更新时间": _dt.fromtimestamp(d.get("time", {}).get("v", 0)).strftime("%Y-%m-%d %H:%M") if d.get("time", {}).get("v") else ""}]
-    for item in d.get("iaqi", {}).get("pm25", {}).get("v", "") and [{"指标": "PM2.5", "值": d["iaqi"]["pm25"]["v"]}] or []:
-        rows[0]["PM2.5"] = item["值"]
+    # 审查十八轮（L）：`x and [...] or []` 链在 PM2.5 == 0（真实值）时字段
+    # 静默消失——显式判 None/缺失
+    _pm25 = d.get("iaqi", {}).get("pm25", {}).get("v")
+    if _pm25 is not None:
+        rows[0]["PM2.5"] = _pm25
     return rows
 
 register("aqi", match_aqi, lambda h, u: [], run=_aqi_run,

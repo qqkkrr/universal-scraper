@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""审查十四轮（R14）修复的回归测试——全部 hermetic。
+r"""审查十四轮（R14）修复的回归测试——全部 hermetic。
 
 覆盖：
 - selectors：extract_embedded_json_rows 空壳一律 []（{} 单对象 / [{},{}]）
@@ -15,7 +15,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
 
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL))
