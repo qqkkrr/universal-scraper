@@ -385,6 +385,25 @@ def collect_warnings(cfg: Dict[str, Any]) -> "List[str]":
             and not rec.get("fields"):
         warns.append("record.fields 未声明——输出列将自动等于提取字段名。"
                      "需改名/筛选请在 record.fields 声明：{\"列名\": {\"from\": \"字段名\"}}")
+    # R22（实测）：incremental.key 写了"改名前的字段"时映射后该字段不存在——
+    # 去重键恒空、**增量静默失效**（一条 key 都不积累，每次全量重抓，用户以为在增量）。
+    # pipeline 派生字段（add/template/regex_extract/split）与 content_hash 是合法例外。
+    _inc_w = cfg.get("incremental") or {}
+    if isinstance(_inc_w, dict) and _inc_w.get("enabled") and _inc_w.get("key"):
+        _rkw = _inc_w["key"]
+        if _rkw != "content_hash":
+            _parts_w = _rkw if isinstance(_rkw, list) else [_rkw]
+            _rec_fw = rec.get("fields") if isinstance(rec.get("fields"), dict) else {}
+            if _rec_fw:
+                _derived_w = {str(s.get("field")) for s in (cfg.get("pipeline") or [])
+                              if isinstance(s, dict) and s.get("field")}
+                _miss_w = [p for p in _parts_w if p not in _rec_fw and p not in _derived_w]
+                if _miss_w:
+                    warns.append(
+                        f"incremental.key 引用了 record.fields 未声明的字段 {_miss_w}——"
+                        "映射后该字段不存在，去重键恒空、增量将静默失效（每次全量重抓）。"
+                        "请在 record.fields 保留该字段，或用 pipeline 先派生，"
+                        '或改用 key="content_hash"')
     if stype == "browser" and not src.get("cdp") and src.get("headless") is not False:
         warns.append("browser 为 headless 且未配 cdp——遇 Cloudflare/Turnstile 会被拦，"
                      "见配方 R16（调试 Chrome 过一次校验后附加）。")
