@@ -60,6 +60,12 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli <子命令> [参数]
    那是封号前站方给的最后警告。
    登录态只能走"用户亲手登录一次 → 工具复用"这条正路。
 5. **数据只落地本地**：结果写到用户指定的本地文件夹，不上传任何外部服务。
+6. **先查表再试错**（2026-10 快手战役反馈：配方表里明明写着"楼中楼接口已下架"，
+   现场仍先花多轮实测才发现——纯浪费）：动手探测**任何子接口**（回复/楼中楼/搜索/
+   收藏夹/二级列表）之前，先查三处——① 对应站配方（`references/recipes.md` 的
+   R 编号）② 判型表与形态章（第九章：GraphQL/protobuf/WebSocket）③ `sites` 命令
+   的端点登录要求（`评论=免登录` 这类）。**配方里标注"已下架/不存在"的，直接跳过，
+   不要"实测确认一下"**；配方写着"免登录"的，不要先去登录。
 
 ## 先选模式（每个任务开始时判断一次）
 
@@ -327,6 +333,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 结果复核/报表 | `verify --file` / `verify --dir <任务目录>`（通用审计：任意来源） / `report` |
 | 环境/出口 IP | `doctor.py`（含网络链路体检）/ `ip`（出口+系统代理+电源） |
 | **被 412/403 拦，不知道撞的什么防护** | `diagnose <url>`（实测一次机器判型：瑞数/Cloudflare/WAF/JS壳/SPA + 处方 + 退出码 2 可脚本分支） |
+| **接口看不懂形态（乱码/帧流/白名单报错）** | **先读 playbook 第九章**（GraphQL / protobuf-gRPC / WebSocket 三形态的 30 秒识别指纹与打法）——protobuf 是明文二进制不是加密；WS 型站用 `browser_agent` 抓帧；GraphQL 见 R48 |
+| **站点能不能免登录跑** | `sites` 命令看端点级标注（如 `评论=免登录 / 用户微博=需 Cookie`）——整站一个标签会误导 |
 | 瑞数系 gov 站（药监局等，412+`$_ts`） | R26：`rs_harvest.cjs --config`（CDP 过挑战 + UI 触发 + 拦 XHR JSON + 翻页全量） |
 | **任务有请求次数上限** | `run --max-requests N`（真实 HTTP 尝试计数含重试，触发即停 exit 4；或配置 `anti_bot.max_requests`；v1/v3 与 --task 都生效；pipeline 下载也计数）；`budget --usage` 看本进程已用/剩余 |
 | **多步 API 链/接口考古采集** | `session --plan plan.json --out 证据目录`（单会话+预算硬闸+节流+逐请求 JSONL 审计+挑战壳冷却+证据落盘；配合 `jsrecon` 的 endpoint_signatures 用） |

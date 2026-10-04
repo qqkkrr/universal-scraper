@@ -881,8 +881,13 @@ def main() -> int:
             print("  导出:", list(r["files"].values()))
             return 0
         print("🏆 高频网站表（v1）：")
+        from .sites import format_endpoints
         for s in list_sites():
             print(f"  {s['status']} {s['name']:<6} {s['domain']:<22} {s['desc']}  [{s['difficulty']}]")
+            _eps = format_endpoints(s)
+            if _eps:
+                # R21：端点级登录要求（整站一个标签会把"评论免登录"这类关键事实盖掉）
+                print(f"        └ {_eps}")
         return 0
 
     if args.cmd == "books":

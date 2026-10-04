@@ -27,11 +27,19 @@ from .book_catalog import parse_douban_book_search as _parse_douban_book_search
 # ---------------------------------------------------------------------------
 HIGH_FREQUENCY_SITES = [
     {"name": "大众点评", "domain": "dianping.com", "module": "dianping", "status": "✅ 已精配",
-     "desc": "美食/商家列表（Cookie 直抓 SSR）", "difficulty": "高反爬·需登录 Cookie"},
+     "desc": "美食/商家列表（Cookie 直抓 SSR）", "difficulty": "高反爬·需登录 Cookie",
+     "endpoints": [
+         {"name": "商家/榜单列表", "auth": "cookie", "note": "SSR 直抓，需用户登录 Cookie"},
+     ]},
     {"name": "京东", "domain": "item.jd.com", "module": "jd", "status": "✅ 聚合价方案（不绕过登录）",
      "desc": "商品详情/搜索当前会跳登录墙；价格采用豆瓣在哪儿买公开聚合价+联盟跳转",
      "difficulty": "高·强风控+需登录；不逆向h5st/不获取登录态",
-     "url_tips": "商品页: https://item.jd.com/<skuID>.html；在哪儿买聚合: https://book.douban.com/subject/<id>/buylinks"},
+     "url_tips": "商品页: https://item.jd.com/<skuID>.html；在哪儿买聚合: https://book.douban.com/subject/<id>/buylinks",
+     # R21 端点粒度：此前整站被显示成"需登录调优"，把"聚合价可不登录"这条出路盖掉了
+     "endpoints": [
+         {"name": "商品详情/搜索", "auth": "login", "note": "会跳登录墙"},
+         {"name": "价格（图书/比价）", "auth": "none", "note": "走豆瓣在哪儿买公开聚合价，不绕过登录"},
+     ]},
     {"name": "当当网", "domain": "search.dangdang.com", "module": "dangdang_search", "status": "✅ 已精配",
      "desc": "图书 ISBN 搜索：实时价/划线价/商品链接（HTTP SSR）",
      "difficulty": "低·公开搜索页",
@@ -42,16 +50,37 @@ HIGH_FREQUENCY_SITES = [
      "desc": "书目详情/ISBN搜索/在哪儿买（京东/当当聚合价）",
      "difficulty": "中·有反爬但 SSR；需限速",
      "url_tips": "详情: /subject/<id>/；在哪儿买: /subject/<id>/buylinks；搜索: /subject_search?cat=1001&search_text=<ISBN>"},
-    {"name": "B站", "domain": "bilibili.com", "module": "bilibili", "status": "🔄 待精配",
-     "desc": "视频搜索/信息", "difficulty": "中·有风控"},
+    # R21：手写标注与真实能力对齐（bili 命令已代码化三通道，此前却标"待精配"）
+    {"name": "B站", "domain": "bilibili.com", "module": "bilibili",
+     "status": "✅ 已精配（bili 命令：视频/弹幕/评论三通道）",
+     "desc": "视频搜索/信息/弹幕/评论（R34 四通道；评论匿名仅 3 条，全量需登录）",
+     "difficulty": "中·wbi 签名（代码已内化）+ 评论登录墙",
+     "endpoints": [
+         {"name": "视频信息", "auth": "none", "note": "x/web-interface/view"},
+         {"name": "弹幕", "auth": "none", "note": "seg.so/list.so 双通道，protobuf 手解"},
+         {"name": "评论", "auth": "optional",
+          "note": "匿名仅热评 3 条 + is_end:true；全量需登录（playbook B站条目）"},
+     ]},
     {"name": "知乎", "domain": "zhihu.com", "module": "zhihu", "status": "🔧 浏览器模式·需登录调优",
-     "desc": "问题/回答/搜索", "difficulty": "中高·需登录"},
+     "desc": "问题/回答/搜索", "difficulty": "中高·需登录",
+     # R21 端点粒度（R41 配方）：回答接口匿名可达；搜索/个人页要登录态
+     "endpoints": [
+         {"name": "问题/回答", "auth": "optional", "note": "R41：少量匿名可达，稳定跑量需登录 Cookie"},
+         {"name": "搜索/个人页", "auth": "login"},
+     ]},
     {"name": "微博", "domain": "weibo.com", "module": "weibo", "status": "🔧 浏览器模式·需登录调优",
-     "desc": "热搜/用户微博", "difficulty": "高·需登录"},
+     "desc": "热搜/用户微博", "difficulty": "高·需登录",
+     # R21 端点粒度：热搜是公开的，用户微博才需要登录态
+     "endpoints": [
+         {"name": "热搜榜", "auth": "none", "note": "公开接口"},
+         {"name": "用户微博", "auth": "cookie", "note": "需登录 Cookie（cookies 命令导出）"},
+     ]},
     {"name": "GitHub", "domain": "api.github.com", "module": "github", "status": "✅ 已精配（HTTP/API）",
      "desc": "仓库搜索 API（api.github.com/search）", "difficulty": "低·API 公开"},
-    {"name": "天气", "domain": "wttr.in", "module": "weather", "status": "🔄 待精配",
-     "desc": "全球天气（公开 API）", "difficulty": "低·公开 API"},
+    {"name": "天气", "domain": "wttr.in", "module": "weather",
+     "status": "✅ 已精配（公开 API，无需登录）",
+     "desc": "全球天气（公开 API）", "difficulty": "低·公开 API",
+     "endpoints": [{"name": "天气查询", "auth": "none"}]},
     {"name": "百度百科", "domain": "baike.baidu.com", "module": "baike", "status": "✅ 已精配",
      "desc": "词条卡片（公开 API）", "difficulty": "低·openapi 可用"},
     {"name": "澎湃新闻", "domain": "thepaper.cn", "module": "thepaper", "status": "✅ 已精配",
@@ -65,7 +94,13 @@ HIGH_FREQUENCY_SITES = [
     {"name": "快手", "domain": "kuaishou.com", "module": "kuaishou", "status": "✅ 评论/API·免登录",
      "desc": "视频评论+用户主页（GraphQL）", "difficulty": "中·接口需浏览器上下文",
      "url_tips": "评论走 operationName=commentListQuery + 只用 pcursorV2 翻页；直连必 Need captcha；"
-                 "定位账号用 /rest/v/search/user|feed。配方 R47"},
+                 "定位账号用 /rest/v/search/user|feed。配方 R47",
+     # R21：端点级登录要求（整站一个标签会误导——R47 实测评论免登录）
+     "endpoints": [
+         {"name": "评论", "auth": "none", "note": "R47 实测：浏览器上下文内同源 fetch，免登录"},
+         {"name": "用户主页", "auth": "unknown", "note": "本轮未单独实测；如遇登录墙请回填 R47"},
+         {"name": "账号/视频搜索", "auth": "none", "note": "/rest/v/search/*，限流强（result:2 为限流信号）"},
+     ]},
     {"name": "沈阳体育学院学报", "domain": "stxb.magtech.com.cn", "module": "sytyxb", "status": "✅ 已精配",
      "desc": "期刊全文/PDF（magtech 系统，2024 起免费）", "difficulty": "低·公开全文",
      "url_tips": "期次: /CN/Y<年>/V<卷>/I<期>；文章: /CN/<DOI>；PDF 由 showArticleFile.do 换取直链"},
@@ -221,7 +256,34 @@ def match_site(url: str) -> Optional[str]:
     return None
 
 
-def list_sites() -> List[Dict[str, str]]:
+# 端点级登录要求（R21，实战反馈：整站一个 status 承载不了"不同接口不同登录要求"，
+# 快手实测评论免登录却被标注成"需登录调优"，误导实战走登录路径白扫 6 次码）
+SITE_AUTH_VALUES = ("none", "optional", "login", "cookie", "unknown")
+_AUTH_LABELS = {"none": "免登录", "optional": "匿名部分/全量需登录",
+                "login": "需登录", "cookie": "需 Cookie", "unknown": "未实测"}
+
+
+def format_endpoints(site: Dict[str, Any]) -> str:
+    """端点登录要求 → 一行速览（CLI/Agent 用）。无标注返回 ""。"""
+    eps = site.get("endpoints")
+    if not isinstance(eps, list):
+        return ""
+    parts = []
+    for e in eps[:6]:
+        if not isinstance(e, dict) or not e.get("name"):
+            continue
+        parts.append(f"{e['name']}={_AUTH_LABELS.get(e.get('auth'), e.get('auth') or '?')}")
+    return " / ".join(parts)
+
+
+def list_sites() -> List[Dict[str, Any]]:
+    """站点清单（CLI/Agent 选入口用）。
+
+    R21 修复：此前用注册表 desc 里的"浏览器渲染"字样**重新计算 status 并覆盖
+    手写标注**——17/21 个站的手写状态被替换；快手的"评论/API·免登录"被显示成
+    "🔧 浏览器模式·需登录调优"（2026-10 实战反馈：直接误导走登录路径）。
+    现在：**手写 status 优先**；缺省才回退计算，且文案标注"（按注册表推断）"
+    以示来源不同。`endpoints`（端点级登录要求）原样透出。"""
     out = []
     # module 字段 → SITES 注册键
     mapping = {"baidu_search": "baidu", "dianping": "dianping",
@@ -229,15 +291,15 @@ def list_sites() -> List[Dict[str, str]]:
                "dangdang_search": "dangdang_search", "bilibili": "bilibili",
                "github": "github", "weather": "weather", "netease_news": "netease"}
     for s in HIGH_FREQUENCY_SITES:
-        key = mapping.get(s["module"], s["module"])
-        reg = SITES.get(key)
-        if reg:
+        item = dict(s)
+        if not str(item.get("status") or "").strip():
+            key = mapping.get(s["module"], s["module"])
+            reg = SITES.get(key) or {}
             if "浏览器渲染" in reg.get("desc", ""):
-                out.append({**s, "status": "🔧 浏览器模式·需登录调优"})
+                item["status"] = "🔧 浏览器模式·需登录调优（按注册表推断）"
             else:
-                out.append({**s, "status": "✅ 已精配（HTTP/API）"})
-        else:
-            out.append({**s, "status": s["status"]})
+                item["status"] = "✅ 已精配（HTTP/API）（按注册表推断）"
+        out.append(item)
     return out
 
 
@@ -1263,6 +1325,10 @@ SITE_DOMAINS = {"jd": "jd.com", "weibo": "weibo.com", "zhihu": "zhihu.com",
 # 除魔法令牌外不可达。含这些路径片段的 URL 不归兜底管，落到后面的精配
 _SITE_EXCLUDE = {"weibo": ("s.weibo.com", "/hot", "hotsearch", "top/summary"),
                  "zhihu": ("hot-list", "/hot")}
+# R21：注册表 desc 曾一律写"{name}（浏览器渲染）"——旧 list_sites 据此把整站判成
+# "需登录调优"（快手被误标 → 实战白扫 6 次码的根因链）。展示以手写 desc 为准，
+# 没有手写的站才落回"（浏览器渲染）"。
+_DESC_OVERRIDE = {s["module"]: s["desc"] for s in HIGH_FREQUENCY_SITES if s.get("desc")}
 for _name, _dom in SITE_DOMAINS.items():
     def _mk(_n, _d):
         _ex = _SITE_EXCLUDE.get(_n, ())
@@ -1273,7 +1339,8 @@ for _name, _dom in SITE_DOMAINS.items():
             return parse_browser_generic(html, url, _n)
         return matcher, parse
     _m, _p = _mk(_name, _dom)
-    register(_name, _m, _p, fetch=browser_fetch, desc=f"{_name}（浏览器渲染）")
+    register(_name, _m, _p, fetch=browser_fetch,
+             desc=_DESC_OVERRIDE.get(_name) or f"{_name}（浏览器渲染）")
 
 
 # ===========================================================================
