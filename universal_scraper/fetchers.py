@@ -779,6 +779,10 @@ class BrowserFetcher(BaseFetcher):
                         # 审查修复（P2）：桥明确上报的失败原因（封禁/验证码/超时）
                         # 曾被静默忽略——browser_miss 标签掩盖了真实原因
                         log(f"  ⚠️ 详情页失败 {str(obj.get('url', ''))[:80]}: {str(obj.get('error'))[:120]}", "WARN")
+                    elif obj.get("type") == "captcha":
+                        # 审查十七轮：桥的验证码事件（R17 起 detail 循环也自动处理）
+                        # 曾无分支静默丢弃——用户看不到"详情页撞了验证码"
+                        log(f"  🔐 详情页验证码（{obj.get('kind', '?')}），自动处理中", "WARN")
                     elif obj.get("type") == "error":
                         # 审查修复（HIGH）：terminate 后必须 reap 再退出——die() 立即
                         # 抛异常，wait 永不执行，Node/Playwright 孤儿进程占着端口和内存

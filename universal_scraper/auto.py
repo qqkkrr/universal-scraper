@@ -3027,10 +3027,23 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
 
         # 🛡️ WAF 滑块拦截 → 确定性自动升级浏览器模式（不靠 LLM 猜）
         # 注意：即使本轮有真实行，只要 WAF 拦截导致关键字段缺失/详情失败，也必须升级
+        # 审查十七轮（M 对齐）：升级种类曾只有 waf——auto_task 的
+        # _BLOCK_UPGRADE_KINDS 全集（cloudflare/verify/captcha/anti_bot/
+        # rate_limit/session_flagged）在 WebUI 主执行路径缺失：确认执行后的
+        # http 任务撞 Cloudflare/429 不升级，只反复让 LLM 改选择器
         _blk = (result or {}).get("block_stats") or {}
-        if _blk.get("waf") and ((config.get("source") or {}).get("type") == "http"):
-            log("🛡️ 检测到 WAF 滑块验证（CWAP/wzws），自动升级为浏览器模式——请在弹出的浏览器窗口中完成滑块拼图，完成后自动继续...")
+        _upgrade_kinds = ("waf", "cloudflare", "verify", "captcha", "anti_bot",
+                          "rate_limit", "session_flagged")
+        if any(_blk.get(k) for k in _upgrade_kinds) \
+                and ((config.get("source") or {}).get("type") == "http"):
+            log("🛡️ 检测到反爬拦截（"
+                + "、".join(f"{k}×{_blk[k]}" for k in _upgrade_kinds if _blk.get(k))
+                + "），自动升级为浏览器模式——请在弹出的浏览器窗口中完成验证/登录，完成后自动继续...")
             config = _force_browser_waf(config)
+            # 审查十七轮（M 对齐）：auth 墙时自动从调试 Chrome 导入会话
+            # （auto_task 同款，WebUI 路径曾漏）
+            _reason = "；".join(f"{k}×{_blk[k]}" for k in _upgrade_kinds if _blk.get(k))
+            _maybe_import_session_on_auth_wall(config, _reason, log)
             continue
 
         # 🧠 改造3：失败轮内先对真实页面证据（渲染页/捕获接口）做 LLM 结构化抽取，成功即收

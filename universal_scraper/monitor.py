@@ -191,7 +191,24 @@ def push_webhook(url: str, payload: Dict[str, Any], timeout: int = 15) -> Dict[s
 
 def watch_once(name: str, sitemap_url: str, webhook: str = "",
                timeout: int = 30) -> Dict[str, Any]:
-    """单轮监视：diff → 有变化且配了 webhook 才推送。返回 diff + 推送结果。"""
+    """单轮监视：diff → 有变化且配了 webhook 才推送。返回 diff + 推送结果。
+
+    审查十七轮（L）：并发 watch 同名监控曾各自 load→diff→push——同一变化
+    双份 webhook 推送（快照原子写保证 JSON 不坏，但推送不幂等）。跨进程
+    flock 串行化同名监控的整轮（diff→推送→落快照）。"""
+    import fcntl
+    _lock_path = _snapshot_path(name).with_suffix(".watch.lock")
+    _lock_path.parent.mkdir(parents=True, exist_ok=True)
+    _lf = open(_lock_path, "a")
+    try:
+        fcntl.flock(_lf.fileno(), fcntl.LOCK_EX)
+        return _watch_once_locked(name, sitemap_url, webhook, timeout)
+    finally:
+        _lf.close()
+
+
+def _watch_once_locked(name: str, sitemap_url: str, webhook: str,
+                       timeout: int) -> Dict[str, Any]:
     diff = sitemap_diff(name, sitemap_url, timeout=timeout)
     result: Dict[str, Any] = {"name": name, "sitemap": sitemap_url, **diff,
                               "webhook": None}

@@ -20,7 +20,9 @@ def test_capture_mode_empty_shell_exempt():
     src = inspect.getsource(BrowserFetcher.fetch)
     # 修前：空壳检测无条件抛 RateLimitedError——capture 模式（空壳恰是主场景）
     # 的桥捕获从未执行，--capture 参数拿不到文件
-    assert 'and not self.config.get("capture")' in src
+    # R17 自查升级：豁免条件补 capture_all 拼写
+    assert ('and not (self.config.get("capture")' in src
+            and 'self.config.get("capture_all")' in src)
 
 
 def test_quick_capture_path_printed():
