@@ -984,6 +984,17 @@ function centerCaptcha(page) {
         try {
           await page.goto(u, { timeout: 45000, waitUntil: "domcontentloaded" });
           await sleep(waitMs);
+          // 审查十七轮：detail 循环曾不调 handleCaptcha——详情页遇验证码/滑块
+          // 时存下的是验证码页 HTML（engine R88 兜底标 blocked，自动解能力缺失）。
+          // 与主循环同款：配置了 captcha/slider 时先尝试自动处理再提取；
+          // 单页失败 continue 跳过（不废整批），engine 侧标 browser_miss
+          if (captchaDir && (spec.captcha || spec.slider)) {
+            const okc = await handleCaptcha(page, spec, captchaDir, captchaTimeout);
+            if (!okc) {
+              out({ type: "detail_page", index: i, url: u, error: "验证码处理失败/超时" });
+              continue;
+            }
+          }
           const html = await page.evaluate(() => document.documentElement.outerHTML);
           const file = path.join(outDir, `detail_${i}.html`);
           fs.writeFileSync(file, html);

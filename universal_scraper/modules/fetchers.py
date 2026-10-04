@@ -818,7 +818,11 @@ class BrowserFetcher(BaseFetcher):
         if (self.config.get("login") or {}).get("enabled") or \
            (self.config.get("verify") or {}).get("enabled") or \
            self.config.get("capture") or \
+           self.config.get("capture_all") or \
            self.config.get("headless") is False:
+            # 审查十七轮自查：capture_all 拼写曾漏——auto.py 生成的
+            # {"record_from":"capture_all","capture_all":true} 形态走 pool 桥
+            # （pool 无捕获代码），捕获是死键（R12 M10 残留）
             resp = self._fetch_interactive(req)
         # 多代理轮换：逐请求换代理，必须走单页桥（池是固定代理）
         elif self._single_proxy_mode:
@@ -835,7 +839,11 @@ class BrowserFetcher(BaseFetcher):
         # RateLimitedError——空壳恰恰是 capture 的主场景（数据在 XHR 接口不在
         # DOM），此处在桥跑完、capture_all 已落盘后抛错，调用方（fetch --capture）
         # 收到异常走降级路径、capture 参数拿不到文件。统计照记，豁免照旧可用
-        if self.anti.get("empty_shell_check", True) and not self.config.get("capture"):
+        # 审查十七轮自查：豁免条件补 capture_all 拼写（auto.py 生成形态），
+        # 单查 capture 会漏 record_from+capture_all 形态
+        if self.anti.get("empty_shell_check", True) \
+                and not (self.config.get("capture")
+                         or self.config.get("capture_all")):
             try:
                 _bd = detect_block(int(getattr(resp, "status", 0) or 0),
                                    getattr(resp, "text", "") or "", {}, req.url, rendered=True)
