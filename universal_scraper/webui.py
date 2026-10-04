@@ -905,6 +905,27 @@ def _auto_verify(rows, cfg):
 # HTTP
 # --------------------------------------------------------------------------
 
+def _resolve_under_outputs(raw, *, base: str = "auto") -> "Path":
+    """把用户给的路径解析到 outputs 目录内（越界抛 ValueError）。
+
+    R23：此前 6 处端点各写一份同样逻辑、混着两种口径（"副本必漂移"是历轮抓过的
+    事故类）。统一到这里，口径显式化：
+    - base="auto"（文件端点 verify/preview/reveal）：绝对路径必须已在 outputs 内；
+      "outputs/x.json" 按工具根解析；裸 "x.json" 按 outputs 目录解析
+    - base="root"（输出目录端点 journal/books）：相对路径一律按工具根解析
+      （即要求写成 "outputs/<子目录>"）
+    支持 ~ 与 $ENV 展开（journal 端点原本就展开，books 端点曾只展开 ~——统一）。"""
+    p = Path(os.path.expandvars(os.path.expanduser(str(raw or "").strip())))
+    if not p.is_absolute():
+        if base == "root":
+            p = ROOT / p
+        else:
+            p = (ROOT / p) if p.parts[:1] == ("outputs",) else (ROOT / "outputs" / p)
+    p = p.resolve()
+    p.relative_to((ROOT / "outputs").resolve())      # 越界 → ValueError（调用方转 4xx）
+    return p
+
+
 class Handler(BaseHTTPRequestHandler):
     # 审查十轮（M）：无超时曾让半截请求永久占住线程（Slowloris：每连接一线程
     # 且线程数无上限，N 个空闲连接 = N 线程+fd 被耗尽；后续任务线程 start 失败
@@ -1088,13 +1109,13 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/metrics":
                 # R101 新能力：run 时序指标（engine_v3 落 <out>/.metrics.json）
                 _task = q.get("task", [""])[0]
-                _mf = (ROOT / "outputs" / _task / ".metrics.json") if _task else None
                 if not _task:
                     self._json({"error": "需要 ?task=<输出子目录名>"})
                     return
                 try:
-                    _mf = (_mf or Path()).resolve()
-                    _mf.relative_to((ROOT / "outputs").resolve())
+                    # 入参语义=输出子目录名（非路径）→ 走 base="auto" 的裸名分支即可，
+                    # 越界（如 "../../etc"）由 helper 统一拒绝
+                    _mf = _resolve_under_outputs(Path(_task) / ".metrics.json")
                 except Exception:
                     self._json({"error": "非法任务目录"})
                     return
@@ -1105,10 +1126,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"task": _task, "points": data if isinstance(data, list) else []})
             elif u.path == "/api/verify":
                 name = q.get("file", [""])[0]
-                # 路径穿越防护：只允许 outputs 目录内（resolve 后校验前缀，拒绝绝对路径/..）
+                # 路径穿越防护：只允许 outputs 目录内（R23 起与 preview/reveal 同口径，
+                # 支持 "outputs/x.json" 与 outputs 内绝对路径——三处统一，防副本漂移）
                 try:
-                    fp = (ROOT / "outputs" / name).resolve()
-                    fp.relative_to((ROOT / "outputs").resolve())
+                    fp = _resolve_under_outputs(name)
                 except Exception:
                     self._json({"error": "非法文件路径（仅允许 outputs 目录内）"})
                     return
@@ -1137,12 +1158,8 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     rows_n = 20
                 try:
-                    fp = Path(name).expanduser()
-                    if not fp.is_absolute():
-                        # 兼容两种相对写法："outputs/x.json"（工具根基准）与裸 "x.json"（outputs 基准）
-                        fp = (ROOT / fp) if fp.parts[:1] == ("outputs",) else (ROOT / "outputs" / fp)
-                    fp = fp.resolve()
-                    fp.relative_to((ROOT / "outputs").resolve())
+                    # 兼容两种相对写法："outputs/x.json"（工具根基准）与裸 "x.json"（outputs 基准）
+                    fp = _resolve_under_outputs(name)
                 except Exception:
                     self._json({"error": "非法文件路径（仅允许 outputs 目录内）"})
                     return
@@ -1230,11 +1247,7 @@ class Handler(BaseHTTPRequestHandler):
                 # 小白友好：一键在系统文件管理器里定位导出文件（不需要会用终端/找目录）
                 raw = str(body.get("path", "") or "")
                 try:
-                    p = Path(raw).expanduser()
-                    if not p.is_absolute():
-                        p = (ROOT / p) if p.parts[:1] == ("outputs",) else (ROOT / "outputs" / p)
-                    p = p.resolve()
-                    p.relative_to((ROOT / "outputs").resolve())
+                    p = _resolve_under_outputs(raw)
                 except Exception:
                     self._json({"ok": False, "error": "非法路径（仅允许 outputs 目录内）"})
                     return
@@ -1660,11 +1673,7 @@ class Handler(BaseHTTPRequestHandler):
                 # 任意可写路径。与 books/start 同一 containment 口径
                 if out:
                     try:
-                        _od = Path(os.path.expandvars(os.path.expanduser(out)))
-                        if not _od.is_absolute():
-                            _od = ROOT / _od
-                        _od.resolve().relative_to((ROOT / "outputs").resolve())
-                        out = str(_od)
+                        out = str(_resolve_under_outputs(out, base="root"))
                     except Exception:
                         self._json({"error": "非法输出目录（仅允许 outputs/ 内）"})
                         return
@@ -1680,18 +1689,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not spec_src:
                     self._json({"error": "请先粘贴书籍清单 spec JSON，或填 .json 文件路径（可点「填入示例」）"})
                     return
-                # 安全：输出目录限定在 outputs/ 内（与 /api/verify 同口径；防分享模式远程投递文件到源码/config 目录）
+                # 安全：输出目录限定在 outputs/ 内（R23 起统一走 _resolve_under_outputs；
+                # 防分享模式远程投递文件到源码/config 目录）
                 try:
-                    _od = Path(str(body.get("out", "") or "").strip()
-                               or "outputs/book_catalog").expanduser()
-                    if not _od.is_absolute():
-                        _od = ROOT / _od
-                    _od = _od.resolve()
-                    _od.relative_to((ROOT / "outputs").resolve())
+                    out_dir = str(_resolve_under_outputs(
+                        str(body.get("out", "") or "").strip() or "outputs/book_catalog",
+                        base="root"))
                 except Exception:
                     self._json({"error": "非法输出目录（仅允许 outputs 目录内，如 outputs/book_catalog）"})
                     return
-                out_dir = str(_od)
                 covers = bool(body.get("covers", True))
                 try:
                     iv = float(body.get("interval", 1.0))
