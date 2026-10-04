@@ -6,7 +6,7 @@ description: >
   引擎代码在 Full 版（universal-scraper/）。当用户想抓取/采集/爬取网页数据、
   遇到反爬/封禁/0 结果需要判型对号入座、或需要交付级数据验收清单时使用。
 metadata:
-  version: "2.0.1-lite"
+  version: "2.0.2-lite"
   source_project: "universal-scraper (11 轮审计, 178 测试, 五任务科研实战)"
 ---
 
