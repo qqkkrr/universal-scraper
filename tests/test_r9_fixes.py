@@ -20,12 +20,8 @@ import json
 import os
 import re
 import sys
-import tempfile
-import threading
-import time
 from pathlib import Path
 
-import pytest
 
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL))
@@ -83,6 +79,17 @@ def test_engine_resume_keyless_rows_not_merged():
     assert "detail_body" not in new2[0]
     # resume_key=null 走 or 链回退 url_field
     assert _merge_rows(old[:1], [{"url": "http://x/1"}], {"resume_key": None}) == 1
+    # 变异测试暴露（R18）：上方 _merge_rows 是逻辑段复现（复制品）——真实
+    # engine.py 被改坏时本测试不报警。补源级结构断言双保险：resume 合并段
+    # 必须同时有"构建旧键桶跳过空键"与"查找侧跳过空键"两个守卫
+    import inspect
+    from universal_scraper import engine as E
+    src = inspect.getsource(E)
+    assert 'keyf = detail.get("resume_key") or detail.get("url_field") or "url"' in src
+    _seg = src[src.index('keyf = detail.get("resume_key")'):]
+    _seg = _seg[:_seg.index("logger.info")]
+    assert "_ok = record_key(o, keyf)" in _seg and "if _ok:" in _seg   # 构建侧守卫
+    assert "if not k:" in _seg                                         # 查找侧守卫
 
 
 # ---------- action_budget ----------

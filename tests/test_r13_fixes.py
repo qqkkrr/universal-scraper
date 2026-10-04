@@ -11,11 +11,9 @@
 - book：_find_info 行首锚定 / _text 剥 script+style
 """
 import inspect
-import json
 import sys
 from pathlib import Path
 
-import pytest
 
 SKILL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL))

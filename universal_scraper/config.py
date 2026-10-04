@@ -165,7 +165,8 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
                               "webhook 通知为 v3 引擎能力，请改用 v3 任务包（task 包）或去掉该中间件")
     if pag:
         strat = pag.get("strategy", "none")
-        if strat not in PAGINATION_STRATEGIES:
+        # 审查十八轮（H 族）：不可哈希标量（list/dict）穿 set 判定曾 TypeError 裸崩
+        if not isinstance(strat, str) or strat not in PAGINATION_STRATEGIES:
             raise ConfigError("pagination.strategy", f"未知分页策略 '{strat}'",
                               f"可选: {', '.join(sorted(PAGINATION_STRATEGIES))}")
         if strat == "page_param" and not pag.get("page_param"):
@@ -196,7 +197,7 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(step, dict):
             raise ConfigError(f"pipeline[{i}]", f"流水线步骤应为 dict，实际 {type(step).__name__}")
         pt = step.get("type")
-        if pt not in PIPELINE_TYPES:
+        if not isinstance(pt, str) or pt not in PIPELINE_TYPES:
             raise ConfigError(f"pipeline[{i}].type", f"未知流水线类型 '{pt}'",
                               f"可选: {', '.join(sorted(PIPELINE_TYPES))}")
         # R94 修复（P1）：必填键曾只在运行时 KeyError——抓完整单才炸、数据全丢。
@@ -217,7 +218,7 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
             if not isinstance(spec, dict):
                 raise ConfigError(f"detail.extract[{i}]", "extract 步骤应为 dict")
             et = spec.get("type")
-            if et not in EXTRACT_TYPES:
+            if not isinstance(et, str) or et not in EXTRACT_TYPES:
                 raise ConfigError(f"detail.extract[{i}].type", f"未知提取类型 '{et}'",
                                   f"可选: {', '.join(sorted(EXTRACT_TYPES))}")
 
@@ -268,7 +269,7 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
         raise ConfigError("anti_bot.captcha", f"captcha 应为 dict，实际 {type(cap).__name__}")
     cap = cap if isinstance(cap, dict) else {}
     cs = cap.get("strategy", "auto")
-    if cs not in CAPTCHA_STRATEGIES:
+    if not isinstance(cs, str) or cs not in CAPTCHA_STRATEGIES:
         raise ConfigError("anti_bot.captcha.strategy", f"未知验证码策略 '{cs}'",
                           f"可选: {', '.join(sorted(CAPTCHA_STRATEGIES))}")
     return cfg
@@ -356,7 +357,7 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
         if not isinstance(a, dict) or not a.get("type"):
             raise ConfigError(f"source.actions[{i}]", "每个 action 需是含 type 的对象",
                               '{"type": "click", "selector": "#more"}')
-        if a["type"] not in V3_ACTION_TYPES:
+        if not isinstance(a["type"], str) or a["type"] not in V3_ACTION_TYPES:
             raise ConfigError(f"source.actions[{i}].type", f"未知动作类型 '{a['type']}'",
                               f"可选: {', '.join(sorted(V3_ACTION_TYPES))}")
         # 审查十三轮（H5）：click 支持 xpath 定位（桥同款消费）——只认 selector
@@ -414,6 +415,11 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
                               "可选: regex / contains / startswith")
         if not r.get("pattern") or not r.get("parser"):
             raise ConfigError(f"rules[{i}]", "规则需要 pattern 和 parser")
+    # 审查十八轮（H 族）：parser 为 list/dict 时集合构造曾 unhashable TypeError
+    for i, r in enumerate(rules):
+        if not isinstance(r.get("parser"), str):
+            raise ConfigError(f"rules[{i}].parser",
+                              f"parser 应为字符串，实际 {type(r.get('parser')).__name__}")
     for pname in {r.get("parser") for r in rules}:
         if pname not in cfg.get("parsers", {}):
             raise ConfigError(f"parsers.{pname}", f"规则引用了未定义的 parser '{pname}'",
@@ -425,7 +431,7 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
             raise ConfigError(f"pipelines[{i}]", f"流水线步骤应为 dict，实际 {type(step).__name__}",
                               '例如: {"type": "dedup", "key": "url"}')
         pt = step.get("type")
-        if pt not in ALL_PIPELINE_TYPES:
+        if not isinstance(pt, str) or pt not in ALL_PIPELINE_TYPES:
             raise ConfigError(f"pipelines[{i}].type", f"未知流水线类型 '{pt}'",
                               f"可选: {', '.join(sorted(ALL_PIPELINE_TYPES))}")
         if pt == "download" and not step.get("field"):
@@ -490,14 +496,16 @@ def validate_task(cfg: Dict[str, Any], has_custom_fetcher: bool = False,
     if not has_custom_parser:
         for pname, pcfg in (cfg.get("parsers", {}) or {}).items():
             pt = (pcfg or {}).get("type")
-            if pt and pt not in ALL_PARSER_TYPES:
+            if pt and (not isinstance(pt, str) or pt not in ALL_PARSER_TYPES):
                 raise ConfigError(f"parsers.{pname}.type", f"未知解析器类型 '{pt}'",
                                   f"可选: {', '.join(sorted(ALL_PARSER_TYPES))}")
             if pt == "llm" and not (pcfg or {}).get("schema"):
                 raise ConfigError(f"parsers.{pname}.schema", "llm 解析器需要 schema（字段定义）",
                                   '例如: {"type": "llm", "schema": {"标题": "...", "价格": "..."}}')
     st = cfg.get("storage") or {}  # OCR R131 二轮（H）："storage": null 曾 AttributeError
-    if st.get("type", "jsonl") not in ALL_STORAGE_TYPES and not has_custom_storage:
+    if not isinstance(st.get("type", "jsonl"), str) and st.get("type") is not None:
+        raise ConfigError("storage.type", f"storage.type 应为字符串，实际 {type(st.get('type')).__name__}")
+    if (st.get("type") or "jsonl") not in ALL_STORAGE_TYPES and not has_custom_storage:
         raise ConfigError("storage.type", f"未知存储类型 '{st.get('type')}'",
                           "可选: " + " / ".join(sorted(ALL_STORAGE_TYPES)) + " 或提供 modules/storage.py 自定义")
     if st.get("type") == "multi" and not st.get("backends"):

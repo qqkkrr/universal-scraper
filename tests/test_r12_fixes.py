@@ -13,7 +13,6 @@
 """
 import gzip
 import json
-import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
