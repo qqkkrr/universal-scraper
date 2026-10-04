@@ -30,6 +30,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli <cmd> [args]
 | 长跑想按域自适应限速 | `anti_bot.autothrottle: {"cap": 30}` | 分域桶（A 站被封不拖慢 B 站）；`Retry-After` 计入惩罚；robots Crawl-delay 作下限 |
 | 反检测细粒度 | `anti_bot.stealth_opts: {...}` | `hide_canvas/block_webrtc/allow_webgl/dns_over_https/timezone/locale/block_ads/blocked_domains/extra_flags` |
 | Agent 一次抓多个 URL | MCP `bulk_scrape{urls:[…]}`（≤30） | 逐条隔离失败 + 间隔；`screenshot{url}` 落盘截图 |
+| **接口看不懂形态** | playbook **第九章**（GraphQL/protobuf-gRPC/WebSocket） | 乱码=protobuf 明文非加密；`wss://` 帧流用 `browser_agent`（内置帧采集）；GraphQL=R48 |
+| **先查表再动手** | 配方表 + 第九章 + `sites` 端点登录标注 | 配方写"已下架"的接口不要实测确认；写"免登录"的不要先登录（R21 铁律 №6） |
 | 页面内容进 LLM 前 | 自动净化 | R20：隐藏元素/注释/零宽字符剥离 + 主内容收窄（`mcp extract` 默认净化，`raw:true` 放行） |
 
 ## 失败 → 处置

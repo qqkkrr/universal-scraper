@@ -19,6 +19,8 @@
 | 200 但 body 极短（<2KB），含 `document.location`、`document.write`、`stoken`、`__js_challenge`、`setTimeout(...location...)` 之类脚本壳 | JS 挑战壳 | L1 → L2 |
 | **650B 壳页 `<meta id="zh-zse-ck">` + "知乎，让每一次点击都充满意义"；裸 curl 与 curl_cffi 全 403；真浏览器可过，但未登录问题页只渲染 SSR 首批 ~9-15 条回答，滚动不发任何翻页请求（前端根本不发，不是被拦）** | **知乎 zh-zse-ck 挑战 + TLS 指纹 + 未登录列表硬墙（2026-09 实测）** | L2 **有头** patchright 持久 profile 加载即过（headless 会被"安全验证"页拦）；回答列表**必须登录**（用户扫码一次，易盾滑块人工在环）；登录后 feeds 链头 cursor 由页面加载时自发一次（响应监听器须挂在 goto 之前），页内同源 fetch 重放 cursor 链免签名——动线见 R41 |
 | **GraphQL 端点可达（改字段名返回正常校验错误）但请求被 `Need captcha`；或 `Unknown operation named "x"`** | **缺浏览器风控头 / operationName 是白名单** | **借浏览器上下文同源 fetch**（不逆向签名，配方 R48）；`operationName` 与 query 文本从页面 XHR 抄 |
+| **响应体是二进制乱码 / `Content-Type` 含 `protobuf` 或 `grpc`**（gRPC-Web 文本变体是超长 base64 文本） | **protobuf/gRPC——"明文二进制"，不是加密** | 见第九章：capture 落盘原始字节 → 有 .proto 走 `protoc --decode_raw`；没有就手写 wire 解析（B站弹幕战例：field1=elem / 2=progress ms / 7=content / 8=ctime） |
+| **Network 里有 `wss://` 帧流、找不到对应 XHR/fetch，数据随时间自己长出来** | **WebSocket 推送型**（弹幕/行情/协同/IM） | 见第九章：`browser_agent` 已内置 WS 帧采集（`framereceived`，JSON 帧自动解析、上限 500 帧）→ JSON 帧直接复放；二进制帧按 protobuf 解 |
 | 返回验证码图片 / 滑块 / 点选 | 验证码 | L2 + 识别，失败 L4 |
 | 提示登录 / 跳登录页 / 关键字段空且需会员 | 登录墙 | L4（唯一正路） |
 | HTML 干净但没数据（列表空） | 数据走接口 | 接口捕获 |
@@ -342,3 +344,25 @@ Clash 等系统代理开着时，"直连"其实走代理节点出口——烧错
 | 后台浏览器/采集进程被外部杀掉（本机常态） | 同上 | 采集器必须抗杀：`uncaughtException`/`unhandledRejection` 兜底 + **每页落盘** + 同进程内重开浏览器续跑（不要依赖外部守护 shell，它也会被杀） |
 | bash heredoc 里写 JS，`${...}` 模板字符串被 shell 解析报 `Bad substitution` | 未加引号的 heredoc 展开变量 | 用 Write 工具写脚本文件，别在 heredoc 里塞 JS 模板串 |
 | `sed -i ''` 改 macOS 文件报 `No such file or directory` | BSD sed 与 GNU sed 参数差异 | 用 Python `pathlib` 改文件更稳 |
+
+---
+
+## 九、接口形态判型：GraphQL / protobuf-gRPC / WebSocket（2026-10 补，实战反馈驱动）
+
+**为什么要单列**：判型表原先把"反爬强度"当主分类（L0-L5），但 2020 后最常见的失手不是"被拦"，
+而是**看不懂接口形态**——把 protobuf 当"加密"、把 WebSocket 当"没接口"、把 GraphQL 的
+`operationName` 白名单当"签名不对"，然后花几个小时在错误方向上。形态先判对，反爬强度再叠加。
+
+| 形态 | 识别指纹（30 秒判定） | 打法 | 本仓可用的东西 |
+|---|---|---|---|
+| **GraphQL** | 单一端点（`/graphql`、`/api/graphql`）；POST body 含 `operationName`/`query`/`variables`；改字段名返回 `GRAPHQL_VALIDATION_FAILED`/`Did you mean`；`__schema` 被禁 | ① `operationName` 是**白名单**，从页面 XHR 抄；② introspection 被禁时**用校验错误反推 schema**；③ 游标 V1/V2 不混用；④ 直连被 `Need captcha` = 缺浏览器风控头，**不逆向签名**，改浏览器上下文同源 fetch | 第八章 8.1/8.2、配方 **R48**（通用探测法）、R47（快手实例）；`source.single_record=true` 适配单对象响应 |
+| **protobuf / gRPC-Web** | 响应体二进制乱码；`Content-Type: application/x-protobuf`、`application/grpc-web+proto`；gRPC-Web-text 是超长 base64 文本；帧头 5 字节（1 字节压缩标志 + 4 字节长度） | ① **它是明文二进制不是加密**——别放弃；② 浏览器 capture 把原始字节落盘；③ 能拿到 `.proto`（JS bundle 里搜 `descriptor`/开源 SDK）→ `protoc --decode_raw`（无 proto 也能看结构）；④ 无 proto → 手写 wire 解析：`varint` 键 = `field<<3 | wire_type`，2 号 wire_type 是长度前缀（嵌套/字符串）；⑤ gRPC-Web-text 先 base64 解码再按 ④ | B站弹幕战例（playbook 第五章条目）：field1=elem / 2=progress ms / 7=content / 8=ctime——**先 `--decode_raw` 看形状，再按已知语义字段反推编号**；`fetch --capture` 落原始 XHR 响应 |
+| **WebSocket** | Network 里 `wss://` 帧流；找不到能解释数据的 XHR/fetch；数据随时间自己增长（弹幕/行情/协同/IM） | ① 别硬找 REST——没有就是没有；② 抓帧：`browser_agent` 已内置 `page.on("websocket")` + `framereceived`（JSON 帧自动解析、上限 500 帧/次）；③ JSON 帧 → 落盘后按"新消息流"复放/增量累积；④ 二进制帧 → 按 protobuf 行解；⑤ 需要重连复放时，握手头（Origin/Cookie/子协议）从连接上下文抄 | `scripts/browser_agent.cjs`（WS 帧采集，已在库）；`fetch --browser` 走桥时 `US_BLOCK_EXTRA="websocket"` 可反向屏蔽（诊断"数据是否只走 WS"用） |
+| **SSE（text/event-stream）**（附） | `Content-Type: text/event-stream`；连接不关闭、按行 `data:` 推送 | `fetch --capture` 能拿到响应体；按行解析 `data:` 前缀累积；长连接注意超时参数 | `fetch --capture <路径>` |
+
+**纪律（三条）**：
+1. **形态先判、强度后判**：形态判错时，L0→L5 全梯都是浪费（拿 curl 解 WebSocket、拿 OCR 解 protobuf）。
+2. **"乱码 ≠ 加密"**：protobuf/gRPC 是结构化明文；判断"真加密"的唯一标准是**熵高且无结构**（如 AES 密文），
+   而 protobuf 的字节流有稳定帧头与长度前缀（连续两条响应可按长度切分即证明）。
+3. **形态经验要回写**：做完一单就把"形态指纹 + 字段映射"写进配方（R47/R48 就是这么来的）——
+   同类站下一单 30 秒判型、不用重试错。
