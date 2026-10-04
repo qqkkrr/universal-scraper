@@ -1576,14 +1576,31 @@ class EngineV3:
 
         def _work(u, r):
             try:
+                # 审查十六轮（M）：详情批抓曾完全绕过中间件——列表页带代理/限速
+                # 语义、NotifyMiddleware 的详情阶段失败告警全部静默。最小接线：
+                # 只接 on_request/on_response（返回新对象或 None 保持原值），
+                # 插件契约复杂（headers 重建）本轮不接、记录待修
+                _req = Request(url=u)
+                for mw in self.middlewares:
+                    try:
+                        _req = mw.on_request(_req, self.ctx) or _req
+                    except Exception as e:
+                        self.logger.warn(f"详情 on_request 失败（按原请求继续）"
+                                         f"（{type(mw).__name__}）: {type(e).__name__}: {e}")
                 try:
                     if pool_fetcher is not None:
-                        resp = pool_fetcher.fetch(Request(url=u))
+                        resp = pool_fetcher.fetch(_req)
                     else:
-                        resp = self.fetcher.fetch(Request(url=u))
+                        resp = self.fetcher.fetch(_req)
                 except Exception:
                     # 池失败（详情页触发验证/登录墙等）→ 回退原交互取数器保底
-                    resp = self.fetcher.fetch(Request(url=u))
+                    resp = self.fetcher.fetch(_req)
+                for mw in self.middlewares:
+                    try:
+                        resp = mw.on_response(resp, self.ctx) or resp
+                    except Exception as e:
+                        self.logger.warn(f"详情 on_response 失败（按原响应继续）"
+                                         f"（{type(mw).__name__}）: {type(e).__name__}: {e}")
                 html = resp.text or ""
                 for spec in extract:
                     _n = spec.get("name", "detail")
