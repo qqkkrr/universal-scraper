@@ -101,6 +101,107 @@ def check_mutable_defaults(path: Path, tree: ast.AST):
                 WARN.append(f"{path}:{node.lineno}: 可变默认参数 in {node.name}()")
 
 
+# ---------------------------------------------------------------------------
+# R20 契约静态检查：配置键/工具注册/开关键三处一致性（副本漂移防线）
+# ---------------------------------------------------------------------------
+
+def _read(rel: str) -> str:
+    try:
+        return (ROOT / rel).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def check_mcp_tool_registry():
+    """MCP：TOOLS（对外 schema）与 TOOL_IMPLS（分发）名字必须一一对应。
+
+    历史上新增工具只改一处会让 tools/list 与调用面分叉（agent 拿到
+    未注册工具名 → -32602）。"""
+    import re as _re
+    src = _read("universal_scraper/mcp_server.py")
+    if not src:
+        return
+    tools_block = src.split("TOOLS: List[Dict[str, Any]] = [", 1)
+    impls_block = src.split("TOOL_IMPLS = {", 1)
+    if len(tools_block) < 2 or len(impls_block) < 2:
+        FAIL.append("mcp_server.py: 找不到 TOOLS/TOOL_IMPLS 定义（结构变更需同步本检查）")
+        return
+    tools_names = set(_re.findall(r'"name":\s*"([a-z_]+)"', tools_block[1]))
+    impl_keys = set(_re.findall(r'"([a-z_]+)":\s*tool_', impls_block[1]))
+    if tools_names != impl_keys:
+        FAIL.append(f"mcp_server: TOOLS 与 TOOL_IMPLS 不一致："
+                    f"仅声明 {sorted(tools_names - impl_keys)}；"
+                    f"仅注册 {sorted(impl_keys - tools_names)}")
+
+
+def check_switch_key_parity():
+    """开关键三处一致：config 校验集合 == 各消费端读取的键。
+
+    - autothrottle：config.py（v2/v3 各一处）== core._AUTOTHROTTLE_KEYS
+    - stealth_opts：config.py（bool/str/list 三组）== browser_pw 读取键
+      == browser_common.cjs parseStealthOpts 读取键"""
+    import re as _re
+    cfg = _read("universal_scraper/config.py")
+    core_src = _read("universal_scraper/core.py")
+    pw = _read("universal_scraper/browser_pw.py")
+    js = _read("scripts/browser_common.cjs")
+
+    # --- autothrottle ---
+    core_keys = set(_re.findall(r'"([a-z_]+)"',
+                                core_src.split("_AUTOTHROTTLE_KEYS = {", 1)[1].split("}", 1)[0]))
+    for i, seg in enumerate(cfg.split('_at_allowed = {')[1:], 1):
+        cfg_keys = set(_re.findall(r'"([a-z_]+)"', seg.split("}", 1)[0]))
+        if cfg_keys != core_keys:
+            FAIL.append(f"autothrottle 键不一致（config 第 {i} 处 vs core）："
+                        f"{sorted(cfg_keys ^ core_keys)}")
+
+    # --- stealth_opts ---
+    so_segs = cfg.split("_SO_BOOLS = {")
+    if len(so_segs) >= 2:
+        cfg_so = set()
+        for name, close in (("_SO_BOOLS", "}"), ("_SO_STRS", "}"), ("_SO_LISTS", "}")):
+            if f"{name} = {{" in cfg:
+                cfg_so |= set(_re.findall(r'"([a-z_]+)"',
+                                          cfg.split(f"{name} = {{", 1)[1].split(close, 1)[0]))
+        pw_so = set(_re.findall(r'o\.get\("([a-z_]+)"', pw))
+        # 提取 parseStealthOpts 函数体：到下一个顶层函数声明为止
+        # （曾用 "return out;" 截断——函数内 JSON 守卫就有早返回，段为空导致全部误报）
+        if "function parseStealthOpts" in js:
+            _body = js.split("function parseStealthOpts", 1)[1].split("\nfunction ", 1)[0]
+            js_so = set(_re.findall(r"\bo\.([a-z_]+)\b", _body))
+        else:
+            js_so = set()
+        js_so = {k for k in js_so if k not in ("ctx", "args", "blocked", "blockAds")}
+        if cfg_so != pw_so:
+            FAIL.append(f"stealth_opts 键不一致（config vs browser_pw）：{sorted(cfg_so ^ pw_so)}")
+        if cfg_so != js_so:
+            WARN.append(f"stealth_opts 键不一致（config vs JS 桥）：{sorted(cfg_so ^ js_so)}")
+
+
+def check_config_key_contract():
+    """引擎顶层消费键 ⊆ 配置已知键（消费了但校验器不认 = 拼错静默忽略的前置条件）。"""
+    import re as _re
+    cfg = _read("universal_scraper/config.py")
+    known = set()
+    if "_KNOWN_KEYS = {" in cfg:
+        known |= set(_re.findall(r'"([a-zA-Z_]+)"',
+                                 cfg.split("_KNOWN_KEYS = {", 1)[1].split("}", 1)[0]))
+    # validate/validate_task 的容器守卫与显式字段名（用引号字面量近似收集）
+    for key in ("name", "source", "pagination", "pipeline", "detail", "record", "storage",
+                "anti_bot", "output", "queue", "rules", "parsers", "middleware",
+                "incremental", "download", "start_urls", "sitemap", "iterate",
+                "capture", "base_dir", "description", "vars", "pipelines"):
+        known.add(key)
+    consumed = set()
+    for rel in ("universal_scraper/engine.py", "universal_scraper/engine_v3.py"):
+        src = _read(rel)
+        consumed |= set(_re.findall(r'(?<!\.)\bconfig\.get\("([a-zA-Z_]+)"', src))
+        consumed |= set(_re.findall(r'self\.config\.get\("([a-zA-Z_]+)"', src))
+    unknown = consumed - known
+    if unknown:
+        FAIL.append(f"引擎消费了未登记配置键：{sorted(unknown)}（同步 config 已知键，防拼错静默）")
+
+
 def main(argv):
     targets = [Path(a) for a in argv] or [ROOT / "universal_scraper"]
     files = []
@@ -119,6 +220,10 @@ def main(argv):
         check_bare_except(f, tree)
         check_mutable_defaults(f, tree)
         n += 1
+    # R20 契约静态检查（与逐文件 AST 检查并列）
+    check_mcp_tool_registry()
+    check_switch_key_parity()
+    check_config_key_contract()
     print(f"== 静态检查（{n} 文件）==")
     for w in WARN[:20]:
         print(f"  ⚠️  {w}")

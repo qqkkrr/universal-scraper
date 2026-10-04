@@ -22,20 +22,30 @@ esac
 
 # 审查修复（M）：端口 9222 有监听 ≠ 是我们的调试 Chrome——验证 /json/version
 # 返回体含 Browser 字段再复用，否则提示端口被其他程序占用
-if curl -s -m 2 http://127.0.0.1:9222/json/version 2>/dev/null | grep -q '"Browser"'; then
+# 2026-10 修复：探测本地回环地址必须绕过环境代理（HTTP_PROXY 会让 curl 把
+# "连不上"误报成"有东西在监听"，本机曾因此连续 4 次误判端口被占而放弃启动）
+CURL_LOCAL="curl -s -m 2 --noproxy '*'"
+if $CURL_LOCAL http://127.0.0.1:9222/json/version 2>/dev/null | grep -q '"Browser"'; then
   echo "✅ 调试端口 9222 已在运行，直接复用。"
-elif curl -s -m 1 http://127.0.0.1:9222 >/dev/null 2>&1; then
+elif $CURL_LOCAL -m 1 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
   echo "❌ 端口 9222 已被其他程序占用（响应不是 Chrome DevTools 协议）"; exit 1
 else
+  # 2026-10：macOS seatbelt 沙箱会阻止 Chrome 辅助进程导致
+  # 「GPU process isn't usable. Goodbye.」而端口起不来。先加 --disable-gpu 兜底启动。
   open -na "$CHROME" --args --remote-debugging-port=9222 --user-data-dir="$PROFILE" \
-       --no-first-run --no-default-browser-check "$START_URL"
+       --no-first-run --no-default-browser-check --disable-gpu --disable-dev-shm-usage "$START_URL"
   ok=0
   for _ in $(seq 1 15); do
-    if curl -s -m 1 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then ok=1; break; fi
+    if $CURL_LOCAL -m 1 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then ok=1; break; fi
     sleep 1
   done
-  [ "$ok" = 1 ] && echo "🚀 调试 Chrome 已启动（端口 9222）" \
-               || { echo "❌ 9222 未能启动（Chrome 未装好或被拦截）"; exit 1; }
+  if [ "$ok" != 1 ]; then
+    echo "⚠️ 9222 未能启动。若日志出现「GPU process isn't usable」多为 macOS 沙箱拦截，"
+    echo "   改用无头方案：chromium.launchPersistentContext(headless:true) + 页内 fetch，"
+    echo "   配方见 references/anti-block-playbook.md 第八章 8.3。"
+    exit 1
+  fi
+  echo "🚀 调试 Chrome 已启动（端口 9222）"
 fi
 echo "请在弹出的 Chrome 窗口里完成【登录/验证】，完成后回来告诉向导「好了」。"
 exit 0

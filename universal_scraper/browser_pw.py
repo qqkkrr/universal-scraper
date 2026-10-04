@@ -17,6 +17,19 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
+
+# R20 隐身开关：内置广告/追踪域名清单（与 scripts/browser_common.cjs 的
+# AD_DOMAINS 同源同口径——两处改动必须同步，注释互指）
+_AD_DOMAINS = (
+    "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+    "google-analytics.com", "googletagmanager.com", "googletagservices.com",
+    "adservice.google.com", "ads.yahoo.com", "adnxs.com", "criteo.com",
+    "criteo.net", "taboola.com", "outbrain.com", "pubmatic.com",
+    "rubiconproject.com", "openx.net", "casalemedia.com", "smartadserver.com",
+    "scorecardresearch.com", "quantserve.com", "moatads.com", "adform.net",
+    "sharethrough.com", "teads.tv", "zedo.com", "sizmek.com",
+)
 
 
 def playwright_available() -> bool:
@@ -41,6 +54,72 @@ class PWBrowserFetcher:
         self._lock = threading.RLock()  # 可重入：fetch_pages/fetch 持锁后 ensure/_ensure_browser 再次加锁不死锁
         self._pw = None
         self._browser = None
+        self._context = None   # R20：仅在有 stealth 上下文参数（时区/语言/UA）时创建
+
+    # ---- R20 隐身细粒度开关（anti_bot.stealth_opts）----
+    def _stealth_opts(self) -> Dict[str, Any]:
+        o = self.anti.get("stealth_opts")
+        return o if isinstance(o, dict) else {}
+
+    def _launch_args(self) -> List[str]:
+        """stealth_opts → Chromium 启动参数（与 node 桥 parseStealthOpts 同口径）。"""
+        o = self._stealth_opts()
+        args: List[str] = []
+        if o.get("hide_canvas") is True:
+            args.append("--fingerprinting-canvas-image-data-noise")
+        if o.get("allow_webgl") is False:
+            args += ["--disable-webgl", "--disable-webgl-image-chromium", "--disable-webgl2"]
+        if o.get("block_webrtc") is True:
+            args += ["--webrtc-ip-handling-policy=disable_non_proxied_udp",
+                     "--force-webrtc-ip-handling-policy"]
+        if o.get("dns_over_https") is True:
+            args += ["--dns-over-https-mode=secure",
+                     "--dns-over-https-templates=https://cloudflare-dns.com/dns-query"]
+        extra = o.get("extra_flags")
+        if isinstance(extra, list):
+            args += [str(a) for a in extra[:10]
+                     if isinstance(a, str) and a.startswith("--") and len(a) < 200]
+        return args
+
+    def _context_kwargs(self) -> Dict[str, Any]:
+        """stealth_opts → new_context 参数（时区/语言/UA）。"""
+        o = self._stealth_opts()
+        kw: Dict[str, Any] = {}
+        if isinstance(o.get("timezone"), str) and o["timezone"]:
+            kw["timezone_id"] = o["timezone"]
+        if isinstance(o.get("locale"), str) and o["locale"]:
+            kw["locale"] = o["locale"]
+        if isinstance(o.get("user_agent"), str) and o["user_agent"]:
+            kw["user_agent"] = o["user_agent"]
+        return kw
+
+    def _install_domain_blocking(self) -> None:
+        """域名级阻断（广告清单 + 用户清单）：只作用于自建 context（CDP 附加不动）。"""
+        o = self._stealth_opts()
+        if not self._context or not (o.get("block_ads") or o.get("blocked_domains")):
+            return
+        doms = []
+        if o.get("block_ads"):
+            doms += _AD_DOMAINS
+        for d in (o.get("blocked_domains") or [])[:200]:
+            if isinstance(d, str) and d:
+                doms.append(d.lower())
+        if not doms:
+            return
+
+        def _handler(route):
+            try:
+                host = (urlsplit(route.request.url).hostname or "").lower()
+            except Exception:
+                return route.continue_()
+            if any(host == d or host.endswith("." + d) for d in doms):
+                return route.abort()
+            return route.continue_()
+
+        try:
+            self._context.route("**/*", _handler)
+        except Exception:
+            pass  # 老内核不支持 route：静默降级（与桥同口径）
 
     # ---- 生命周期 ----
     def _ensure_browser(self, cdp: str = ""):
@@ -57,7 +136,12 @@ class PWBrowserFetcher:
                     # 审查八轮（H）：曾硬编码 headless=True——用户配 headless:false
                     # 想走有头抗检测时被静默无视（engine 现已透传该键）
                     self._browser = self._pw.chromium.launch(
-                        headless=bool(self.source.get("headless", True)))
+                        headless=bool(self.source.get("headless", True)),
+                        args=self._launch_args() or None)
+                # R20：有 stealth 上下文参数时建共享 context（cookie 在会话内保持）
+                _kw = self._context_kwargs()
+                self._context = self._browser.new_context(**_kw) if _kw else None
+                self._install_domain_blocking()
             except Exception:
                 # 启动失败不能留下半初始化状态：close() 只认 _browser，
                 # _pw 泄漏会让 playwright 驱动进程挂住
@@ -67,6 +151,8 @@ class PWBrowserFetcher:
 
     def close(self) -> None:
         try:
+            if self._context is not None:
+                self._context.close()
             if self._browser is not None:
                 self._browser.close()
             if self._pw is not None:
@@ -75,6 +161,7 @@ class PWBrowserFetcher:
             pass
         finally:
             self._browser = None
+            self._context = None
             self._pw = None
 
     # ---- 取数 ----
@@ -85,7 +172,8 @@ class PWBrowserFetcher:
 
     def _render(self, url: str, wait_ms: int, js_actions: List[Dict[str, Any]]) -> str:
         self._ensure_browser(cdp=str(self.source.get("cdp") or ""))
-        page = self._browser.new_page()
+        # R20：有共享 context 时复用（cookie 在会话内保持）
+        page = (self._context or self._browser).new_page()
         try:
             # R116 智能等待：wait_until 支持 networkidle（SPA 接口拖尾）——
             # 站点长连接多时 networkidle 会超时，此时回落 domcontentloaded+固定等待

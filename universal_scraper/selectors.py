@@ -677,6 +677,94 @@ def _lxml_html_tostring(el) -> str:
         return str(el)
 
 
+# ---------------------------------------------------------------------------
+# 选择器辅助（R20，第三梯队采纳；配方生成/排障用）
+# 场景：写/修配方时手上只有"这一行长这样"——由它反推可用的行选择器、
+# 拿到祖先/兄弟定位锚点、或按文本找人。都是纯函数，不做网络。
+# ---------------------------------------------------------------------------
+
+def _doc_of(html_or_el):
+    if not isinstance(html_or_el, str):
+        return html_or_el
+    try:
+        from lxml import html as _h
+        return _h.fromstring(html_or_el)
+    except Exception:
+        return None
+
+
+def find_by_text(html_or_el, text: str, tag: str = "", limit: int = 20) -> List[Any]:
+    """按可见文本找元素（包含匹配，大小写敏感）；tag 限定标签名。"""
+    doc = _doc_of(html_or_el)
+    if doc is None or not text:
+        return []
+    out = []
+    for el in doc.iter():
+        if not isinstance(getattr(el, "tag", None), str):
+            continue
+        if tag and el.tag != tag:
+            continue
+        try:
+            if text in (el.text_content() or ""):
+                out.append(el)
+                if len(out) >= limit:
+                    break
+        except Exception:
+            continue
+    return out
+
+
+def ancestors(el, tag: str = "", limit: int = 10) -> List[Any]:
+    """祖先链（自内向外）；tag 限定标签名。"""
+    out = []
+    node = el.getparent() if hasattr(el, "getparent") else None
+    while node is not None and len(out) < limit:
+        if isinstance(getattr(node, "tag", None), str) and (not tag or node.tag == tag):
+            out.append(node)
+        node = node.getparent()
+    return out
+
+
+def siblings(el, tag: str = "", limit: int = 50) -> List[Any]:
+    """同级元素（不含自身）；tag 限定标签名。"""
+    try:
+        parent = el.getparent()
+    except Exception:
+        return []
+    if parent is None:
+        return []
+    return [c for c in parent if getattr(c, "tag", None) is not None
+            and c is not el and isinstance(c.tag, str) and (not tag or c.tag == tag)][:limit]
+
+
+def find_similar(el, min_score: float = 60.0, limit: int = 200) -> List[Any]:
+    """结构相似的同级元素（"给我这个元素的所有兄弟行"）。
+
+    评分口径与 fingerprint.similarity 同源（标签/属性/子结构/文本长度），
+    但只比同级——配方生成时用它从"一行的样本"反推整页行集合。"""
+    try:
+        from .fingerprint import element_fingerprint, similarity
+        fp = element_fingerprint(el)
+    except Exception:
+        return []
+    cands = []
+    try:
+        root = el.getroottree().getroot()
+    except Exception:
+        return []
+    for node in root.iter():
+        if node is el or not isinstance(getattr(node, "tag", None), str):
+            continue
+        try:
+            if similarity(fp, node) >= min_score:
+                cands.append(node)
+                if len(cands) >= limit:
+                    break
+        except Exception:
+            continue
+    return cands
+
+
 def extract_embedded_json_rows(html: str, spec: Any) -> List[Dict[str, Any]]:
     """从页面 <script> 内嵌 JSON 提取记录行（SSR 常见：window.X = [...]、
     module 作用域 const X = [...]、裸 X = [...] 都认）。

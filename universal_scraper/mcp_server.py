@@ -21,6 +21,7 @@ Claude Desktop / Cursor / Continue / Codex 等通过 stdio 配置接入。
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from typing import Any, Dict, List, Optional
@@ -83,8 +84,45 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "bulk_scrape",
+        "description": "批量抓取多个 URL（一次调用替代 N 次往返；逐 URL 隔离失败——"
+                       "单个 URL 出错不影响其余）。默认最多 10 个、上限 30（防爆）。"
+                       "每个 URL 有间隔（默认 1s）保持礼貌；返回每条的 url/status/摘要。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "urls": {"type": "array", "items": {"type": "string"},
+                         "description": "URL 列表（最多 30 个）"},
+                "article": {"type": "boolean", "description": "正文抽取（默认 false）"},
+                "selector": {"type": "string", "description": "只取匹配元素的文本（可选）"},
+                "max": {"type": "integer", "description": "最多处理几个（默认 10，上限 30）"},
+                "interval": {"type": "number", "description": "每个 URL 间隔秒数（默认 1.0）"},
+                "max_chars": {"type": "integer", "description": "每条摘要上限字符（默认 8000）"},
+            },
+            "required": ["urls"],
+        },
+    },
+    {
+        "name": "screenshot",
+        "description": "对页面截图（浏览器渲染）并保存为图片文件，返回文件路径。"
+                       "用于人工核对渲染结果/排障；图片本身不内联返回。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "目标网址（http/https）"},
+                "path": {"type": "string",
+                         "description": "保存路径（可选；默认 outputs/mcp_shots/<时间戳>.png）"},
+                "wait_selector": {"type": "string", "description": "等该元素出现后再截图（可选）"},
+                "full_page": {"type": "boolean", "description": "整页截图（默认 false=视口）"},
+            },
+            "required": ["url"],
+        },
+    },
+    {
         "name": "extract",
-        "description": "把 HTML 源码转成干净 Markdown/正文/表格，用于省 token 地阅读网页内容。",
+        "description": "把 HTML 源码转成干净 Markdown/正文/表格，用于省 token 地阅读网页内容。"
+                       "默认先净化（剥离隐藏元素/注释/零宽字符等提示注入载体）再转换；"
+                       "main_only=true 时额外收窄到主内容容器（更适合阅读文章页）。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -92,6 +130,8 @@ TOOLS: List[Dict[str, Any]] = [
                 "mode": {"type": "string", "description": "markdown（默认）/ article / table"},
                 "base_url": {"type": "string", "description": "用于把相对链接转绝对（可选）"},
                 "max_chars": {"type": "integer", "description": "输出上限字符（默认 50000，防爆 token）"},
+                "main_only": {"type": "boolean", "description": "只取主内容容器（默认 false；正文页建议 true）"},
+                "raw": {"type": "boolean", "description": "跳过净化（默认 false；仅在确需原始 HTML 时用）"},
             },
             "required": ["html"],
         },
@@ -172,6 +212,100 @@ def tool_scrape(args: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+_BULK_MAX = 30
+
+
+def tool_bulk_scrape(args: Dict[str, Any]) -> Dict[str, Any]:
+    """批量抓取（R20）：一次调用多个 URL，逐 URL 隔离失败 + 服务端硬上限。
+
+    设计取舍（对标 Scrapling bulk_get，但守我们的纪律）：
+    - 上限 30 硬钳（agent 一次塞 1000 个 URL 会把本机打成 DDoS 工具）；
+    - 逐条 try/except：单条失败进 results[i].error，不影响其余（不整体失败）；
+    - 顺序 + 间隔（默认 1s）：批量很容易变成对单站的并发压测，礼貌优先。"""
+    import time as _t
+    from .quick import fetch_url
+    urls = args.get("urls")
+    if not isinstance(urls, list) or not urls:
+        return {"error": "urls 必须是 URL 数组（非空）"}
+    try:
+        _max = int(args.get("max") or 10)
+    except (TypeError, ValueError):
+        _max = 10
+    _max = max(1, min(_max, _BULK_MAX))
+    _truncated = len(urls) > _max
+    try:
+        _interval = max(0.0, float(args.get("interval", 1.0)))
+    except (TypeError, ValueError):
+        _interval = 1.0
+    try:
+        _mc = max(200, int(args.get("max_chars") or 8000))
+    except (TypeError, ValueError):
+        _mc = 8000
+    results: List[Dict[str, Any]] = []
+    for i, u in enumerate(urls[:_max]):
+        u = str(u or "").strip()
+        if i:
+            _t.sleep(_interval)
+        if not u.startswith(("http://", "https://")):
+            results.append({"url": u, "ok": False, "error": "url 必须是 http/https 开头"})
+            continue
+        try:
+            r = fetch_url(u, article=bool(args.get("article", False)),
+                          selector=args.get("selector") or None)
+        except Exception as e:
+            results.append({"url": u, "ok": False,
+                            "error": f"{type(e).__name__}: {str(e)[:160]}"})
+            continue
+        if r.get("error"):
+            results.append({"url": u, "ok": False, "error": r["error"]})
+            continue
+        body = r.get("article") or r.get("selector") or r.get("markdown") or r.get("text") or ""
+        item = {"url": r.get("url") or u, "ok": True, "status": r.get("status")}
+        if r.get("backend"):
+            item["backend"] = r["backend"]
+        if r.get("degraded_backend"):
+            item["degraded_backend"] = True
+        item["text"] = body[:_mc] + (f"\n...(截断，共 {len(body)} 字符)" if len(body) > _mc else "")
+        results.append(item)
+    out: Dict[str, Any] = {"count": len(results), "results": results}
+    if _truncated:
+        out["truncated"] = True
+        out["note"] = f"URL 超过上限 {_max} 个，只处理了前 {_max} 个（分批调用）"
+    return out
+
+
+def tool_screenshot(args: Dict[str, Any]) -> Dict[str, Any]:
+    """页面截图（R20）：浏览器渲染后落盘图片，返回路径（不内联二进制）。"""
+    from datetime import datetime
+    from pathlib import Path as _P
+
+    from .quick import fetch_url
+    url = str(args.get("url", "")).strip()
+    if not url.startswith(("http://", "https://")):
+        return {"error": "url 必须是 http/https 开头的完整网址"}
+    p = args.get("path")
+    if p:
+        out = _P(str(p)).expanduser()
+        if out.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+            return {"error": "path 扩展名须为 .png/.jpg/.jpeg/.webp"}
+    else:
+        out = _P(__file__).resolve().parent.parent / "outputs" / "mcp_shots" / \
+            f"shot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return {"error": f"无法创建目录 {out.parent}: {e}"}
+    try:
+        r = fetch_url(url, browser=True, screenshot=str(out),
+                      wait_selector=args.get("wait_selector") or None)
+    except Exception as e:
+        return {"error": f"截图失败: {type(e).__name__}: {str(e)[:160]}"}
+    got = r.get("screenshot") or (str(out) if out.exists() else None)
+    if not got:
+        return {"error": r.get("error") or "截图未产出（浏览器不可用或页面加载失败）"}
+    return {"url": url, "path": str(got), "bytes": out.stat().st_size if out.exists() else None}
+
+
 def tool_auto(args: Dict[str, Any]) -> Dict[str, Any]:
     from .auto import auto_task
     desc = str(args.get("description", "")).strip()
@@ -218,11 +352,16 @@ def tool_crawl(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def tool_extract(args: Dict[str, Any]) -> Dict[str, Any]:
-    from .extractors import extract_article, extract_tables, html_to_markdown
+    from .extractors import (ai_safe_markdown, extract_article, extract_tables,
+                             html_to_markdown, strip_hidden_content)
     html = str(args.get("html", ""))
     mode = str(args.get("mode") or "markdown").lower()
     base_url = args.get("base_url") or None
     max_chars = int(args.get("max_chars") if args.get("max_chars") is not None else 50000)
+    # 审查二十轮（R20，安全）：MCP 输出直接喂给 agent——默认净化掉隐藏元素/
+    # 注释/零宽字符（提示注入载体）；raw=true 才放行原始内容
+    if not args.get("raw"):
+        html = strip_hidden_content(html)
     try:
         if mode == "article":
             txt = extract_article(html)
@@ -237,6 +376,9 @@ def tool_extract(args: Dict[str, Any]) -> Dict[str, Any]:
             if len(payload) > max_chars:
                 return {"tables": [], "text": f"(共 {len(_all_tables)} 张表，响应超限已省略——请缩小页面范围)", "mode": "table"}
             return {"tables": tbls, "mode": "table"}
+        elif args.get("main_only"):
+            # 已净化过——此处只收窄（main_only 缺省 false，保持旧行为兼容）
+            txt = ai_safe_markdown(html, base_url=base_url, main_only=True)
         else:
             txt = html_to_markdown(html, base_url=base_url)
     except Exception as e:
@@ -416,6 +558,8 @@ def tool_check(_args: Dict[str, Any]) -> Dict[str, Any]:
 
 TOOL_IMPLS = {
     "scrape": tool_scrape,
+    "bulk_scrape": tool_bulk_scrape,
+    "screenshot": tool_screenshot,
     "auto": tool_auto,
     "crawl": tool_crawl,
     "extract": tool_extract,
@@ -436,6 +580,20 @@ def _error(id_: Any, code: int, message: str, data: Any = None) -> Dict[str, Any
     if data is not None:
         e["data"] = data
     return {"jsonrpc": "2.0", "id": id_, "error": e}
+
+
+def _mcp_token_ok(params: Dict[str, Any]) -> bool:
+    """可选工具级令牌闸（R20）：US_MCP_TOKEN 未设 → 放行（stdio 默认本地信任）。
+
+    设了令牌就必须匹配（常量时间比较）：适用于 stdio 会话被转发/共享
+    （ssh 隧道、agent 编排平台把多会话接到同一进程）的场景。令牌从
+    params._token 或 params.token 读，**不记录进日志**。"""
+    want = os.environ.get("US_MCP_TOKEN") or ""
+    if not want:
+        return True
+    import hmac
+    got = str((params or {}).get("_token") or (params or {}).get("token") or "")
+    return bool(got) and hmac.compare_digest(got, want)
 
 
 def handle_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -462,9 +620,11 @@ def handle_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "capabilities": {"tools": {}},
             "serverInfo": {"name": SERVER_NAME, "version": VERSION},
             "instructions": (
-                "万能爬虫引擎 MCP：可用 scrape/auto/crawl/extract/books/check 六个工具。"
-                "auto 是最强入口——给一句话任务即可全自动爬取；"
+                "万能爬虫引擎 MCP：scrape/bulk_scrape/screenshot/auto/crawl/extract/books/check。"
+                "auto 是最强入口——给一句话任务即可全自动爬取；bulk_scrape 一次抓多个 URL"
+                "（逐条隔离失败）；screenshot 落盘页面截图供人工核对；"
                 "books 按 ISBN 清单采集图书目录（豆瓣+比价，不下载正文，0 条会返回诊断与行动方案）。"
+                "服务端设了 US_MCP_TOKEN 时，tools/call 需带 params._token。"
             ),
         })
     if method in ("notifications/initialized", "initialized"):
@@ -474,6 +634,10 @@ def handle_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if method == "tools/list":
         return _result(mid, {"tools": TOOLS})
     if method == "tools/call":
+        # R20：可选令牌闸（US_MCP_TOKEN；未设置=不启用）
+        if not _mcp_token_ok(params):
+            return _error(mid, -32001, "未授权：缺少或错误的 _token"
+                                        "（服务端已通过 US_MCP_TOKEN 启用令牌校验）")
         name = params.get("name")
         args = params.get("arguments") or {}
         if name not in TOOL_IMPLS:

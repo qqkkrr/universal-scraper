@@ -464,21 +464,12 @@ class HttpFetcher(BaseFetcher):
 
     @staticmethod
     def _retry_after(headers: dict) -> float:
-        """解析 Retry-After（秒 或 HTTP-date）。"""
-        import email.utils
-        v = (headers or {}).get("retry-after", "")
-        if not v:
-            return 0.0
-        v = str(v).strip()
-        try:
-            return max(0.0, float(v))
-        except ValueError:
-            try:
-                dt = email.utils.parsedate_to_datetime(v)
-                import time as _t
-                return max(0.0, (dt.timestamp() - _t.time()))
-            except Exception:
-                return 0.0
+        """解析 Retry-After（秒 或 HTTP-date）——统一走 core.parse_retry_after。
+
+        R20：同一解析逻辑曾在本文件与根 fetchers 各存一份（R18 教训：副本必漂移，
+        根文件就漏同步过本文件已修的缺陷）——现在只有一份实现。"""
+        from ..core import parse_retry_after
+        return float(parse_retry_after(headers or {}) or 0.0)
 
 
 class ScraplingFetcher(BaseFetcher):
@@ -946,6 +937,10 @@ class BrowserFetcher(BaseFetcher):
                 pass
         if _cdp:
             cmd += ["--cdp", _cdp]
+        # R20 隐身细粒度开关：anti_bot.stealth_opts → 单 JSON 参数（不拼接多参数）
+        _so = self.anti.get("stealth_opts")
+        if isinstance(_so, dict) and _so:
+            cmd += ["--stealthOpts", json.dumps(_so, ensure_ascii=False)]
         if self._task_dir:
             cmd += ["--stopFile", str(self._task_dir / ".stop")]
         env = {**os.environ, "NODE_PATH": _NODE_PATH}

@@ -10,8 +10,8 @@ description: >
   【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
   获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
 metadata:
-  version: "1.27.0"
-  source_project: "universal-scraper (19 轮审计 + 实战反馈轮, 276 测试)"
+  version: "1.28.0"
+  source_project: "universal-scraper (20 轮审计 + 实战反馈轮, 330 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能
@@ -292,8 +292,10 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | **B站视频/弹幕/评论** | `bili --video BV号`（单视频三通道）或 `bili --mid <UID> --year 2024`（UP主年度全量，R34 四通道战法已代码化含 wbi 签名；-352 时按提示 capture dm_img 原值；楼中楼只取内联首页 ≤3 条） |
 | 图书目 + 比价 | `books --spec` |
 | 大众点评 | `dianping`（cookie 直抓专用） |
+| **快手视频评论 + 用户主页** | 浏览器上下文内 `fetch('/graphql')` 发 `operationName: commentListQuery`（**不是** visionCommentList），**只用 `pcursorV2` 单游标翻页**；`curl_cffi` 直连必被 `Need captcha` 拦。定位账号用 `/rest/v/search/user|feed`（限流信号 `result:2`）。配方 **R47** |
 | **评论/短评/回复类任务** | **先读配方 R45**（评论任务通用骨架：热门/热度排序口径、翻页游标、展开回复、请求量估算公式）——再查对应站配方（R46 猫眼 / R40 小红书 / R41 知乎），站没有配方时按 R45 骨架自写 |
 | **猫眼电影短评/评分** | 无需 CLI 命令——直连 `m.maoyan.com/apollo/apolloapi/review/v2/comments.json`（**无签名无登录**，limit≤20 + ts 游标）；评分走移动端 SSR 绕开字体反爬。配方 **R46** |
+| **GraphQL 站（接口/字段全未知）** | introspection 多被禁 → 靠**校验错误反推 schema**（`Did you mean` / `Cannot query field`）；`operationName` 是白名单须抄页面的；游标 V1/V2 **不能混用**。配方 **R48**（不限平台） |
 | SPA 找接口 | `jsrecon <url>`（下载 JS 包自动提候选端点）；挑战壳站自动降级 CDP 流量采集；`fetch --capture <路径>` 一步捕获页面 XHR/fetch JSON |
 | SPA 框架表单（Angular/React） | fill 失效时降级：`type_real` 动作（真实键盘）→ 读渲染 DOM（阶梯见 playbook 第四章） |
 | 登录站复用登录态 | `cookies`（用户登录一次 → 导出直抓串）；`cdp --login-state/--list-tabs` 查调试 Chrome |
@@ -317,6 +319,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 交付时间口径 | 数据源只有当前值时必须标注"当前值，非任务日期快照"（playbook 六·一） |
 | 域名封锁台账 | `budget --mark 域名 --hours 24`（跨运行冷却账本；403/421/52x 已自动记账） |
 | 捕获→配置一键转换 | `capture2config capture_all.json`（POST体/方法/翻页模板/records_path 草案） |
+| 有 curl 命令要复现 | `curl2config --cmd "curl '…' -H '…'"`（只解析不执行；凭据/不支持项明确提醒；产物先 --dry-run 再 --limit 2） |
+| 调解析规则不想重打目标站 | `run --config x.json --replay`（R20 开发模式：只读本地响应缓存、绝不发网络；未命中结构化失败） |
 | 附件下载+PDF表格 | `pdf --download 清单.json` / `pdf --tables x.pdf`（断点续传+%PDF校验+pdfplumber） |
 | 定时重复采集 | `schedule --task --every <秒>` |
 | 监控网页变化 | `monitor --task --every <秒>` |

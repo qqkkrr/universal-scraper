@@ -1217,3 +1217,151 @@ PC 页 `@font-face{font-family:MaoYanHeiTi-DemiBold}`，明文里评分是空的
 
 **实战数字**：509 条 / 25 页 / 25 次请求 / 0 错误 / 回源抽样 60 条全一致 / 11 字段 100% 完整。
 预算按 `目标数 ÷ 20 + 2` 估（500 条 ≈ 27 次），设 `max_requests=80` 硬闸绰绰有余。
+
+## R47 · 快手（kuaishou.com）视频评论 + 用户主页（2026-10-04 实战：人民日报官方号 500 评论 / 404 用户 / 73 页零封锁）
+
+**标称"反爬极强"（protobuf + 签名 + 设备指纹 + 滑块 + 字体反爬）——实测全线绕过**：
+快手 PC 端是 **GraphQL**，**无签名、无 protobuf、无字体反爬**；唯一真门槛是**必须在浏览器上下文里发请求**。
+
+### ★ 唯一正确姿势：浏览器上下文内 fetch（HTTP 直连必被拦）
+
+```js
+// 关键：operationName 必须是 commentListQuery，不是 visionCommentList
+const Q = `query commentListQuery($photoId: String, $pcursor: String) {
+  visionCommentList(photoId: $photoId, pcursor: $pcursor) {
+    commentCountV2 pcursor pcursorV2
+    rootCommentsV2 { commentId authorId authorName content headurl
+                     timestamp hasSubComments likedCount liked status }
+  }
+}`;
+await page.evaluate(async ({q, photo, pc}) => {
+  const r = await fetch('/graphql', { method:'POST',
+    headers:{'Content-Type':'application/json'}, credentials:'include',
+    body: JSON.stringify({operationName:'commentListQuery',
+      variables:{photoId:photo, pcursor:pc}, query:q}) });
+  return await r.text();
+}, {q:Q, photo:PHOTO, pc:pcursorV2});
+```
+
+| 现象 | 真相 |
+|---|---|
+| `curl_cffi` 直连 `visionCommentList` → `Need captcha` | **必须走浏览器上下文**，curl 一律被拦（页面 JS 自动生成 `kww` 风控头 + `kwssectoken` cookie，缺了就拦） |
+| 传 `operationName: "visionCommentList"` → 400 | operationName 是**白名单**，必须是页面自己用的 `commentListQuery` |
+| 混用 `pcursor` + `pcursorV2` 翻页 → 后面全是 0 条 | **只用 `pcursorV2` 单游标**。V1 的 `pcursor`/`rootComments` 通道已废弃（返回 0 条），混用会让游标错乱进死循环 |
+| 滑块验证码 | 浏览器上下文内**自动通过**，无需人工过 |
+| 字体反爬 | 不涉及（走 JSON 接口，不经字体渲染层） |
+
+### 定位账号/视频（REST 接口，非 GraphQL，限流很强）
+
+| 用途 | 端点 | 说明 |
+|---|---|---|
+| 搜用户 | `/rest/v/search/user?keyword=X&pcursor=1` | 返回 `users[].user_id/user_name/verified` |
+| 搜视频 | `/rest/v/search/feed?keyword=X` | 返回 `feeds[].photo/author`，可按 `author.id` 精确过滤某账号全部作品 |
+
+- **限流信号 `result: 2`** = "操作太快了，请稍微休息一下"（HTTP 仍是 200，**别当成成功**）。
+  恢复要 **间隔 5s+ 且换关键词**；急跑 8 个关键词必被限流。实测隔开后 20 关键词 0 限流。
+- 20 个关键词（`X` / `X时政` / `X最新` / `X官方` …）可捞全某账号的全部作品。
+- **profile 页（`/profile/{userId}`）与 `visionProfile` 都是登录墙**，`visionProfile` 未登录返回
+  `result: 2`、且 `userProfile.profile` **只有 5 个字段**（`user_id/user_name/headurl/user_text/gender`）——
+  **粉丝数/关注数/作品数/获赞数/认证在 PC 端已下架**，不是没抓到，是源站不提供。
+- 旧版数字 userId（如人民日报 `1096637401`）**已失效**，profile 页返回空白；只能用 `3x` 开头的新式 ID。
+
+### 楼中楼：接口已下架，别考古
+
+`visionSubCommentList` **不存在**（`Did you mean` 只提示 visionCommentList）；
+V1 `rootComments` 通道返回 0 条；`visionCommentList` 也**不接受** `subCommentId`/`rootCommentId` 参数
+（`rootComments.subComments` 恒为空）。页面 UI 无独立"展开"类元素，点击捕获也拿不到。
+**结论：500 条里 15 条标 `hasSubComments: true`，但回复明细公开侧已不可得** —— 交付时明确声明，别反复重试。
+
+### 字段名探测法：GraphQL 报错就是 schema 字典
+
+Apollo 生产配置**禁用 introspection**（`__type` 直接报错），但校验层错误信息会**主动列出真实字段名**：
+- `Cannot query field "id" on type "VisionUser"` → 试 `user_id` / `user_name` / `headurl` / `fansCount`
+- `Did you mean "visionProfile"?` → 照着试，一次命中
+- 逐字段发请求 + 精确匹配该字段的报错即可批量枚举（**注意：不要 `slice()` 截断响应**，
+  否则判定逻辑误判"全部合法"——本任务踩过，报错被截断后 45 个字段全判为合法）
+
+**字段命名是 snake_case 与驼峰混用**（`user_id`/`headurl`/`pcursorV2`/`likedCount`），
+不能想当然按一种风格推，必须逐个验。
+
+### 实战数字与预算
+
+500 条 / 73 页 / 约 4.5 分钟 / **零验证码零 403** / 9 字段 100% 完整 / 零重复。
+去重评论用户 404 个（人均 1.24 条，符合"小事件+大账号"特征）。
+预算按 `目标数 ÷ 每页条数` 估（此视频每页 1~15 条波动大，均值约 7 → 500 条 ≈ 73 页）。
+
+**抗杀设计（本机必做）**：本机浏览器进程会被外部清理，采集器必须内建
+`uncaughtException` 兜底 + **每页落盘** + 同进程内重开浏览器续跑（见 `ks_collect_v3.cjs` 模式）。
+
+## R48 · GraphQL 型站的通用探测法（不限平台，2026-10 快手/Apollo 实战提炼）
+
+**适用**：任何 `POST /graphql` 的站（快手、GitHub v4、Shopify、Yelp…）。
+与 R33 华为商城那类"接口已知"不同，本条解决**接口未知 + 字段未知**的冷启动。
+
+### 三板斧（按顺序用，10 分钟内可摸清一个 GraphQL 站）
+
+**① operationName 是白名单，不是随便起的**
+GraphQL 规范里 `operationName` 只是"从文档里挑一个 operation 执行"，但很多站（Apollo Server 配
+`operationName` 白名单的）会校验它。传接口名（如 `visionCommentList`）直接 400：
+```
+{"message":"Unknown operation named \"x\"."}   ← 传错
+```
+**正确做法**：拦截真实页面的 XHR 抄 `operationName` + 完整 `query` 文本，别自己编。
+页面请求的 query 文本是"官方版"，直接抄。
+
+**② 校验错误就是 schema 字典（introspection 被禁时的唯一出路）**
+Apollo 生产配置默认 `introspection: false`，`__type`/`__schema` 直接报错：
+```
+GraphQL introspection is not allowed by Apollo Server, but the query contained __schema or __type.
+```
+但**校验层会主动告诉你正确答案**——这是免费的 schema 泄漏，务必榨干：
+| 错误形态 | 用法 |
+|---|---|
+| `Cannot query field "id" on type "VisionUser".` | 说明类型名已知，只差字段名 → 试 `user_id`/`userName`/`headurl` |
+| `Did you mean "visionProfile"?` | 照着抄，一次命中（接口名/字段名都给） |
+| `Unknown argument "pCursor" on field "Query.x". Did you mean "pcursor"?` | 参数名大小写错，提示已给正确拼写 |
+| `Field "users" of type "[VisionUser]" must have a selection of subfields.` | 给了**类型名**，接着探该类型的字段 |
+
+**批量枚举字段的正确写法**（⚠️ 有坑）：
+```js
+// ✅ 读完整 text，按"报错里是否提及本字段"判定
+const t = await fetchGql(`... { ${f} }`);
+const msgs = JSON.parse(t).errors?.map(e => e.message) ?? [];
+if (msgs.some(m => m.includes(`"${f}"`))) { /* 该字段非法 */ } else { /* 合法 */ }
+```
+**❌ 千万别 `slice()` 截断响应再判定**——报错被截掉 → 判定逻辑误判"全部合法"，
+本任务踩过：45 个字段全被判合法，实际 40 个都是错的（截断把报错切在了字段名之后）。
+
+**③ 游标通道要单链，不要混用**
+同一接口常同时存在 V1/V2 两套游标字段（如 `pcursor` + `pcursorV2`），对应两套返回结构
+（`rootComments` vs `rootCommentsV2`）。**V1 通道常已废弃但字段还在**（不报错、返回空数组）。
+混用两个游标 → 游标错乱 → 前几页正常、第 N 页起恒 0 条，**极易误判为风控封禁**。
+**先单链诊断**：逐页推进只用一个游标，确认每页都有数据，再谈其他。
+若某通道返回 0 条但接口 200，**先怀疑通道废弃，不是被拦**。
+
+### 绕过风控：优先"借浏览器"，而不是"逆向签名"
+
+| 站给的假象 | 真相（快手实测） |
+|---|---|
+| "需要逆向签名算法" | 只是缺 `kww` 头 + `kwssectoken` cookie，**由页面 JS 运行时生成**，不是静态密钥 |
+| "需要伪造设备指纹" | 浏览器自带真实指纹，不用造 |
+| "有滑块要人工过" | 在浏览器上下文里发请求，**滑块自动过**（风控认的是上下文，不是调用方代码） |
+
+**合规红线内**的做法（不碰逆向）：
+```js
+// 在页面上下文里同源 fetch，浏览器自动带上风控头与 cookie
+await page.evaluate(async (q) => {
+  const r = await fetch('/graphql', { method:'POST',
+    headers:{'Content-Type':'application/json'}, credentials:'include',
+    body: JSON.stringify({ operationName:'x', variables:{}, query:q }) });
+  return await r.text();
+}, queryText);
+```
+**这不算"浏览器自动化绕过"**——登录墙、付费墙、验证码该拦还是拦；
+被拦就如实声明"需人工/需登录"，不要靠伪造把墙翻过去。
+
+### 顺带：REST 搜索接口的限流信号
+
+HTTP 200 **不代表成功**。快手 `/rest/v/search/*` 限流时 `{"result":2,"error_msg":"操作太快了"}`。
+**把 body 里的 `result` 字段当状态码检查**，别只看 HTTP 状态码——否则会把"限流"误读成"查无结果"
+（本次差点因此放弃账号定位）。恢复：间隔 5s+ 且换关键词；连续 8 个必限流，隔开后 20 个 0 限流。

@@ -481,3 +481,163 @@ def discover_forms(html_text: str, base_url: str = "") -> List[Dict[str, Any]]:
             "fields": fields,
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# AI 消费前的净化与收窄（审查二十轮 R20）
+#
+# 背景：页面内容进 LLM/Agent 之前必须当作**不可信数据**——隐藏元素、注释、
+# 零宽字符都是提示注入（prompt injection）的常见载体。本组函数只服务
+# "页面内容 → LLM/Agent"链路；用户数据抽取路径（html_to_markdown /
+# extract_article / extract_tables 等）行为不变，避免动到已交付数据。
+#
+# 对标 Scrapling 的 _sanitize_for_ai / _strip_noise_tags，并修正其一个已知误伤：
+# 它用 contains(@style,"opacity:0") 判隐藏，会把 opacity:0.5 的可见元素也删掉——
+# 这里按属性值边界解析，0.5 / 10px 不受影响；并补上它未覆盖的 HTML5 hidden 属性。
+# ---------------------------------------------------------------------------
+
+# 注意 height/width 需要前置边界（^ 或 ;），否则 "line-height:0" 会被误判
+_HIDE_STYLE_RES = tuple(re.compile(p) for p in (
+    r"display\s*:\s*none",
+    r"visibility\s*:\s*(?:hidden|collapse)",
+    r"opacity\s*:\s*0(?:\.0*)?\s*(?:!important)?\s*(?:;|$)",
+    r"font-size\s*:\s*0(?:\.0*)?\s*(?:px|em|rem|%)?\s*(?:!important)?\s*(?:;|$)",
+    r"(?:^|;)\s*(?:max-)?height\s*:\s*0(?:\.0*)?\s*(?:px|em|rem|%)?\s*(?:!important)?\s*(?:;|$)",
+    r"(?:^|;)\s*(?:max-)?width\s*:\s*0(?:\.0*)?\s*(?:px|em|rem|%)?\s*(?:!important)?\s*(?:;|$)",
+))
+# 零宽字符（U+200B-200F 零宽空格/连接符/方向标记、U+202A-202E 双向控制、
+# U+2060-2064 词连接/不可见运算符、U+FEFF BOM）+ C0/C1 控制字符
+_ZWC_RE = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
+_CTRL_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_AI_NOISE_TAGS = ("script", "style", "noscript", "template", "svg", "iframe")
+
+
+def scrub_text(text: str) -> str:
+    """剥零宽/控制字符（注入常用载体，可见正文语义不受影响）。"""
+    if not text:
+        return text
+    return _CTRL_RE.sub("", _ZWC_RE.sub("", text))
+
+
+def _is_hidden_element(el) -> bool:
+    style = (el.get("style") or "").lower()
+    if style and any(rx.search(style) for rx in _HIDE_STYLE_RES):
+        return True
+    if (el.get("aria-hidden") or "").strip().lower() == "true":
+        return True
+    if el.get("hidden") is not None:      # HTML5 hidden 属性（Scrapling 未覆盖）
+        return True
+    return False
+
+
+def strip_hidden_content(html_text: str) -> str:
+    """移除不可见内容并剥零宽字符，返回净化后的 HTML。
+
+    处理：CSS 隐藏（display:none / visibility:hidden|collapse / opacity:0 /
+    font-size:0 / height:0 / width:0）、aria-hidden="true"、hidden 属性、
+    <template>/<script>/<style>/<noscript>/<svg>/<iframe>、HTML 注释
+    （注入常藏 <!-- 指令 -->）、零宽与控制字符。
+    lxml 不可用时退回正则级（注释 + 零宽字符）。"""
+    src = html_text or ""
+    doc = _doc(src)
+    if doc is None:
+        return scrub_text(re.sub(r"<!--.*?-->", "", src, flags=re.S))
+    # 注释节点
+    for node in doc.xpath("//comment()"):
+        parent = node.getparent()
+        if parent is not None:
+            try:
+                parent.remove(node)
+            except Exception:
+                pass
+    for el in list(doc.iter()):
+        if not isinstance(el.tag, str):
+            continue
+        try:
+            if el.tag in _AI_NOISE_TAGS or _is_hidden_element(el):
+                el.drop_tree()
+        except Exception:
+            pass
+    for el in doc.iter():
+        if isinstance(el.tag, str):
+            if el.text:
+                el.text = scrub_text(el.text)
+            if el.tail:
+                el.tail = scrub_text(el.tail)
+    try:
+        from lxml import etree as _etree
+        return _etree.tostring(doc, encoding="unicode", method="html")
+    except Exception:
+        return scrub_text(re.sub(r"<!--.*?-->", "", src, flags=re.S))
+
+
+_MAIN_SEMANTIC_XPATHS = (
+    ".//main", ".//article", ".//*[@role='main']", ".//*[@role=\"main\"]",
+    ".//*[contains(@class,'article-content') or contains(@class,'article_content')]",
+    ".//*[contains(@class,'post-content') or contains(@class,'entry-content')]",
+    ".//*[contains(@class,'main-content') or contains(@class,'main_content')]",
+)
+
+
+def main_content_html(html_text: str, min_chars: int = 300) -> str:
+    """收窄到主内容容器（语义容器 → 文本密度打分 → 回退全文），返回 HTML 字符串。
+
+    拿不准时宁可不收窄（回退全文/body）——把正文收没了比多送点 token 更糟。"""
+    doc = _doc(html_text)
+    if doc is None:
+        return html_text
+    body = doc.body if doc.body is not None else doc
+    total = len((body.text_content() or "").strip())
+
+    def _ser(el) -> str:
+        try:
+            from lxml import etree as _etree
+            return _etree.tostring(el, encoding="unicode", method="html")
+        except Exception:
+            return html_text
+
+    # 1) 语义容器（main/article/[role=main]/常见内容 class）取文本最长者
+    best_el, best_len = None, 0
+    for xp in _MAIN_SEMANTIC_XPATHS:
+        try:
+            for el in body.xpath(xp):
+                n = len((el.text_content() or "").strip())
+                if n > best_len:
+                    best_el, best_len = el, n
+        except Exception:
+            continue
+    # 语义容器成立条件：绝对长度够，或"短但主导全页"（很多真页正文只有两三百字，
+    # 硬卡 300 会一律回退全文，收窄形同虚设——但主导性门槛必须保住）
+    if best_el is not None and (best_len >= min_chars
+                                or (best_len >= 120 and total and best_len >= 0.5 * total)):
+        return _ser(best_el)
+
+    # 2) 文本密度打分（extract_article 同款口径：长度 + 2×直接子段落数×50）
+    for el in body.iter():
+        if not isinstance(el.tag, str) or el.tag not in ("p", "div", "article", "section", "td"):
+            continue
+        text = (el.text_content() or "").strip()
+        if len(text) < 40:
+            continue
+        try:
+            paras = len(el.xpath(".//p"))
+        except Exception:
+            paras = 0
+        score = len(text) + 2 * paras * 50
+        if score > best_len and len(text) >= min_chars:
+            best_el, best_len = el, score
+    # 密度最优块须占到全页文本的足够比例，否则视为"内容分散"→ 不收窄
+    if best_el is not None and best_len and total and len((best_el.text_content() or "").strip()) >= max(min_chars, int(total * 0.25)):
+        return _ser(best_el)
+    return _ser(body)
+
+
+def ai_safe_markdown(html_text: str, base_url: Optional[str] = None,
+                     max_chars: int = 0, main_only: bool = True) -> str:
+    """AI/Agent 消费专用 Markdown：先净化、再收窄、后转换。
+
+    顺序不可颠倒——先收窄的话，隐藏的垃圾文本会参与密度评分，把真正文挤出
+    主容器选择（等于被注入内容牵着走）。"""
+    cleaned = strip_hidden_content(html_text)
+    narrowed = main_content_html(cleaned) if main_only else cleaned
+    return html_to_markdown(narrowed, base_url=base_url, max_chars=max_chars)

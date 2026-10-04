@@ -364,11 +364,71 @@ async function dismissOverlays(page) {
   } catch (e) { /* 静默 */ }
 }
 
+/** R20 隐身开关：anti_bot.stealth_opts 的内置广告/追踪域名清单。
+ *  刻意保持"小而准"（常见第三方追踪/广告域），用户可用 blocked_domains
+ *  追加自己的清单；不照搬大清单（体积与误杀都要付代价）。 */
+const AD_DOMAINS = [
+  "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+  "google-analytics.com", "googletagmanager.com", "googletagservices.com",
+  "adservice.google.com", "ads.yahoo.com", "adnxs.com", "criteo.com",
+  "criteo.net", "taboola.com", "outbrain.com", "pubmatic.com",
+  "rubiconproject.com", "openx.net", "casalemedia.com", "smartadserver.com",
+  "scorecardresearch.com", "quantserve.com", "moatads.com", "adform.net",
+  "sharethrough.com", "teads.tv", "zedo.com", "sizmek.com",
+];
+
+/** 解析 --stealthOpts '<json>'（Python 侧 anti_bot.stealth_opts 透传）。
+ *  返回 {args, ctx, blocked, blockAds}；非法 JSON/类型一律返回空（不阻塞主流程）。
+ *  键：hide_canvas / allow_webgl / block_webrtc / dns_over_https / extra_flags /
+ *      timezone / locale / user_agent / blocked_domains / block_ads */
+function parseStealthOpts(raw) {
+  const out = { args: [], ctx: {}, blocked: [], blockAds: false };
+  if (!raw || typeof raw !== "string") return out;
+  let o;
+  try { o = JSON.parse(raw); } catch (e) { return out; }
+  if (!o || typeof o !== "object") return out;
+  const push = (a) => { if (typeof a === "string" && a.startsWith("--") && a.length < 200) out.args.push(a); };
+  if (o.hide_canvas === true) push("--fingerprinting-canvas-image-data-noise");
+  if (o.allow_webgl === false) {
+    push("--disable-webgl"); push("--disable-webgl-image-chromium"); push("--disable-webgl2");
+  }
+  if (o.block_webrtc === true) {
+    push("--webrtc-ip-handling-policy=disable_non_proxied_udp");
+    push("--force-webrtc-ip-handling-policy");
+  }
+  if (o.dns_over_https === true) {
+    push("--dns-over-https-mode=secure");
+    push("--dns-over-https-templates=https://cloudflare-dns.com/dns-query");
+  }
+  if (Array.isArray(o.extra_flags)) o.extra_flags.slice(0, 10).forEach(push);
+  if (typeof o.timezone === "string" && o.timezone) out.ctx.timezoneId = o.timezone;
+  if (typeof o.locale === "string" && o.locale) out.ctx.locale = o.locale;
+  if (typeof o.user_agent === "string" && o.user_agent) out.ctx.userAgent = o.user_agent;
+  if (Array.isArray(o.blocked_domains)) {
+    for (const d of o.blocked_domains.slice(0, 200)) {
+      if (typeof d === "string" && /^[a-z0-9.-]+$/i.test(d)) out.blocked.push(d.toLowerCase());
+    }
+  }
+  out.blockAds = o.block_ads === true;
+  return out;
+}
+
+/** 域名匹配：精确或子域（a.b.com 命中 b.com）。返回命中的域名或 null。 */
+function matchBlockedDomain(url, domains) {
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase(); } catch (e) { return null; }
+  for (const d of domains) {
+    if (host === d || host.endsWith("." + d)) return d;
+  }
+  return null;
+}
+
 /** 资源拦截（对标 Crawlee blockRequests）：默认阻断 font/media（零功能风险，
  * 文本/DOM 采集不受影响；字体图标变方块不影响字段抽取），image 默认保留——
  * 本插件有图片采集用例（xhs 图片直链等）。
  * 环境变量：US_BLOCK_IMAGES=1 追加阻断图片（纯文本任务提速 2-5 倍）；
- *          US_BLOCK_EXTRA="websocket,other" 追加任意 resourceType。
+ *          US_BLOCK_EXTRA="websocket,other" 追加任意 resourceType；
+ *          US_BLOCK_ADS=1 / US_BLOCK_DOMAINS="a.com,b.com"（R20 域名级）。
  * 失败静默（route 注册失败不阻塞主流程）；abort/continue 均 catch（页面关闭竞态）。 */
 async function applyResourceBlocking(context, opts = {}) {
   const env = (k) => process.env[k];
@@ -381,18 +441,31 @@ async function applyResourceBlocking(context, opts = {}) {
       if (t.trim()) types.add(t.trim());
     }
   }
-  if (!types.size) return;
+  // R20：域名级阻断（广告清单 + 用户清单；env 兜底）
+  const domains = [];
+  if (opts.blockAds === true || (opts.blockAds === undefined && env("US_BLOCK_ADS") === "1")) {
+    domains.push(...AD_DOMAINS);
+  }
+  if (Array.isArray(opts.blockedDomains)) domains.push(...opts.blockedDomains);
+  if (typeof env("US_BLOCK_DOMAINS") === "string" && env("US_BLOCK_DOMAINS").trim()) {
+    domains.push(...env("US_BLOCK_DOMAINS").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+  }
+  if (!types.size && !domains.length) return;
   try {
     await context.route("**/*", (route) => {
       let rt = null;
-      try { rt = route.request().resourceType(); } catch (e) { rt = null; }
+      let u = "";
+      try { rt = route.request().resourceType(); u = route.request().url(); } catch (e) { /* 竞态 */ }
       if (rt && types.has(rt)) return route.abort("blockedbyclient").catch(() => {});
+      if (u && domains.length && matchBlockedDomain(u, domains)) {
+        return route.abort("blockedbyclient").catch(() => {});
+      }
       return route.continue().catch(() => {});
     });
   } catch (e) { /* 静默：老版本内核不支持 route 时退化为无拦截 */ }
 }
 
-module.exports = { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy, waitCloudflare, applyResourceBlocking };
+module.exports = { CHROMIUM_EXE, loadChromium, sleep, runActions, applyStealth, dismissOverlays, parseProxy, waitCloudflare, applyResourceBlocking, parseStealthOpts, matchBlockedDomain, AD_DOMAINS };
 
 /** 解析代理串（http://user:pass@host:port / socks5://host:port / host:port）为 Playwright proxy 配置 */
 function parseProxy(proxy) {
