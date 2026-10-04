@@ -38,13 +38,18 @@ def _load_snapshot(name: str) -> Dict[str, Any]:
               file=_sys.stderr)
     # 损坏隔离（R18 cookies 同款口径）；审查八轮（L）：固定 .corrupt 后缀曾让
     # 二次损坏覆盖前一份证据——时间戳+uuid 后缀（PoolState/QuotaLedger 同款）
+    _isolated = False
     try:
         if p.exists():
             import uuid as _uuid
             p.rename(p.with_suffix(f".corrupt.{int(time.time())}.{_uuid.uuid4().hex[:6]}"))
+            _isolated = True
     except Exception:
         pass
-    return {"urls": [], "ts": 0}
+    # R24：损坏与"从未监控过"必须可区分——前者若按空基线走，sitemap_diff 会把
+    # 当前全部 URL 判成 added（几万条假告警风暴）并立刻覆写基线；由调用方决定
+    # "重建基线、本轮不 diff 不推送"。文件不存在 = 首次监控（corrupt=False）。
+    return {"urls": [], "ts": 0, "corrupt": _isolated}
 
 
 def _save_snapshot(name: str, urls: List[str]) -> None:
@@ -149,7 +154,16 @@ def sitemap_diff(name: str, sitemap_url: str, timeout: int = 30,
     if not current:
         return {"added": [], "removed": [], "total": 0, "changed": False,
                 "note": "sitemap 抓取为空——不更新快照（防抖动清基线）"}
-    old = set(_load_snapshot(name).get("urls") or [])
+    _old_meta = _load_snapshot(name)
+    if _old_meta.get("corrupt"):
+        # R24：快照损坏曾按"空基线"处理 → 当前全部 URL 判 added（可达数万条假告警
+        # 并触发 webhook 风暴）且立刻覆写基线。改为：静默重建基线、本轮不 diff
+        # 不推送（与"抓取为空/不足 10%"两处护栏同口径：宁可不报，不可乱报）
+        _save_snapshot(name, current)
+        return {"added": [], "removed": [], "total": len(current), "changed": False,
+                "rebaselined": True,
+                "note": "监控快照损坏（已隔离）——本轮重建基线，不 diff 不推送"}
+    old = set(_old_meta.get("urls") or [])
     # R105 修复（P2）：比例护栏——当前 URL 数不足基线 10% 视为截断/降级
     # （CDN 陈旧副本、动态 sitemap 半输出），跳过 diff 不砸基线不误报
     if old and len(current) * 10 < len(old):
@@ -197,7 +211,10 @@ def watch_once(name: str, sitemap_url: str, webhook: str = "",
     双份 webhook 推送（快照原子写保证 JSON 不坏，但推送不幂等）。跨进程
     flock 串行化同名监控的整轮（diff→推送→落快照）。"""
     import fcntl
-    _lock_path = _snapshot_path(name).with_suffix(".watch.lock")
+    # R24：曾用 with_suffix(".watch.lock")——名字含点时后缀被替换（"a.b.json" 与
+    # "a.json" 都得到 "a.watch.lock"），不同监控撞同一把锁。改为在 stem 后追加。
+    _snap = _snapshot_path(name)
+    _lock_path = _snap.parent / (_snap.stem + ".watch.lock")
     _lock_path.parent.mkdir(parents=True, exist_ok=True)
     _lf = open(_lock_path, "a")
     try:

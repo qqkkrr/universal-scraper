@@ -107,11 +107,31 @@ class LLMClient:
             except _LLMFormatError:
                 raise
             except urllib.error.HTTPError as e:
-                # 收官九轮（审查）：4xx = 请求本身有误（key/参数/格式）——重试
-                # 同样的请求必然同样失败，白白烧掉预算和时间
-                e.close() if hasattr(e, 'close') else None
-                raise RuntimeError(f"LLM HTTP {e.code}（{'认证失败' if e.code in (401,403) else '请求错误'}）"
-                                   f"——非瞬时错误，不重试: {e.read().decode('utf-8','ignore')[:200]}") from e
+                # R24 修复（实测复现两处）：
+                # ① 曾先 e.close() 再 e.read()——close 后 read 抛 ValueError
+                #    "I/O operation on closed file"，把"401 认证失败"这条最该看懂
+                #    的错误换成天书（配错 key 是最高频故障）。先读体、再关闭。
+                # ② 曾把所有状态码一票判"非瞬时错误"不重试——429 限流与 5xx 抖动
+                #    是 LLM 服务最常见的瞬时故障（重试循环正是为此存在），却被判死。
+                #    现在分类：408/409/425/429/5xx 走退避重试；其余 4xx（key/参数错）
+                #    立即失败并带服务端响应体。
+                _code = int(getattr(e, "code", 0) or 0)
+                _body = ""
+                try:
+                    _body = e.read().decode("utf-8", "ignore")[:200]
+                except Exception:
+                    _body = ""
+                try:
+                    e.close()
+                except Exception:
+                    pass
+                if _code in (408, 409, 425, 429) or _code >= 500:
+                    last_err = f"HTTP {_code}: {_body[:120]}"
+                    if attempt < retries + 1:
+                        time.sleep(2 ** attempt + 1)
+                    continue
+                raise RuntimeError(f"LLM HTTP {_code}（{'认证失败' if _code in (401, 403) else '请求错误'}）"
+                                   f"——非瞬时错误，不重试: {_body}") from e
             except Exception as e:
                 last_err = str(e)
                 if attempt < retries + 1:
@@ -162,6 +182,30 @@ class LLMClient:
                         f"视觉模型响应格式异常（缺少 choices[0].message.content）: {str(data)[:200]}") from e
             except _LLMFormatError:
                 raise
+            except urllib.error.HTTPError as e:
+                # R24：与 chat() 同口径——瞬时（408/409/425/429/5xx）退避重试；
+                # 其余 4xx（key/参数错）不重试且带服务端响应体（此前 vision 把 401
+                # 当普通异常重试 3 轮，最终只报 "HTTP Error 401: Unauthorized"，
+                # 既烧预算又无诊断信息）
+                _vcode = int(getattr(e, "code", 0) or 0)
+                _vbody = ""
+                try:
+                    _vbody = e.read().decode("utf-8", "ignore")[:200]
+                except Exception:
+                    _vbody = ""
+                try:
+                    e.close()
+                except Exception:
+                    pass
+                if _vcode in (408, 409, 425, 429) or _vcode >= 500:
+                    last_err = f"HTTP {_vcode}: {_vbody[:120]}"
+                    if attempt < 3:
+                        _t.sleep(2 ** attempt + 1)
+                    continue
+                raise RuntimeError(
+                    f"视觉模型 HTTP {_vcode}"
+                    f"（{'认证失败' if _vcode in (401, 403) else '请求错误'}）"
+                    f"——非瞬时错误，不重试: {_vbody}") from e
             except Exception as e:
                 last_err = str(e)
                 if attempt < 3:
