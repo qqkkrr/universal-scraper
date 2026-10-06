@@ -26,8 +26,8 @@ import tempfile
 import threading
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-os.environ["US_ALLOW_PRIVATE"] = "1"
-
+# R25：US_ALLOW_PRIVATE 的设置在 main() 内（带保存/恢复）——模块级设置会在
+# pytest 收集期（import 本文件）就污染整个会话，让"出站守卫"类断言失去意义
 from universal_scraper.rangedl import rangedl  # noqa: E402
 
 C1 = bytes((i * 7 + 3) % 251 for i in range(4000))
@@ -91,7 +91,12 @@ class H(http.server.BaseHTTPRequestHandler):
 
 
 OUT = pathlib.Path(tempfile.mkdtemp(prefix="us_rangedl_"))
-res = []
+res: list = []
+
+# R25 接线说明：本文件此前是纯手工脚本——pytest 只按文件名 import 它（import 期
+# 就设 US_ALLOW_PRIVATE=1，**污染整个测试会话的 hermeticity**），10 个场景一条都
+# 没进电池。现在：环境变量移动 main() 内（带保存/恢复）、补 pytest 入口
+# （见文件尾 test_rangedl_manual_scenarios），场景本体一字未改。
 
 
 def clean(name):
@@ -111,6 +116,20 @@ def reset(**kw):
 
 
 def main() -> int:
+    # 环回桩服务器需过出站守卫白名单；保存/恢复保证 pytest 会话不被污染
+    _prev_env = os.environ.get("US_ALLOW_PRIVATE")
+    os.environ["US_ALLOW_PRIVATE"] = "1"
+    res.clear()                      # 同一会话内重复调用（手工 + pytest）不累积
+    try:
+        return _main_impl()
+    finally:
+        if _prev_env is None:
+            os.environ.pop("US_ALLOW_PRIVATE", None)
+        else:
+            os.environ["US_ALLOW_PRIVATE"] = _prev_env
+
+
+def _main_impl() -> int:
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     PORT = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -179,6 +198,19 @@ def main() -> int:
     bad = [t for t, ok, _ in res if not ok]
     print(f"总计 {len(res)} 项，失败 {len(bad)}" + (f": {bad}" if bad else "  ★ 全部通过"))
     return 1 if bad else 0
+
+
+def test_rangedl_manual_scenarios(monkeypatch):
+    """pytest 入口（R25 接线）：整跑全部场景（本地 Range 服务器 + 故障注入）。
+
+    退避 sleep 打桩：404 路径的原生退避会让每次 pytest 多等 1-2 分钟；场景断言
+    不依赖"真的等过"，因此把标准库 sleep 置空（llm 测试同款手法）。"""
+    import time as _time_mod
+    monkeypatch.setattr(_time_mod, "sleep", lambda s: None)
+    rc = main()
+    assert rc == 0, f"rangedl 套件 {rc} 项失败（见打印的 ❌ 列表）"
+    assert res, "场景一条都没跑（res 为空）——接线失效"
+    assert len(res) >= 10, f"场景数异常偏少：{len(res)}"
 
 
 if __name__ == "__main__":
