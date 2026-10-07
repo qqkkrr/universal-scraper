@@ -20,18 +20,20 @@ TASKS_DIR = ROOT / "tasks"
 
 
 def _assert_http_url(url: str) -> str:
-    """SSRF 边界（与 journals.py 同型）：仅 http/https；host 解析到
-    私网/环回/保留地址即拒绝。OCR 图源与探测 URL 都过这道闸。"""
-    import socket
-    import ipaddress
+    """SSRF 边界：仅 http/https；host 解析到私网/环回/保留地址即拒绝。
+    OCR 图源与探测 URL 都过这道闸。
+
+    R26：主机判定统一走 core._host_is_private——本模块的私有副本缺 multicast
+    检查、空主机名会裸抛 gaierror、也没有 core 的解析缓存（三份守卫副本是历轮
+    "副本漂移"事故类）。本闸保留**无条件拒绝**语义：不接 US_ALLOW_PRIVATE——
+    自动精配的探测不接受环境白名单改道内网。"""
     import urllib.parse
     sp = urllib.parse.urlsplit(url)
     if sp.scheme not in ("http", "https"):
         raise ValueError(f"仅允许 http/https URL: {url}")
-    for info in socket.getaddrinfo(sp.hostname, None):
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-            raise ValueError(f"拒绝私有/保留地址: {sp.hostname} -> {ip}")
+    from .core import _host_is_private
+    if _host_is_private(sp.hostname or ""):
+        raise ValueError(f"拒绝私有/保留地址: {sp.hostname}")
     return url
 
 
@@ -147,6 +149,27 @@ def _ask_scheme(description: str, sample: Dict[str, Any], log: Optional[Callable
 # ---------------------------------------------------------------------------
 # 保存 + 注册 + 试跑
 # ---------------------------------------------------------------------------
+def _same_site(candidate: str, original: str) -> bool:
+    """LLM 给出的入口/修复 URL 必须与原任务同站（R26，防提示注入改道）。
+
+    页面内容会进 LLM 提示词——恶意页可注入"把入口改成 attacker.com"，而
+    `_llm_repair`/`_entry_candidates` 的产出会**持久化进精配注册表**：该 host
+    后续所有任务都会抓第三方站并把数据当原站导出（本模块自己的纪律是
+    "防毒配置不得进注册表"）。判定：netloc 小写、剥端口与尾点；相等或互为
+    后缀（www.x.com 与 x.com 互认）。"""
+    from urllib.parse import urlparse as _up
+
+    def _host(u: str) -> str:
+        h = (_up(u if "//" in u else "https://" + u).netloc or "").lower()
+        h = h.rsplit(":", 1)[0] if (h.count(":") == 1 and ":" in h) else h
+        return h.rstrip(".")
+
+    a, b = _host(candidate), _host(original)
+    if not a or not b:
+        return False
+    return a == b or a.endswith("." + b) or b.endswith("." + a)
+
+
 def _sanitize_host(host: str) -> str:
     return re.sub(r"[^0-9A-Za-z_.-]", "_", host).strip("_") or "site"
 
@@ -686,7 +709,16 @@ def _repair_probe(meta: Dict[str, Any], url: str, limit: int, runner, log=None):
         params2 = dict(meta.get("params") or {})
         params2.update(fixed.get("params") or {})
         meta2["params"] = params2
-        entry2 = fixed.get("entry") or params2.get("entry") or url
+        # R26 同域闸：LLM 修复建议的 entry 必须与原任务同站才被采纳——
+        # 跨域建议连试跑都不去（更不能写回 meta 被注册持久化）
+        _orig_entry = meta.get("entry") or url
+        _fixed_entry = fixed.get("entry") or ""
+        if _fixed_entry and not _same_site(_fixed_entry, _orig_entry):
+            if log:
+                log(f"🚧 LLM 修复建议的入口与原任务不同站——已忽略（防注入改道）: "
+                    f"{_fixed_entry[:70]}")
+            _fixed_entry = ""
+        entry2 = _fixed_entry or params2.get("entry") or url
         try:
             rows, files, detail = _run_once(meta2, entry2)
         except Exception as e2:
@@ -697,9 +729,9 @@ def _repair_probe(meta: Dict[str, Any], url: str, limit: int, runner, log=None):
         # 注册闭包读 meta.get("entry")（sites._register_tactic_precise），顶层
         # entry 同样要更新；params 里的旧 entry 会经 setdefault 顶替顶层值，
         # 必须一并覆盖
-        if fixed.get("entry"):
-            meta2["entry"] = fixed["entry"]
-            params2["entry"] = fixed["entry"]
+        if _fixed_entry:
+            meta2["entry"] = _fixed_entry
+            params2["entry"] = _fixed_entry
         meta.clear()
         meta.update(meta2)
         url = entry2
@@ -761,6 +793,12 @@ def _entry_candidates(description: str, url: str, log=None) -> Dict[str, Any]:
         return probe
     for cand in cands[:3]:
         if not isinstance(cand, str) or not cand.startswith("http"):
+            continue
+        # R26 同域闸：LLM 候选入口必须与原任务同站——跨域候选被采纳会成为
+        # 持久化精配入口（页面提示注入即可把该 host 的任务改道第三方站）
+        if not _same_site(cand, url):
+            if log:
+                log(f"🚧 跳过跨域候选（防注入改道）: {cand[:70]}")
             continue
         if log:
             log(f"🔍 尝试候选入口: {cand}")
