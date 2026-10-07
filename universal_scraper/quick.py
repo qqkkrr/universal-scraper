@@ -55,7 +55,10 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
             import socket as _sock
             for _info in _sock.getaddrinfo(_sp.hostname, None):
                 _ip = _ipa.ip_address(_info[4][0])
-                if _ip.is_private or _ip.is_loopback or _ip.is_reserved or _ip.is_link_local:
+                # R27：补 is_multicast（与 precise_auto R26 同族——本文件两份守卫
+                # 副本都缺；ff02:: 系组播地址可触达本地网络服务）
+                if (_ip.is_private or _ip.is_loopback or _ip.is_reserved
+                        or _ip.is_link_local or _ip.is_multicast):
                     return {"url": url, "status": 0, "text": "",
                             "error": f"拒绝私有/保留地址: {_sp.hostname}"}
         except Exception as _e:
@@ -422,7 +425,9 @@ def js_recon(url: str, max_scripts: int = 6, out: Optional[str] = None) -> Dict[
         try:
             for info in socket.getaddrinfo(sp.hostname, None):
                 ip = ipaddress.ip_address(info[4][0])
-                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                # R27：补 is_multicast（fetch_url 同款，同族副本缺口）
+                if (ip.is_private or ip.is_loopback or ip.is_reserved
+                        or ip.is_link_local or ip.is_multicast):
                     return {"error": f"拒绝私有/保留地址: {sp.hostname} -> {ip}"}
         except Exception as e:
             # 审查五轮（H）：曾只捕 gaierror——中文 IDN 域名的 UnicodeError 穿透
