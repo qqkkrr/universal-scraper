@@ -1272,8 +1272,14 @@ class EngineV3:
             _tmp.write_text(json.dumps({"urls": urls, "items": len(urls)}, ensure_ascii=False), encoding="utf-8")
             import os as _os
             _os.replace(_tmp, self.state_file)
-        except Exception:
-            pass
+        except Exception as e:
+            # R29 修复（同型修复漏半截）：桥路径的 state 写盘失败曾全静默——
+            # 队列路径的 _save_state 在 R106 已大声告警（"resume 将重抓"），这里
+            # 是同一份状态的孪生写点。写盘失败 = 下次 --resume 静默从零开始
+            if not self._checkpoint_warned:
+                self._checkpoint_warned = True
+                self.logger.warn(f"已抓 URL 状态保存失败（后续不再重复提示）: "
+                                 f"{type(e).__name__}: {str(e)[:140]}——下次 --resume 将从零重抓")
         self.logger.info(f"完成: 条目 {len(kept)} | 错误 0")
         # R33 修复：桥路径 0 条曾缺 nodata 键——CLI 的 exit-3 门恒假（0 条假成功
         # 在桥路径复活）。与队列路径同一契约
