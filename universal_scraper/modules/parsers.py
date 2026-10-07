@@ -385,10 +385,16 @@ class LLMParser(BaseParser):
         cfg = self.config or {}  # OCR R131（M）：config 为 None 时下方 .get 必炸
         schema = cfg.get("schema", {})
         text = resp.text
-        # 优先给纯文本（去掉标签）
-        from ..extractors import html_to_markdown
+        # R28：页面内容进 LLM 前先净化（R20-1 家族第四条链——auto 兜底/MCP/agent
+        # 三条链当年已接，本解析器漏了）：隐藏元素/注释/零宽字符都是提示注入
+        # 载体，llm 解析器的输入恰是"不可信页面"的最典型场景。只净化不收窄
+        # （本解析器的语义是"整页抽取"，主内容收窄交给调用方选 main_only）
+        from ..extractors import html_to_markdown, scrub_text, strip_hidden_content
         if "<" in text[:500]:
-            text = html_to_markdown(text)[:8000] or re.sub(r"<[^>]+>", " ", resp.text)[:8000]
+            _clean = strip_hidden_content(text)
+            text = html_to_markdown(_clean)[:8000] or re.sub(r"<[^>]+>", " ", _clean)[:8000]
+        else:
+            text = scrub_text(re.sub(r"<[^>]+>", " ", text))[:8000]
         client = LLMClient()
         data = client.extract_json(text, schema, cfg.get("instruction", ""))
         return ParseResult(items=[data if isinstance(data, dict) else {"data": data}], requests=[])
