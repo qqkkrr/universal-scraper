@@ -10,8 +10,8 @@ description: >
   【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
   获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
 metadata:
-  version: "1.28.0"
-  source_project: "universal-scraper (20 轮审计 + 实战反馈轮, 330 测试)"
+  version: "1.29.0"
+  source_project: "universal-scraper (21 轮审计 + 实战反馈轮, 350 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能
@@ -328,6 +328,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 有 curl 命令要复现 | `curl2config --cmd "curl '…' -H '…'"`（只解析不执行；凭据/不支持项明确提醒；产物先 --dry-run 再 --limit 2） |
 | 调解析规则不想重打目标站 | `run --config x.json --replay`（R20 开发模式：只读本地响应缓存、绝不发网络；未命中结构化失败） |
 | 附件下载+PDF表格 | `pdf --download 清单.json` / `pdf --tables x.pdf`（断点续传+%PDF校验+pdfplumber） |
+| 名单类附件（通报/公示/招标，验收=行数≈声明数） | 读 **`references/name-list-parsing.md`**：镜像并集、五条解析链、行语义六条、声明数句子级对账、图片名单双引擎 OCR |
 | 定时重复采集 | `schedule --task --every <秒>` |
 | 监控网页变化 | `monitor --task --every <秒>` |
 | 结果复核/报表 | `verify --file` / `verify --dir <任务目录>`（通用审计：任意来源） / `report` |
@@ -417,7 +418,9 @@ HS 字体反爬）+ 签名接口需行为指纹——配置 schema 装不下这�
 人工配合话术（验证码/滑块/登录怎么跟用户说）→ 真实战例档案（gov.cn、点评、京东等）。
 
 写配置遇到不确定的字段 → **`references/spec-schema.md`**；
-照抄现成任务模板 → **`references/recipes.md`**。
+照抄现成任务模板 → **`references/recipes.md`**；
+名单在附件里（通报/公示/招标清单，验收口径是"行数≈正文声明数"）→
+**`references/name-list-parsing.md`**（附件发现与落盘、五条解析链、行语义、声明数对账、图片 OCR）。
 
 **强登录态/强签名站点（拼多多/知乎/淘宝）实战要点（2026-09 反馈七）**：
 - 在场捕获用 `capture-daemon --attach-cdp 9222` 附加到已登录 Chrome（用户先开调试 Chrome

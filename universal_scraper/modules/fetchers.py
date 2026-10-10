@@ -2,6 +2,7 @@
 """内置取数器：HTTP（连接池） / 浏览器 / 桥。"""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys

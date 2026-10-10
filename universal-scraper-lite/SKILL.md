@@ -6,8 +6,8 @@ description: >
   引擎代码在 Full 版（universal-scraper/）。当用户想抓取/采集/爬取网页数据、
   遇到反爬/封禁/0 结果需要判型对号入座、或需要交付级数据验收清单时使用。
 metadata:
-  version: "2.0.4-lite"
-  source_project: "universal-scraper (11 轮审计, 178 测试, 五任务科研实战)"
+  version: "2.0.5-lite"
+  source_project: "universal-scraper (21 轮审计, 350 测试, 五任务科研实战)"
 ---
 
 # 万能爬虫 · 知识与纪律手册（Lite）
@@ -17,12 +17,13 @@ metadata:
 > 本手册中提到的引擎命令均在那里执行。两个目录配合使用，也可单独把本手册当作
 > 任何采集任务的"兵法 + 军纪"。
 
-## 知识层（references/，2013 行实战判例）
+## 知识层（references/，2531 行实战判例）
 
 | 文件 | 内容 | 何时查 |
 |---|---|---|
 | `anti-block-playbook.md` | **判型表**（瑞数/Cloudflare/WAF/JS壳/SPA/EdgeOne/HS伪元素/随机值干扰表…34 判例行）、升级阶梯 L0→L5、限速与礼貌、接口捕获、**实战档案**（12306/统计局/小红书/知乎/aqistudy/巨潮年报面板等 33 条真实战役全记录）、0 结果诊断报告、配额机制 | 侦察阶段判型、被封时对号入座 |
 | `recipes.md` | **配方库 R1–R45**（每条=可复用打法：API 通道/参数/坑/验证法） | 动手前查有没有现成配方 |
+| `name-list-parsing.md` | **名单类附件解析**（通报/公示/招标清单）：镜像并集、五条解析链、行语义六条（rowspan 续行/一问题一行/"无序号即续行"的启用条件）、声明数句子级对账、图片名单双引擎 OCR、坑速查 | 验收口径是"行数≈正文声明数"的任务 |
 | `agent-quickref.md` | 并行子代理执行规范速览（含证据目录约定，见 `evidence-schema.md`） | 大批量任务编排时 |
 | `evidence-schema.md` | 批次任务目录/证据命名契约（`evidence_` 前缀——`verify --dir` 按它统计） | 多代理批次交付时 |
 | `data-sources-exchanges.md` | 公开数据源与交易所通道 | 找数据入口时 |
