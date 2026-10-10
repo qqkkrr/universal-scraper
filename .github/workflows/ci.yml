@@ -28,8 +28,12 @@ jobs:
       - name: 编译检查（全部 .py）
         run: python -m compileall -q universal_scraper scripts examples
 
-      - name: 单元用例（pytest，tests/test_*.py）
-        run: python -m pytest -q
+      - name: 单元用例（pytest；环境依赖/过时用例见 tests/ci_deselect.txt）
+        run: |
+          # 只对"存在的文件"下 --deselect：本机 tests/ 是远端子集时不会因缺文件报错
+          DESELECT=$(grep -v '^#' tests/ci_deselect.txt | grep -v '^$' | while read -r t; do \
+              [ -f "${t%%::*}" ] && printf -- '--deselect %s ' "$t"; done)
+          python -m pytest -q $DESELECT
 
       - name: pyflakes（未定义名必须为 0）
         run: |
