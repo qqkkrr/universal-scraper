@@ -35,7 +35,7 @@ import statistics
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 STATE_DIR = Path.home() / ".universal_scraper" / "health"
 LEDGER_PATH = STATE_DIR / "ledger.jsonl"

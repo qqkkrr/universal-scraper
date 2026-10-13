@@ -130,7 +130,7 @@ def _run_cmd(argv: Sequence[str], timeout: int = 120) -> Tuple[bool, str]:
         rc = p.wait(timeout=HEAL_PROBE_WAIT_S)
     except subprocess.TimeoutExpired:
         return True, ""                                               # 还在跑 = 常驻进程起来了 ✓
-    except Exception as e:                                            # noqa: BLE001
+    except Exception:                                                 # noqa: BLE001
         return True, ""                                               # 探测本身失败不冤枉它 ✓
     if rc == 0:
         return True, ""                                               # 一次性自愈脚本正常收尾 ✓
@@ -161,7 +161,7 @@ def _kill_group(p: "subprocess.Popen") -> None:
         except ProcessLookupError:
             break                                                     # 已经没了 ✓
         except Exception:                                             # noqa: BLE001
-            pass
+            pass                                                      # 权限/竞态 → 下一轮信号 ✓
         try:
             p.wait(timeout=5)
             return
