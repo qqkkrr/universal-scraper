@@ -9,9 +9,11 @@ B. 配额耗尽/页面改版表现为"0 条" ✗ → 台账必须**空结果可�
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -112,7 +114,8 @@ def test_run_cmd_reports_failure_reason(tmp_path):
 
 
 def test_http_probe_dead_port_is_false():
-    assert C._http_probe("http://127.0.0.1:1/none", timeout=1) is False
+    ok, why = C._http_probe("http://127.0.0.1:1/none", timeout=1)
+    assert ok is False and why                                   # 原因必须上浮 ✓（不再只回 bool ✗）
 
 
 # ================= chain：流程与出口语义 =================
@@ -200,7 +203,9 @@ def test_chain_heal_called_before_step_when_probe_dead(tmp_path):
 
 
 def test_chain_heal_failure_stops_with_probe_fail(tmp_path):
-    ch = _chain(tmp_path, [C.Step("s1", ["/bin/sh", "-c", DEATH_SCRIPT])])
+    """★ 审查 H2：自愈返回 True 后**必须复验** ✓✗ —— 通用 Probe 的 heal() 只说"我拉起了"，
+    不等于依赖真活了；不复验就会打"已恢复"然后带着死依赖空转 ✗✗。"""
+    ch = _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])])
     seen = {"n": 0}
 
     def _check():
@@ -208,7 +213,27 @@ def test_chain_heal_failure_stops_with_probe_fail(tmp_path):
         return False                                   # 一直不活 ✓
 
     def _heal():
-        return seen["n"] <= 1                          # 第 1 次探活时自愈成功，判死后自愈失败 ✓
+        return True                                    # 自愈自称成功 ✗ 但复验会戳穿 ✓
+
+    ch.probes = [C.Probe("liar", _check, _heal, heal_wait_s=0)]
+    res = ch.run()
+    assert res["status"] == "probe_fail"
+    assert res["steps"] == []                          # 一步都没跑（探针不可用就别开跑 ✓）
+    rows = _rows(ch.journal_path)
+    assert any(r.get("event") == "heal" and r.get("ok") is False for r in rows)   # 复验失败落账 ✓
+
+
+def test_chain_heal_failure_after_judgement_stops(tmp_path):
+    """判死后的自愈失败也要全停（且此时已有一次尝试记录 ✓）。"""
+    ch = _chain(tmp_path, [C.Step("s1", ["/bin/sh", "-c", DEATH_SCRIPT])])
+    calls = {"n": 0}
+
+    def _check():
+        calls["n"] += 1
+        return calls["n"] <= 1                         # 步骤开始前活 ✓；判死后复探死 ✗
+
+    def _heal():
+        return False
 
     ch.probes = [C.Probe("fake", _check, _heal, heal_wait_s=0)]
     res = ch.run()
@@ -278,14 +303,24 @@ def test_chain_deadline_clamps_step_timeout(tmp_path):
 
 
 def test_chain_single_flight_lock(tmp_path):
+    """★ R32：锁改用内核 `flock` ✓ —— "持有"必须是**真的持有 flock**，
+    写个 pid 到文件里不再能骗过它（旧实现信 pid，于是互删对方的锁 → TOCTOU 双飞 ✗✗）。"""
     ch = _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])])
-    ch.lock_path.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
-    assert ch.run()["status"] == "locked"
+    holder = os.open(ch.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.write(holder, json.dumps({"pid": os.getpid()}).encode())
+        res = ch.run()
+        assert res["status"] == "locked"
+        assert "持有者 pid" in res["reason"]                 # 说明里带持有者信息 ✓
+    finally:
+        fcntl.flock(holder, fcntl.LOCK_UN)
+        os.close(holder)
 
 
-def test_chain_malformed_lock_not_deadlocked(tmp_path):
-    """★ 审查 M4：合法 JSON 但缺 pid / pid=null / 坏 JSON 的锁**不得**造成永久 locked ✓✓。"""
-    for bad in ('{"note":"x"}', '{"pid":null}', "not-json"):
+def test_chain_lock_file_content_never_blocks(tmp_path):
+    """锁文件内容只作诊断 ✓：坏 JSON / 缺 pid / 死 pid 都不得锁死（旧实现靠 pid 判活 ✗）。"""
+    for bad in ('{"note":"x"}', '{"pid":null}', "not-json", '{"pid":999999}'):
         ch = _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])])
         ch.lock_path.write_text(bad, encoding="utf-8")
         assert ch.run()["status"] == "done", bad
@@ -298,9 +333,11 @@ def test_chain_dead_pid_lock_overwritten(tmp_path):
 
 
 def test_chain_lock_released_after_run(tmp_path):
+    """跑完锁必须释放（flock 由内核在 close/退出时释放 ✓；锁文件本身保留 ✓）。"""
     ch = _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])])
     ch.run()
-    assert not ch.lock_path.exists()                   # 自己的锁自己收 ✓
+    again = _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])])
+    assert again.run()["status"] == "done"
 
 
 def test_chain_journal_written_and_counts(tmp_path):
@@ -318,6 +355,54 @@ def test_chain_journal_write_failure_surfaces(tmp_path):
     res = ch.run()
     assert res["journal_errors"] > 0
     assert res["status"] == "ledger_broken"
+
+
+def test_chain_log_write_failure_is_not_done(tmp_path, monkeypatch):
+    """★ 日志是**判死输入**：写不进去 = 判死失效 + 审计轨迹丢失 → 不得报完成 ✓✓。
+
+    真实场景=**步骤跑完后磁盘写满**（日志 open 成功、后续写入失败、判死器仍读得到）✓；
+    若日志路径整体不可用，则会先撞 `judge_unavailable`（同样非 done ✓，见上一个用例）。
+    """
+    ch = _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])])
+    ch.log_path.write_text("旧日志\n", encoding="utf-8")
+    ch.log_path.chmod(0o444)                             # 只读文件：追加必失败、读取仍可 ✓
+    monkeypatch.setattr(ch, "_exec_step", lambda argv, t: 0)           # 步骤本身成功 ✓
+    res = ch.run()
+    assert res["log_errors"] > 0
+    assert res["status"] == "log_broken"
+    assert res["steps"][0]["attempts"][0]["death_hits"] == 0           # 判死器仍可用 ✓
+
+
+def test_chain_optional_step_failure_continues_but_partial(tmp_path):
+    """★ `required=False` 曾是**死字段** ✗（所有失败路径都 stop_chain=True，字段从不生效）：
+    可选步骤失败应继续下一级，但整体**不得报全绿** ✗✓。"""
+    ch = _chain(tmp_path, [C.Step("opt", ["/bin/sh", "-c", "exit 1"], required=False),
+                           C.Step("must", ["/bin/echo", "ran"])], max_heal_retries=0)
+    res = ch.run()
+    assert len(res["steps"]) == 2                        # 链条继续 ✓
+    assert res["status"] == "partial"                    # 但非全绿 ✓✓
+    assert res["skipped_steps"] and "opt" in res["skipped_steps"][0]
+    assert res["steps"][1]["outcome"] == "done"
+
+
+def test_chain_required_step_failure_still_stops(tmp_path):
+    """对照组：必需步骤失败仍必须中断（默认行为不许被 partial 改造放宽 ✗）。"""
+    ch = _chain(tmp_path, [C.Step("must", ["/bin/sh", "-c", "exit 1"]),
+                           C.Step("later", ["/bin/echo", "should-not-run"])], max_heal_retries=0)
+    res = ch.run()
+    assert len(res["steps"]) == 1 and res["status"] == "step_failed"
+
+
+def test_chain_death_burst_at_head_of_long_output(tmp_path):
+    """★ 判死**召回**：死亡爆发集中在本次输出**开头**、其后刷出 150KB 正常日志 ✗✗
+    （实测"带着死浏览器 9 秒跑完 1,751 款"就是这形态）——只扫尾部会误判健康 ✗。"""
+    script = ("for i in $(seq 12); do echo 'TargetClosedError: x'; done; "
+              "i=0; while [ $i -lt 4000 ]; do echo 'a-normal-log-line-that-is-long-enough-ok'; "
+              "i=$((i+1)); done")
+    ch = _chain(tmp_path, [C.Step("s1", ["/bin/sh", "-c", script])])
+    res = ch.run()
+    assert res["steps"][0]["attempts"][0]["death_hits"] >= C.DEATH_HITS_THRESHOLD
+    assert res["status"] == "death_persists"             # 判死 → 重跑仍死 ✓
 
 
 def test_chain_death_patterns_custom(tmp_path):
@@ -338,6 +423,64 @@ def test_chain_tail_death_unreadable_is_none(tmp_path):
     ch.log_path = tmp_path / "adir"
     ch.log_path.mkdir()
     assert ch.tail_death_hits()[0] is None             # 未知 ≠ 健康 ✓✓
+
+
+def test_chain_probe_heal_raising_is_probe_fail(tmp_path):
+    """自愈函数自己抛异常 → 不得穿透（承诺"不外抛" ✓）。"""
+    def _boom():
+        raise RuntimeError("heal boom")
+
+    ch = _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])],
+                probes=[C.Probe("boom", lambda: False, _boom)])
+    res = ch.run()
+    assert res["status"] == "probe_fail"
+    rows = _rows(ch.journal_path)
+    assert any(r.get("event") == "heal" and r.get("ok") is False and "boom" in str(r.get("reason"))
+               for r in rows)                          # 失败原因进账本 ✓
+
+
+def test_chain_exec_timeout_kills_whole_process_group(tmp_path, monkeypatch):
+    """★ 超时必须杀**整个进程组** ✗✗：`subprocess.run(timeout=)` 只杀直接子进程，
+    而步骤常是脚本/桥（node .cjs → 浏览器）——父进程被杀后**孙子进程会继续跑继续写** ✗。
+    本用例实测：父进程起一个后台孙子进程持续写文件 → 超时 → 文件必须停止增长 ✓。"""
+    monkeypatch.setattr(C, "MIN_STEP_TIMEOUT_S", 1)          # 生产下限 60s；测试下调 ✓
+    marker = tmp_path / "orphan.txt"
+    script = (f"(while true; do echo tick >> {marker}; sleep 0.2; done) & "
+              "sleep 30")                                     # 父进程睡死 → 必超时 ✓
+    ch = _chain(tmp_path, [C.Step("s1", ["/bin/sh", "-c", script], timeout_s=2)],
+                max_heal_retries=0)
+    res = ch.run()
+    row = res["steps"][0]["attempts"][0]
+    assert row["code"] == -9 and row["exec_error"] == "TimeoutExpired"
+    assert res["status"] != "done"                            # 超时绝不报完成 ✓
+    time.sleep(0.3)
+    size1 = marker.stat().st_size if marker.exists() else 0
+    time.sleep(1.2)
+    size2 = marker.stat().st_size if marker.exists() else 0
+    assert size1 > 0, "孙子进程没跑起来，用例无效"
+    assert size2 == size1, f"孤儿进程仍在写 ✗（进程组没杀干净：{size1}→{size2}）"
+
+
+def test_chain_effective_timeout_no_time_left(tmp_path):
+    """★ 硬时钟在即 → 不启动该步（返回 no_time ✓），且状态非 done ✓。"""
+    soon = (datetime.now() + timedelta(seconds=30)).strftime("%Y-%m-%d %H:%M:%S")
+    ch = _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])], deadline=soon)
+    t, no_time = ch._effective_timeout(ch.steps[0])
+    assert t == 60 and no_time is True
+    res = ch.run()
+    assert res["status"] == "deadline"
+    assert res["steps"][0]["attempts"] == []           # 一步都没跑 ✓
+
+
+def test_chain_lock_open_failure_is_locked_not_crash(tmp_path, monkeypatch):
+    """占锁本身失败（磁盘/权限）→ 结构化 locked，不外抛 ✓。"""
+    ch = _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])])
+
+    def _boom(*a, **kw):
+        raise OSError("no space")
+
+    monkeypatch.setattr(C.os, "open", _boom)
+    assert ch.run()["status"] == "locked"
 
 
 def test_chain_does_not_write_real_home(tmp_path):
@@ -478,13 +621,122 @@ def test_health_corrupt_state_isolated(tmp_path):
     assert list(tmp_path.glob("state.corrupt.*.json"))   # 真隔离（旧断言恒真 ✗）
 
 
-def test_health_state_wrong_shape_normalized(tmp_path):
-    """★ 审查：合法 JSON 但结构坏（sources 为 list / credentials 为 null）不得抛 ✓。"""
+def test_health_two_corruptions_keep_both_backups(tmp_path):
+    """★ 同一秒内二次损坏不得覆盖前一份证据 ✗（备份名曾只到秒级 ✗）。"""
+    led, st = _hpaths(tmp_path)
+    for i in range(2):
+        st.write_text(f"{{broken{i}", encoding="utf-8")
+        assert H.register("src", state_path=st)["ok"]
+    assert len(list(tmp_path.glob("state.corrupt.*.json"))) == 2
+
+
+def test_health_state_wrong_shape_isolated_not_silently_normalized(tmp_path):
+    """★ 审查 C2：合法 JSON 但结构坏（sources 为 list / credentials 为 null）**必须隔离+报警** ✗✗
+    —— 旧实现静默置空：登记与凭据日历一起消失，且 `expect_interval_h` 丢失会让陈旧规则静默关闭
+    （同一条检查从 stale 退 1 变成 ok 退 0 —— 毁掉数据反而变绿 ✗✗）。"""
     led, st = _hpaths(tmp_path)
     st.write_text(json.dumps({"sources": ["a"], "credentials": None}), encoding="utf-8")
     assert H.register("src", state_path=st)["ok"]
-    assert H.add_credential("vip", "2099-01-01", state_path=st)["ok"]
-    assert H.check("src", 1, ledger_path=led, state_path=st)["verdict"] == "no_baseline"
+    assert list(tmp_path.glob("state.corrupt.*.json"))                 # 真隔离 ✓
+    v = H.check("src", 1, ledger_path=led, state_path=st)
+    assert v["verdict"] == "state_recovered"                           # 非安心值 ✓
+    assert "复核" in " ".join(v["reasons"])                            # 明确要求人工复核登记 ✓
+
+
+def test_health_registered_but_never_recorded_alarms(tmp_path):
+    """★ 审查 C1（静默失败猎手）：登记了"每 N 小时一次"却**从未落账** → 必须告警 ✗✗。
+    旧实现落 no_baseline（安心值，退 0）——"采集器压根没跑/配额耗尽后静默停摆"正是这形态，
+    健康体系却全绿 ✗✗。"""
+    led, st = _hpaths(tmp_path)
+    H.register("qimai_offline", expect_interval_h=24, state_path=st)
+    fresh = H.check("qimai_offline", 2293, ledger_path=led, state_path=st)
+    assert fresh["verdict"] == "no_baseline"                           # 刚登记：宽限期 ✓
+    st.write_text(json.dumps({"sources": {"qimai_offline": {
+        "expect_interval_h": 24, "allow_empty": False,
+        "registered_at": (datetime.now() - timedelta(days=10)).isoformat(timespec="seconds")}},
+        "credentials": []}), encoding="utf-8")
+    v = H.check("qimai_offline", 2293, ledger_path=led, state_path=st)
+    assert v["verdict"] == "no_record" and "无任何账本记录" in " ".join(v["reasons"])
+    H.STATE_PATH.parent.mkdir(parents=True, exist_ok=True)             # 给 CLI 用全局路径 ✓
+    H.STATE_PATH.write_text(st.read_text(encoding="utf-8"), encoding="utf-8")
+    assert H.main(["check", "qimai_offline", "--count", "2293"]) == 1  # 非零退出 ✓
+
+
+def test_health_dirty_source_config_does_not_raise(tmp_path):
+    """★ 审查 H6：`sources: {"s": "oops"}` 曾让 check()/report() 抛 AttributeError 裸栈 ✗。"""
+    led, st = _hpaths(tmp_path)
+    st.write_text(json.dumps({"sources": {"s": "oops"}, "credentials": []}), encoding="utf-8")
+    v = H.check("s", 5, ledger_path=led, state_path=st)                # 不抛 ✓
+    assert v["verdict"] == "config_invalid"
+    assert "结构异常" in H.report(ledger_path=led, state_path=st)      # 报告也不崩 ✓
+
+
+def test_health_record_repairs_crashed_partial_line(tmp_path):
+    """★ 审查 H4：上次写盘崩溃留下的**无换行残行**会把新记录粘死 → 永久不可读，而 record 还报 ok ✗✗。"""
+    led, st = _hpaths(tmp_path)
+    led.write_text(json.dumps({"source": "src", "count": 100, "status": "ok"}), encoding="utf-8")
+    r = H.record("src", count=2293, ledger_path=led)
+    assert r["ok"] and "换行" in str(r.get("warning"))                  # 补换行并留痕 ✓
+    assert H.baseline("src", ledger_path=led)["last_count"] == 2293     # 新记录读得回来 ✓
+
+
+def test_health_record_fails_when_ledger_undecodable(tmp_path):
+    """★ 审查 H5：账本混入非法 UTF-8（整体不可读）时 record 仍退 0 ✗ → 必须 ok:False ✓。"""
+    led, st = _hpaths(tmp_path)
+    led.write_bytes(b'{"source":"src","count":1}\n\xff\xfe bad bytes\n')
+    r = H.record("src", count=5, ledger_path=led)
+    assert r["ok"] is False and "不可解码" in r["error"]
+
+
+def test_health_record_rejects_blank_source(tmp_path):
+    led, st = _hpaths(tmp_path)
+    assert H.record("", count=5, ledger_path=led)["ok"] is False       # 空 source 读不回来 ✗
+
+
+def test_health_allow_empty_strict_bool(tmp_path):
+    """★ 审查 L5：字符串 `"false"` 曾被当真 → 空结果判健康 ✗（只认布尔真 ✓）。"""
+    led, st = _hpaths(tmp_path)
+    st.write_text(json.dumps({"sources": {"src": {"allow_empty": "false"}},
+                              "credentials": []}), encoding="utf-8")
+    for _ in range(5):
+        H.record("src", count=100, ledger_path=led)
+    v = H.check("src", 0, ledger_path=led, state_path=st)
+    assert v["verdict"] in H.ALARM_VERDICTS                            # 不被字符串骗过 → 告警侧 ✓
+    assert any("allow_empty" in r for r in v["reasons"])               # 且明确点出配置异常 ✓
+    assert any("count=0" in r for r in v["reasons"])                   # 空结果本身也照样报 ✓
+
+
+def test_health_credential_warn_days_zero_respected(tmp_path):
+    """★ 审查 L3：显式 `warn_days=0`（只想过期后提醒）曾被 `or 7` 吃成 7 ✗。"""
+    led, st = _hpaths(tmp_path)
+    soon = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
+    assert H.add_credential("c", soon, warn_days=0, state_path=st)["warn_days"] == 0
+    assert H.due_credentials(state_path=st) == []                      # 3 天后到期 + 窗口 0 → 不进日历 ✓
+
+
+def test_health_no_count_does_not_mask_failing(tmp_path):
+    """★ 审查 L2：count 脏值的提前返回曾把已算出的 failing 覆盖成 no_count ✗。"""
+    led, st = _hpaths(tmp_path)
+    for _ in range(3):
+        H.record("src", count=100, ledger_path=led)
+    v = H.check("src", "不是数字", status="error", ledger_path=led, state_path=st)
+    assert v["verdict"] == "failing"                                   # 更高严重度保留 ✓
+
+
+def test_health_aware_datetime_converted_to_local(tmp_path):
+    """★ 审查 M2：带偏移的时间曾被丢掉偏移当本地时间（差 8h ✗）→ 必须换算 ✓。"""
+    d = H._parse_dt("2026-10-14T10:00:00+00:00")
+    assert d == datetime.fromtimestamp(datetime(2026, 10, 14, 10, 0,
+                                                tzinfo=__import__("datetime").timezone.utc).timestamp())
+
+
+def test_health_report_alarms_public_exit(tmp_path):
+    """程序化调用方要能拿到告警清单（旧实现 report() 把 alarms 丢了 ✗）。"""
+    led, st = _hpaths(tmp_path)
+    assert H.report_alarms(ledger_path=led, state_path=st) == []        # 全空 → 无告警 ✓
+    past = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    H.add_credential("vip", past, state_path=st)
+    assert any("vip" in a for a in H.report_alarms(ledger_path=led, state_path=st))
 
 
 def test_health_bad_ledger_lines_skipped(tmp_path):
@@ -551,6 +803,37 @@ def test_health_register_rejects_blank(tmp_path):
     assert H.register("  ", state_path=st)["ok"] is False
 
 
+def test_health_count_non_numeric_is_no_count(tmp_path):
+    led, st = _hpaths(tmp_path)
+    for _ in range(3):
+        H.record("src", count=100, ledger_path=led)
+    assert H.check("src", "N/A", ledger_path=led, state_path=st)["verdict"] == "no_count"
+
+
+def test_health_state_json_list_isolated(tmp_path):
+    """state 是合法 JSON 但顶层不是对象（如列表）→ 同样按损坏隔离 ✓。"""
+    led, st = _hpaths(tmp_path)
+    st.write_text("[1, 2, 3]", encoding="utf-8")
+    assert H.register("src", state_path=st)["ok"]
+    assert list(tmp_path.glob("state.corrupt.*.json"))
+
+
+def test_health_report_marks_recovered_state(tmp_path):
+    """隔离重建后，报告必须把"登记可能已丢"讲出来（否则用户以为登记还在 ✓✗）。"""
+    led, st = _hpaths(tmp_path)
+    st.write_text("{broken", encoding="utf-8")
+    H.register("src", state_path=st)
+    txt = H.report(ledger_path=led, state_path=st)
+    assert "隔离重建" in txt and "复核" in txt
+
+
+def test_health_due_credentials_non_dict_entry(tmp_path):
+    led, st = _hpaths(tmp_path)
+    st.write_text(json.dumps({"sources": {}, "credentials": ["oops", 42]}), encoding="utf-8")
+    due = H.due_credentials(state_path=st)
+    assert len(due) == 2 and all(d.get("error") for d in due)      # 不静默漏 ✓
+
+
 # ================= health：CLI 退出码（白名单 ✓） =================
 def test_health_cli_exit_codes(tmp_path, capsys):
     """CLI 走**模块级** LEDGER_PATH/STATE_PATH（fixture 已改到 tmp ✓），故直接记到那里。"""
@@ -598,3 +881,64 @@ def test_health_cli_report_not_fooled_by_string_match(tmp_path, capsys):
     """★ 审查：退出码曾靠**字符串匹配**判 ✗ —— 源名带"不可读""条目异常"就会误报 ✓✗。"""
     H.record("不可读条目异常", count=100, ledger_path=H.LEDGER_PATH)
     assert H.main(["report"]) == 0                                # 全 ok → 必须退 0 ✓
+
+
+def test_health_custom_drop_spike_thresholds(tmp_path):
+    """阈值是参数，得真的生效（默认 0.5×/2× ✓）。"""
+    led, st = _hpaths(tmp_path)
+    for _ in range(5):
+        H.record("src", count=100, ledger_path=led)
+    assert H.check("src", 50, ledger_path=led, state_path=st)["verdict"] == "ok"       # 边界=不判 ✓
+    assert H.check("src", 50, drop=0.9, ledger_path=led, state_path=st)["verdict"] == "volume_drop"
+    assert H.check("src", 150, ledger_path=led, state_path=st)["verdict"] == "ok"
+    assert H.check("src", 150, spike=1.2, ledger_path=led, state_path=st)["verdict"] == "volume_spike"
+
+
+def test_health_window_changes_verdict(tmp_path):
+    """★ 窗口决定基线：同一 count 在近 20 笔下判掉量、近 5 笔下正常 ✓。"""
+    led, st = _hpaths(tmp_path)
+    for _ in range(20):
+        H.record("src", count=1000, ledger_path=led)
+    for _ in range(5):
+        H.record("src", count=100, ledger_path=led)
+    assert H.check("src", 100, ledger_path=led, state_path=st)["verdict"] == "volume_drop"
+    assert H.check("src", 100, window=5, ledger_path=led, state_path=st)["verdict"] == "ok"
+
+
+# ================= CLI 接线（含"未知参数不得静默忽略"回归 ✓） =================
+def _run_cli(monkeypatch, argv):
+    from universal_scraper import cli as CLI
+    monkeypatch.setattr(sys, "argv", ["universal-scraper", *argv])
+    return CLI.main()
+
+
+def test_cli_rejects_unknown_args_for_normal_subcommands(monkeypatch, capsys):
+    """★ 回归：为透传 chain/health 改用 parse_known_args 后，**其它子命令的参数拼错
+    必须仍然报错** ✗✗（否则 `run --confg x.json` 会带着默认值跑起来）。"""
+    with pytest.raises(SystemExit) as e:
+        _run_cli(monkeypatch, ["run", "--confg", "/tmp/nope.json"])
+    assert e.value.code == 2
+    assert "无法识别的参数" in capsys.readouterr().err
+
+
+def test_cli_chain_unknown_args_reach_module_parser(monkeypatch, capsys):
+    """chain 仍要透传（模块 parser 是唯一来源 ✓），且走 tmp 状态目录（fixture 隔离 ✓）。"""
+    rc = _run_cli(monkeypatch, ["chain", "--step", "ok=/bin/echo hi", "--state-key", "cli_t"])
+    assert rc == 0
+    assert '"status": "done"' in capsys.readouterr().out
+
+
+def test_cli_health_h_exits_zero(monkeypatch, capsys):
+    """`health -h` 必须显示**模块自己的**子命令帮助（曾只显示空用法 ✗）。"""
+    with pytest.raises(SystemExit) as e:
+        _run_cli(monkeypatch, ["health", "-h"])
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert "register" in out and "report" in out
+
+
+def test_cli_chain_h_exits_zero(monkeypatch, capsys):
+    with pytest.raises(SystemExit) as e:
+        _run_cli(monkeypatch, ["chain", "-h"])
+    assert e.value.code == 0
+    assert "--deadline" in capsys.readouterr().out

@@ -10,8 +10,8 @@ description: >
   【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
   获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
 metadata:
-  version: "1.30.0"
-  source_project: "universal-scraper (31 轮审计 + 实战反馈轮, 353 测试)"
+  version: "1.31.0"
+  source_project: "universal-scraper (32 轮审计 + 实战反馈轮, 383 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能
@@ -316,7 +316,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 下载/详情按 IP 限量 | R19 配额收割：代理池 + 切片分工（`quota_ledger`）+ 边际余量 0.75 |
 | 配额锁死/进得来拿不到 | playbook 第七章：四类配额判别 → 冷却账本 → 通道组合（R21） |
 | 学术文献（有机构身份） | R20：机构 VPN + 知网 `navi.cnki.net` 期刊导航 + CDP 下载捕获 |
-| 无人值守长跑 | R22 自检清单（电源/防睡眠/原子状态/看门狗/胜利退出） |
+| 无人值守长跑 | R22 自检清单（电源/防睡眠/原子状态/看门狗/胜利退出）——**看门狗/自愈那部分现已有原语**：`chain`（按日志内容判死+自愈+重跑）+ `health`（空结果告警），见 **R49** |
 | 批量任务队列 | `batch --queue tasks.json next/claim/done/fail/nodata/retry/status`（优先级+断点续跑+多代理原子领取） |
 | 并行子代理批次 | R25 批次编排：`guide` 生成 AGENT_GUIDE + 并发上限（LLM 子代理 ≤8）+ 证据 schema |
 | 数据型任务（行情/指数/名单/统计） | R23 API 优先动线：jsrecon → capture(POST体+认证头) → capture2config（自动带 Cookie/翻页模板）→ 小样 → 全量 |

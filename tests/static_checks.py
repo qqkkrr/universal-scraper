@@ -297,6 +297,49 @@ def check_recipe_refs_resolve():
                 FAIL.append(f"{f.name}: 引用了不存在的配方 R{m.group(1)}")
 
 
+def check_subprocess_timeout_group(path: Path, tree: ast.AST):
+    """chain.py 的子进程调用必须集中在 `_run_killgroup` / `_run_cmd` 内（R32）。
+
+    为什么：`subprocess.run(timeout=)` 只杀**直接子进程** ✗ —— 步骤/探活命令常是脚本或桥
+    （node .cjs → 浏览器），父进程死后**孙子进程继续跑、继续写数据** ✗✗（无人值守长跑里
+    最隐蔽的"假停止"）。唯一正确形态是 `Popen(start_new_session=True)` + 超时 `os.killpg`，
+    因此把全模块的 subprocess 调用收进这两个 helper，谁再随手加一处就直接失败 ✓。
+    别名感知：`import subprocess as sp` / `from subprocess import run` 一样能被抓到 ✓。
+    """
+    if path.name != "chain.py":
+        return
+    mod_names, func_names = {"subprocess"}, set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name == "subprocess":
+                    mod_names.add(a.asname or "subprocess")
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            func_names |= {a.asname or a.name for a in node.names}
+    allowed = {"_run_killgroup", "_run_cmd"}
+    owner = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.walk(fn):
+                if isinstance(child, ast.Call):
+                    owner[id(child)] = fn.name
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        hit = None
+        if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) \
+                and f.value.id in mod_names \
+                and f.attr in ("run", "Popen", "call", "check_call", "check_output"):
+            hit = f"subprocess.{f.attr}"
+        elif isinstance(f, ast.Name) and f.id in func_names:
+            hit = f"subprocess.{f.id}（from-import）"
+        if hit and owner.get(id(node)) not in allowed:
+            FAIL.append(f"{path.name}:{node.lineno}: {hit} 出现在 "
+                        f"{owner.get(id(node)) or '模块级'}——必须走 _run_killgroup/_run_cmd"
+                        f"（超时只杀直接子进程会留孤儿 ✗）")
+
+
 def main(argv):
     targets = [Path(a) for a in argv] or [ROOT / "universal_scraper"]
     files = []
@@ -314,6 +357,7 @@ def main(argv):
         check_locks(f, tree)
         check_bare_except(f, tree)
         check_mutable_defaults(f, tree)
+        check_subprocess_timeout_group(f, tree)
         n += 1
     # R20 契约静态检查（与逐文件 AST 检查并列）
     check_mcp_tool_registry()

@@ -184,15 +184,12 @@ def main() -> int:
     mp.add_argument("--key", default="url", help="对比主键字段（默认 url）")
     mp.add_argument("--diff-fields", default=None, help="对比字段，逗号分隔（默认全部）")
 
-    # chain/health 的参数由各自模块的 build_parser 定义（唯一来源 ✓，避免两处漂移 ✗）；
-    # 这里只做 REMAINDER 透传，-h 也交给模块 parser ✓
-    # chain 用 parents 继承模块 parser（参数定义单源 ✓，-h 能看到全部参数 ✓）；
-    # health 有二级子命令（register/record/…），parents 嵌套不便 → 走未知参数透传 ✓
-    from .chain import build_parser as _chain_bp
-    sub.add_parser("chain", parents=[_chain_bp()], add_help=False,
+    # chain/health 的参数定义**只有一处**（各自模块的 build_parser ✓）——
+    # 这里不重复声明、也不重复实现编排逻辑：未知参数一律透传给模块 main() ✓
+    # （曾把 chain 的步骤/探针装配在 cli.py 里抄了一遍 ✗ = 两份实现必然漂移 ✗✗）
+    # 注意：这两个子命令**故意**容忍未知参数，其余子命令出现未知参数仍立即报错（见下）✓
+    sub.add_parser("chain", add_help=False,
                    help="🔗 自愈链条：步骤+探针+按日志内容判死（退出码 0 也会被抓 ✗）")
-    # health 有二级子命令（register/record/check/cred/report），帮助也归它自己 ✓
-    # —— add_help=False 让 `health -h` 落进透传（否则只显示空用法 ✗）
     sub.add_parser("health", add_help=False,
                    help="🩺 源健康台账：空结果≠正常 + 量级突变 + 凭据到期日历")
 
@@ -749,20 +746,8 @@ def main() -> int:
         return 1 if failed else 0
 
     if args.cmd == "chain":
-        from .chain import Chain, http_probe, parse_step_spec
-        steps = [parse_step_spec(x) for x in args.step]
-        if args.until:
-            for st in steps:
-                st.until = args.until
-        probes = []
-        heal_cmd = __import__("shlex").split(args.heal_cmd) if args.heal_cmd else []
-        for u in args.probe_http:
-            probes.append(http_probe(u, expect="", heal_cmd=heal_cmd))
-        res = Chain(steps=steps, probes=probes, state_key=args.state_key,
-                    deadline=args.deadline).run()
-        import json as _json
-        print(_json.dumps(res, ensure_ascii=False, indent=1))
-        return 0 if res.get("status") == "done" else 2
+        from .chain import main as chain_main
+        return chain_main(list(getattr(args, "passthrough", None) or []))
 
     if args.cmd == "health":
         from .health import main as health_main
