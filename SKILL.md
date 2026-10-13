@@ -10,8 +10,8 @@ description: >
   【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
   获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
 metadata:
-  version: "1.29.0"
-  source_project: "universal-scraper (21 轮审计 + 实战反馈轮, 350 测试)"
+  version: "1.30.0"
+  source_project: "universal-scraper (31 轮审计 + 实战反馈轮, 353 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能
@@ -331,6 +331,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 名单类附件（通报/公示/招标，验收=行数≈声明数） | 读 **`references/name-list-parsing.md`**：镜像并集、五条解析链、行语义六条、声明数句子级对账、图片名单双引擎 OCR |
 | 定时重复采集 | `schedule --task --every <秒>` |
 | 监控网页变化 | `monitor --task --every <秒>` |
+| **多步采集跑挂了自己爬起来** | `chain --step "名称=命令" --probe-http <探活URL> --heal-cmd <自愈命令> --deadline "YYYY-MM-DD HH:MM"`——**按日志内容判死**（退出码 0 但日志满屏 `TargetClosedError` 也判死 ✓，配了探针则先自愈再重跑）、进程级单飞锁防双开、每次尝试一行 JSONL 账本；**没真正成功绝不报 done** ✓。配方 **R49**（`references/ops-chain-health.md`） |
+| **判断采集是不是"静默失败"** | `health register/record/check/cred/report`——**空结果 ≠ 正常**（count=0 默认可疑 ✓）、量级突变（0.5×/2× 中位）、凭据到期日历（VIP/Token 到期前提醒 ✓）；`check` **只有 ok/no_baseline 退 0**，其余判定（含掉量/陈旧）一律退 1 = 需人工看。配方 **R49** |
 | 结果复核/报表 | `verify --file` / `verify --dir <任务目录>`（通用审计：任意来源） / `report` |
 | 环境/出口 IP | `doctor.py`（含网络链路体检）/ `ip`（出口+系统代理+电源） |
 | **被 412/403 拦，不知道撞的什么防护** | `diagnose <url>`（实测一次机器判型：瑞数/Cloudflare/WAF/JS壳/SPA + 处方 + 退出码 2 可脚本分支） |
