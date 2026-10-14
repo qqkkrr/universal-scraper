@@ -1180,7 +1180,8 @@ def _taobao_run(url: str, cookie: str = "", proxy: Optional[str] = None,
         cmd = [sys.executable, str(engine), "--mode", mode or "shop", "--target", target,
                "--max", str(limit), "--workers", "2", "--json"]
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-        for line in (p.stdout or "").splitlines():
+        # 按 "\n" 切（splitlines() 会被抓到的行内容里的 U+2028/U+2029 切碎 → 误判 0 条 ✗）
+        for line in (p.stdout or "").split("\n"):
             if line.startswith("RESULT_JSON "):
                 res = json.loads(line[len("RESULT_JSON "):])
                 rows = res.get("rows") or []

@@ -2193,7 +2193,8 @@ def main() -> int:
                 return 0
             _kw = args.history.lower()
             _rows = []
-            for line in _lp.read_text(encoding="utf-8", errors="ignore").splitlines():
+            # JSONL 按 "\n" 切（splitlines() 会被内容里的 U+2028/U+2029 切碎 → 整条丢 ✗）
+            for line in _lp.read_text(encoding="utf-8", errors="ignore").split("\n"):
                 if not line.strip():
                     continue
                 try:
@@ -2243,7 +2244,7 @@ def main() -> int:
                 _f.write(json.dumps(_entry, ensure_ascii=False) + "\n")
             # 防膨胀：超 2000 行截到最近 1000（tmp+replace 原子替换）
             if _lp.exists() and _lp.stat().st_size > 512 * 1024:
-                _lines = _lp.read_text(encoding="utf-8", errors="ignore").splitlines()
+                _lines = _lp.read_text(encoding="utf-8", errors="ignore").split("\n")   # JSONL：按 \n 切 ✓
                 if len(_lines) > 2000:
                     _tmp = _lp.with_suffix(".jsonl.tmp")
                     _tmp.write_text("\n".join(_lines[-1000:]) + "\n", encoding="utf-8")

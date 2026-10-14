@@ -276,6 +276,31 @@ def check_cli_flags_wired():
             FAIL.append(f"cli.py {sub}: 参数 {flags} 声明后无人读取（静默 no-op）")
 
 
+def check_jsonl_not_splitlines():
+    """JSONL 读取**不得用 `str.splitlines()`**（R33）。
+
+    为什么：`splitlines()` 会按**全部 Unicode 行边界**切分，包括 `U+2028`/`U+2029`
+    （LINE/PARAGRAPH SEPARATOR）——而抓到的正文里就有它们（实测某交付 JSONL 里 16 个 U+2028
+    → `splitlines()` 把 29,539 行切成 29,556 行，被切碎的行 `json.loads` 整条失败 ✗✗）。
+    后果是**静默丢记录**（引擎 spool 读取失败还会退回内存数据 → 子集覆盖全量的风险 ✗）。
+    判据：非注释行里出现 `splitlines()`，且其 ±3 行窗口内出现 `json.loads`。
+    """
+    hits = []
+    for p in sorted((ROOT / "universal_scraper").rglob("*.py")):
+        try:
+            lines = p.read_text(encoding="utf-8", errors="ignore").split("\n")
+        except OSError:
+            continue
+        for i, l in enumerate(lines):
+            if "splitlines()" not in l or l.lstrip().startswith("#"):
+                continue
+            win = "\n".join(lines[max(0, i - 3): i + 4])
+            if "json.loads" in win:
+                hits.append(f"{p.relative_to(ROOT)}:{i + 1}: JSONL 读点用了 splitlines()"
+                            f"（U+2028/U+2029 会切碎整条记录 ✗）")
+    FAIL.extend(hits)
+
+
 def check_recipe_refs_resolve():
     """配方编号引用必须真实存在（R22）：代码/文档里写"配方 R47"而 recipes.md 无 R47 =
     对 agent 说了假话（会去翻一个不存在的配方）。"""
@@ -366,6 +391,8 @@ def main(argv):
     # R22 陈述真实性检查（"技能说的话必须是真的"）
     check_cli_flags_wired()
     check_recipe_refs_resolve()
+    # R33 JSONL 行切分纪律（U+2028/U+2029 会切碎整条记录 ✗）
+    check_jsonl_not_splitlines()
     print(f"== 静态检查（{n} 文件）==")
     for w in WARN[:20]:
         print(f"  ⚠️  {w}")

@@ -150,7 +150,10 @@ def _read_ledger(path: Optional[Path] = None, limit: int = LEDGER_LIMIT) -> Opti
     if not p.exists():
         return []
     try:
-        lines = p.read_text(encoding="utf-8").splitlines()
+        # ⚠ 必须按 "\n" 切，**不能用 splitlines()** ✗：note 字段是自由文本，
+        # 含 U+2028/U+2029（Unicode 行分隔符）时 splitlines() 会把一行 JSONL 切成两半
+        # → 该笔记录被判为"坏行"跳过（静默丢一笔账 ✗✗）
+        lines = p.read_text(encoding="utf-8").split("\n")
     except FileNotFoundError:
         return []
     except Exception as e:                                            # noqa: BLE001
