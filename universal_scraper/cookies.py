@@ -539,7 +539,8 @@ const { loadChromium } = require(%s + "/scripts/browser_common.cjs");
         env = {**os.environ, "NODE_PATH": str(ROOT / "node_modules")}
         r = subprocess.run(["node", "-e", script], capture_output=True, text=True,
                            env=env, timeout=60, cwd=str(ROOT))
-        out = r.stdout.strip().splitlines()
+        # JSON 输出按 "\n" 取末行（splitlines() 会被会话数据里的 U+2028/U+2029 切碎 ✗）
+        out = r.stdout.strip().split("\n")
         data = json.loads(out[-1]) if out else {"ok": False, "error": r.stderr[-300:]}
     except Exception as e:
         return {"ok": False, "error": f"CDP 导入失败：{e}"}

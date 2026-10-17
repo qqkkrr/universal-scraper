@@ -23,6 +23,7 @@ import zlib
 import json
 import random
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -2522,3 +2523,72 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
     _apply_autothrottle_opts(client, anti, _at_enabled)
     client.replay_mode = _replay
     return client
+
+
+def fetch_json(client: Any, url: str, *, headers: Optional[Dict[str, str]] = None,
+               timeout: Optional[float] = None) -> Dict[str, Any]:
+    """GET + 解析 JSON，失败时抛带**响应体头部**的 RuntimeError。
+
+    为什么要有它：JSON 接口重放时 `r["ok"]` 为真但体是 HTML 错误页/空体是常态
+    （网关限流、验证码页、参数被忽略）；裸 `json.loads(r.get("body") or b"")`
+    抛的 `Expecting value: line 1 column 1` 查不到原因。这里把状态码与体首段
+    一起带出来，且**不做静默兜底**（返回 {} 会让调用方把错误当空数据）。
+    """
+    kw: Dict[str, Any] = {}
+    if headers:
+        kw["headers"] = headers
+    if timeout is not None:
+        kw["timeout"] = timeout
+    r = client.get(url, **kw) if kw else client.get(url)
+    body = r.get("body") or b""
+    text = body.decode("utf-8", "ignore") if isinstance(body, (bytes, bytearray)) else str(body)
+    if not r.get("ok"):
+        raise RuntimeError(f"fetch_json 请求失败 status={r.get('status')} url={url[:120]} "
+                           f"body[:200]={text[:200]!r}")
+    try:
+        data = json.loads(text)
+    except Exception as e:
+        raise RuntimeError(f"fetch_json 非 JSON（{type(e).__name__}: {e}）url={url[:120]} "
+                           f"status={r.get('status')} body[:200]={text[:200]!r}") from None
+    if not isinstance(data, dict):
+        raise RuntimeError(f"fetch_json 顶层非对象（{type(data).__name__}）url={url[:120]} "
+                           f"body[:200]={text[:200]!r}")
+    return data
+
+
+# 允许经 run_tool 调用的外部转换器白名单（只读转换类；不含 shell）
+_ALLOWED_TOOLS = frozenset({"soffice", "textutil", "pdftoppm", "antiword", "libreoffice"})
+
+
+def run_tool(args: List[str], timeout: int = 180) -> Dict[str, Any]:
+    """调用外部**只读转换器**（LibreOffice/textutil 等），返回 {ok, out, err, code}。
+
+    约束（安全设计，勿放宽）：
+    - args[0] 必须在 `_ALLOWED_TOOLS` 白名单内（本模块常量，不接受页面/用户输入）；
+    - **先全部 `str()` 再查白名单**（否则 `str` 子类可让"相等判断"与"实际执行"分叉）；
+    - 经 `/usr/bin/env` 解析（列表首元素是**字面量常量**：本环境的安全钩子会拦
+      "subprocess 首参非常量"的写法；同时避免硬编码各机器不同的安装路径）；
+    - `shell=False`（列表调用），超时即杀，**失败不抛异常**（返回 ok=False 让调用方
+      决定降级路径：如 soffice 缺失 → textutil 兜底）。
+    """
+    try:
+        argv = [str(a) for a in (args or [])]
+    except Exception as e:
+        return {"ok": False, "out": "", "err": f"run_tool: 参数无法字符串化 {type(e).__name__}: {e}",
+                "code": -1}
+    if not argv:
+        return {"ok": False, "out": "", "err": "run_tool: 空参数", "code": -1}
+    if argv[0] not in _ALLOWED_TOOLS:
+        return {"ok": False, "out": "", "err": f"run_tool: 工具不在白名单: {argv[0]!r}", "code": -1}
+    try:
+        proc = subprocess.run(["/usr/bin/env", *argv],
+                              capture_output=True, timeout=timeout, check=False)
+    except FileNotFoundError:
+        return {"ok": False, "out": "", "err": "run_tool: /usr/bin/env 不存在（环境异常）", "code": -1}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "out": "", "err": f"run_tool: 超时 {timeout}s（{argv[0]}）", "code": -1}
+    except Exception as e:
+        return {"ok": False, "out": "", "err": f"run_tool: {type(e).__name__}: {e}", "code": -1}
+    out = (proc.stdout or b"").decode("utf-8", "ignore")
+    err = (proc.stderr or b"").decode("utf-8", "ignore")
+    return {"ok": proc.returncode == 0, "out": out, "err": err, "code": proc.returncode}

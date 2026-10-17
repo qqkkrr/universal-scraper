@@ -184,6 +184,15 @@ def main() -> int:
     mp.add_argument("--key", default="url", help="对比主键字段（默认 url）")
     mp.add_argument("--diff-fields", default=None, help="对比字段，逗号分隔（默认全部）")
 
+    # chain/health 的参数定义**只有一处**（各自模块的 build_parser ✓）——
+    # 这里不重复声明、也不重复实现编排逻辑：未知参数一律透传给模块 main() ✓
+    # （曾把 chain 的步骤/探针装配在 cli.py 里抄了一遍 ✗ = 两份实现必然漂移 ✗✗）
+    # 注意：这两个子命令**故意**容忍未知参数，其余子命令出现未知参数仍立即报错（见下）✓
+    sub.add_parser("chain", add_help=False,
+                   help="🔗 自愈链条：步骤+探针+按日志内容判死（退出码 0 也会被抓 ✗）")
+    sub.add_parser("health", add_help=False,
+                   help="🩺 源健康台账：空结果≠正常 + 量级突变 + 凭据到期日历")
+
     fp = sub.add_parser("fetch", help="一键抓取 URL → 干净文本/Markdown/JSON（Firecrawl CLI 风格）")
     fp.add_argument("url", help="目标 URL")
     fp.add_argument("--browser", action="store_true", help="用浏览器渲染（JS/SPA/需要点击的页面）")
@@ -535,7 +544,16 @@ def main() -> int:
                          "全空不判死列、不计抽取缺口，报告如实标注。网易云战训："
                          "IP 属地/回复数这类字段 0%% 是源站特性非漏抓，如 \"IP属地,回复数\"")
 
-    args = ap.parse_args()
+    # chain/health 走"未知参数透传"（模块自带 parser 是唯一来源 ✓）：
+    # argparse 的 REMAINDER 接不住以 `--` 开头的首参，故用 parse_known_args ✓。
+    # ⚠ 但 parse_known_args 会让**所有**子命令的参数拼错变成静默忽略 ✗✗
+    # （如 `run --confg x.json` 会带着默认值跑起来）→ 只有这两个透传命令容忍未知参数，
+    # 其余命令一旦出现未知参数立即报错退出 ✓（保持原 parse_args 行为 ✓）。
+    args, passthrough = ap.parse_known_args()
+    if args.cmd in ("chain", "health"):
+        args.passthrough = list(passthrough)
+    elif passthrough:
+        ap.error(f"无法识别的参数：{' '.join(passthrough)}")
 
     if args.cmd == "dryparse":
         # 单 URL 过完整 fetch→route→parse 链，字段级打印（Scrapy parse 心智）：
@@ -726,6 +744,14 @@ def main() -> int:
         print(json.dumps({"jobs": len(jobs), "failed": len(failed),
                           "total_items": total}, ensure_ascii=False))
         return 1 if failed else 0
+
+    if args.cmd == "chain":
+        from .chain import main as chain_main
+        return chain_main(list(getattr(args, "passthrough", None) or []))
+
+    if args.cmd == "health":
+        from .health import main as health_main
+        return health_main(list(getattr(args, "passthrough", None) or []))
 
     if args.cmd == "monitor":
         from .engine_v3 import run_task
@@ -2167,7 +2193,8 @@ def main() -> int:
                 return 0
             _kw = args.history.lower()
             _rows = []
-            for line in _lp.read_text(encoding="utf-8", errors="ignore").splitlines():
+            # JSONL 按 "\n" 切（splitlines() 会被内容里的 U+2028/U+2029 切碎 → 整条丢 ✗）
+            for line in _lp.read_text(encoding="utf-8", errors="ignore").split("\n"):
                 if not line.strip():
                     continue
                 try:
@@ -2217,7 +2244,7 @@ def main() -> int:
                 _f.write(json.dumps(_entry, ensure_ascii=False) + "\n")
             # 防膨胀：超 2000 行截到最近 1000（tmp+replace 原子替换）
             if _lp.exists() and _lp.stat().st_size > 512 * 1024:
-                _lines = _lp.read_text(encoding="utf-8", errors="ignore").splitlines()
+                _lines = _lp.read_text(encoding="utf-8", errors="ignore").split("\n")   # JSONL：按 \n 切 ✓
                 if len(_lines) > 2000:
                     _tmp = _lp.with_suffix(".jsonl.tmp")
                     _tmp.write_text("\n".join(_lines[-1000:]) + "\n", encoding="utf-8")

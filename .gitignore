@@ -37,3 +37,6 @@ downloads/
 *.corrupt
 *.part[0-9]*
 *.manifest.json
+.coverage
+out/
+

@@ -511,7 +511,8 @@ def run(site_name: str = "sytyxb", since_year: int = 2024, out_dir: Optional[str
     meta_cache = meta_dir / ".meta_cache.jsonl"
     meta_cache_loaded: Dict[str, Dict[str, Any]] = {}
     if meta_cache.exists():
-        for line in meta_cache.read_text(encoding="utf-8").splitlines():
+        # JSONL 按 "\n" 切（splitlines() 会被题录里的 U+2028/U+2029 切碎 → 整条丢 ✗）
+        for line in meta_cache.read_text(encoding="utf-8").split("\n"):
             try:
                 rec = json.loads(line)
                 meta_cache_loaded[rec.get("id", "")] = rec

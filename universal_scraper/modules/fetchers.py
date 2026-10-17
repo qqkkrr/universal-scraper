@@ -2,6 +2,7 @@
 """内置取数器：HTTP（连接池） / 浏览器 / 桥。"""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -1179,7 +1180,8 @@ class BrowserFetcher(BaseFetcher):
                     pass
                 raise TimeoutError(f"浏览器单页桥超时 180s（孤儿已清理）: {req.url}")
             try:
-                obj = _json.loads(proc.stdout.strip().splitlines()[-1])
+                # 桥的 stdout 按 "\n" 取末行（splitlines() 会被 JSON 里的 U+2028 切碎 ✗）
+                obj = _json.loads(proc.stdout.strip().split("\n")[-1])
             except Exception:
                 raise RuntimeError(f"浏览器桥输出异常: {proc.stderr[-300:]}")
             if obj.get("type") == "error":

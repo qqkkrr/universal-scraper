@@ -1499,8 +1499,11 @@ class EngineV3:
                 _dir = Path(_sd) if Path(str(_sd)).is_absolute() else self.out_dir / str(_sd)
                 _sp = _dir / f"{self.storage_name}.jsonl"
                 if _sp.exists():
+                    # ⚠ 必须按 "\n" 切，**不能用 splitlines()** ✗：抓到的内容里可能有
+                    # U+2028/U+2029（Unicode 行分隔符，真实站点日志里就有 ✓），splitlines()
+                    # 会把一行 JSONL 切成两半 → json.loads 整条失败 → 退回内存数据（丢行+覆盖风险 ✗✗）
                     rows = [json.loads(l) for l in
-                            _sp.read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+                            _sp.read_text(encoding="utf-8", errors="ignore").split("\n") if l.strip()]
                     self._spool_total_hint = len(rows)  # 供写回时防子集覆盖全量
                     spool_read_ok = True
             except Exception as e:
@@ -1810,7 +1813,8 @@ class EngineV3:
                     _cur_keys = {str(r.get("_url") or r.get("url") or "") for r in rows}
                     _merged = []
                     if _sp.exists():
-                        for _line in _sp.read_text(encoding="utf-8", errors="ignore").splitlines():
+                        # 同上：JSONL 按 "\n" 切（splitlines() 会被内容里的 U+2028 切碎 ✗）
+                        for _line in _sp.read_text(encoding="utf-8", errors="ignore").split("\n"):
                             if not _line.strip():
                                 continue
                             try:
@@ -1871,7 +1875,8 @@ class EngineV3:
                     loaded = []
                     data = _sp.read_bytes()
                     tail = data[self._spool_start:]
-                    for line in tail.decode("utf-8", "ignore").splitlines():
+                    # JSONL 按 "\n" 切（splitlines() 会被内容里的 U+2028/U+2029 切碎 → 丢行 ✗）
+                    for line in tail.decode("utf-8", "ignore").split("\n"):
                         try:
                             loaded.append(json.loads(line))
                         except Exception:

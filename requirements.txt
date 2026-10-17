@@ -1,6 +1,8 @@
 lxml>=5
 requests>=2.31
 openpyxl>=3.1
+python-docx>=1.1
+Pillow>=10
 cssselect>=1.2
 pdfminer.six>=20240706
 pypdf>=4

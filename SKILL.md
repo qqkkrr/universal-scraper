@@ -10,8 +10,8 @@ description: >
   【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
   获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
 metadata:
-  version: "1.28.0"
-  source_project: "universal-scraper (20 轮审计 + 实战反馈轮, 330 测试)"
+  version: "1.32.0"
+  source_project: "universal-scraper (33 轮审计 + 实战反馈轮, 387 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能
@@ -316,7 +316,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 下载/详情按 IP 限量 | R19 配额收割：代理池 + 切片分工（`quota_ledger`）+ 边际余量 0.75 |
 | 配额锁死/进得来拿不到 | playbook 第七章：四类配额判别 → 冷却账本 → 通道组合（R21） |
 | 学术文献（有机构身份） | R20：机构 VPN + 知网 `navi.cnki.net` 期刊导航 + CDP 下载捕获 |
-| 无人值守长跑 | R22 自检清单（电源/防睡眠/原子状态/看门狗/胜利退出） |
+| 无人值守长跑 | R22 自检清单（电源/防睡眠/原子状态/看门狗/胜利退出）——**看门狗/自愈那部分现已有原语**：`chain`（按日志内容判死+自愈+重跑）+ `health`（空结果告警），见 **R49** |
 | 批量任务队列 | `batch --queue tasks.json next/claim/done/fail/nodata/retry/status`（优先级+断点续跑+多代理原子领取） |
 | 并行子代理批次 | R25 批次编排：`guide` 生成 AGENT_GUIDE + 并发上限（LLM 子代理 ≤8）+ 证据 schema |
 | 数据型任务（行情/指数/名单/统计） | R23 API 优先动线：jsrecon → capture(POST体+认证头) → capture2config（自动带 Cookie/翻页模板）→ 小样 → 全量 |
@@ -328,8 +328,11 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 有 curl 命令要复现 | `curl2config --cmd "curl '…' -H '…'"`（只解析不执行；凭据/不支持项明确提醒；产物先 --dry-run 再 --limit 2） |
 | 调解析规则不想重打目标站 | `run --config x.json --replay`（R20 开发模式：只读本地响应缓存、绝不发网络；未命中结构化失败） |
 | 附件下载+PDF表格 | `pdf --download 清单.json` / `pdf --tables x.pdf`（断点续传+%PDF校验+pdfplumber） |
+| 名单类附件（通报/公示/招标，验收=行数≈声明数） | 读 **`references/name-list-parsing.md`**：镜像并集、五条解析链、行语义六条、声明数句子级对账、图片名单双引擎 OCR |
 | 定时重复采集 | `schedule --task --every <秒>` |
 | 监控网页变化 | `monitor --task --every <秒>` |
+| **多步采集跑挂了自己爬起来** | `chain --step "名称=命令" --probe-http <探活URL> --heal-cmd <自愈命令> --deadline "YYYY-MM-DD HH:MM"`——**按日志内容判死**（退出码 0 但日志满屏 `TargetClosedError` 也判死 ✓，配了探针则先自愈再重跑）、进程级单飞锁防双开、每次尝试一行 JSONL 账本；**没真正成功绝不报 done** ✓。配方 **R49**（`references/ops-chain-health.md`） |
+| **判断采集是不是"静默失败"** | `health register/record/check/cred/report`——**空结果 ≠ 正常**（count=0 默认可疑 ✓）、量级突变（0.5×/2× 中位）、凭据到期日历（VIP/Token 到期前提醒 ✓）；`check` **只有 ok/no_baseline 退 0**，其余判定（含掉量/陈旧）一律退 1 = 需人工看。配方 **R49** |
 | 结果复核/报表 | `verify --file` / `verify --dir <任务目录>`（通用审计：任意来源） / `report` |
 | 环境/出口 IP | `doctor.py`（含网络链路体检）/ `ip`（出口+系统代理+电源） |
 | **被 412/403 拦，不知道撞的什么防护** | `diagnose <url>`（实测一次机器判型：瑞数/Cloudflare/WAF/JS壳/SPA + 处方 + 退出码 2 可脚本分支） |
@@ -348,6 +351,14 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | **渲染等待策略** | detail/source 配 `"wait_until"`（如 `networkidle`，SPA 接口拖尾场景）/ `"dom_stable"`：**Playwright 后端（`browser_pw.py`）生效**；**node 桥（`browser_drive.py`）不生效**——桥内硬编码 `domcontentloaded`（审查更正：此前"所有执行器都不生效"的说法已过时）。走桥的任务需要等接口拖尾时，用 `scroll_count/scroll_wait_ms` 或 `actions` 里的 `wait` 步替代；并发渲染 `browser_backend: auto` + `concurrency>1` 时多实例分片并行（上限 3） |
 | **LLM pydantic 结构化抽取** | `LLMClient().extract_json_model(内容, MyPydanticModel)`（R101：jsonschema 注入+校验失败自动回喂重试） |
 | **sitemap 增量监控** | `monitor.watch_once(name, sitemap_url, webhook=...)`（R101：快照 diff 新增/消失 URL，有变化才 POST webhook；快照存 `~/.universal_scraper/monitor/`） |
+| 新建任务配置骨架 | `scaffold --type {http_json,http_html,browser,browser_script,task} --name <任务名>`（产出的配置可直接 `run --config`） |
+| 一次跑多份任务清单 | `jobs --file jobs.json`（`[{"task": "tasks/a", "var": {"k": "v"}}]` 顺序执行） |
+| 先摸清全站有哪些页面 | `map <入口URL> [--sitemap] [--allow <正则>] [--deny <正则>] [--max-urls N]`（入口链接 + sitemap 并集，出规划清单） |
+| 只预检一页、不跑全量 | `dryparse --task <v3任务目录> --url <url> [--var k=v] [--limit N] [--json]`（改选择器前先验一页） |
+| 换解析模型 / 视觉模型 | `llm`（看当前配置）/ `llm --model <模型> --vision <视觉模型>` |
+| 找页面的加密/签名入口 | `pagefn <url> [--limit 60]`（枚举非原生全局函数，实现长的排前；需调试 Chrome 已过挑战/登录） |
+| 慢站大文件并行下载 | `rangedl <url> --out <文件> [--segments N] [--concurrency N]`（需服务器支持 Accept-Ranges；分段并行 + 断点续传） |
+| 让其他客户端也能调用采集能力 | `mcp`（stdio MCP Server，供 Claude/Cursor/Codex；`--token` 启用令牌校验，`--once` 自测） |
 
 ## 权限友好执行模式（减少权限弹窗，R102 战报沉淀）
 
@@ -417,7 +428,9 @@ HS 字体反爬）+ 签名接口需行为指纹——配置 schema 装不下这�
 人工配合话术（验证码/滑块/登录怎么跟用户说）→ 真实战例档案（gov.cn、点评、京东等）。
 
 写配置遇到不确定的字段 → **`references/spec-schema.md`**；
-照抄现成任务模板 → **`references/recipes.md`**。
+照抄现成任务模板 → **`references/recipes.md`**；
+名单在附件里（通报/公示/招标清单，验收口径是"行数≈正文声明数"）→
+**`references/name-list-parsing.md`**（附件发现与落盘、五条解析链、行语义、声明数对账、图片 OCR）。
 
 **强登录态/强签名站点（拼多多/知乎/淘宝）实战要点（2026-09 反馈七）**：
 - 在场捕获用 `capture-daemon --attach-cdp 9222` 附加到已登录 Chrome（用户先开调试 Chrome

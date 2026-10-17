@@ -426,8 +426,9 @@ def verify_file(path: str, network: bool = False, data_key: str = "",
             # 裁判文书网战训（UI 驱动采集没有配置产物，verify 此前无从下手）：
             # 兼容 JSONL——逐行 JSON 的流式采集产物
             try:
+                # JSONL 按 "\n" 切（splitlines() 会被内容里的 U+2028/U+2029 切碎 → 整条丢 ✗）
                 lines = [ln for ln in
-                         fp.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+                         fp.read_text(encoding="utf-8-sig", errors="replace").split("\n")
                          if ln.strip()]
                 data = [json.loads(ln) for ln in lines]
             except json.JSONDecodeError as e2:

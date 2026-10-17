@@ -2546,7 +2546,8 @@ def auto_task(description: str, limit: Optional[int] = None, rounds: int = 2,
         sample = []
         if items_path is not None and items_path.exists():
             # 从文件末尾读（最新写入在末尾），最多回看 500 行取最新 5 条
-            _lines = items_path.read_text(encoding="utf-8", errors="replace").splitlines()[-500:]
+            # JSONL 按 "\n" 切（splitlines() 会被内容里的 U+2028/U+2029 切碎 ✗）
+            _lines = items_path.read_text(encoding="utf-8", errors="replace").split("\n")[-500:]
             for line in reversed(_lines):
                 if line.strip():
                     try:
@@ -2993,7 +2994,8 @@ def run_with_config(config: dict, name: str, task_dir, description: str = "",
         sample = []
         if items_path.exists():
             # 从文件末尾读（最新写入在末尾），最多回看 500 行取最新 5 条
-            _lines = items_path.read_text(encoding="utf-8", errors="replace").splitlines()[-500:]
+            # JSONL 按 "\n" 切（splitlines() 会被内容里的 U+2028/U+2029 切碎 ✗）
+            _lines = items_path.read_text(encoding="utf-8", errors="replace").split("\n")[-500:]
             for line in reversed(_lines):
                 if line.strip():
                     try:
