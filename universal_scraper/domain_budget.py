@@ -17,11 +17,12 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .quota_ledger import QuotaLedger
+from .home import state_path
 
 # batch2400 GLM 战训：支持环境变量覆盖台账路径——A/B 测试/多代理模式不共享封锁状态
 DEFAULT_FILE = os.environ.get(
     "UNIVERSAL_SCRAPER_LEDGER",
-    str(Path.home() / ".universal_scraper" / "domain_budget.json")
+    str(state_path("domain_budget.json"))
 )
 
 

@@ -459,7 +459,7 @@ def main() -> int:
     bd_p.add_argument("--action-window", type=float, default=3600.0, help="动作预算：滑动窗口秒（默认 3600）")
     bd_p.add_argument("--action-cost", type=int, default=1, help="动作预算：本次扣额数（默认 1）")
     bd_p.add_argument("--action-info", default=None, help="查动作预算状态（不扣额）")
-    bd_p.add_argument("--file", default=None, help="台账文件路径（默认 ~/.universal_scraper/domain_budget.json）")
+    bd_p.add_argument("--file", default=None, help="台账文件路径（默认 ~/.universal-scraper/domain_budget.json）")
 
     c2p = sub.add_parser("capture2config", help="⚡ 捕获→可重放 http_json 配置（POST体/方法/翻页模板一步到位）")
     c2p.add_argument("capture", help="捕获文件：capture_all.json 或声明式 <name>.json")

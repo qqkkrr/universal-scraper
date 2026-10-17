@@ -12,7 +12,7 @@
         sleep(r["reset_in"])   # 或转做便宜动作
 
 失败也扣：调用方在动作"发起"时 acquire（无论成败不退额）；窗口是滑动的，
-只数最近 window 秒内的 events。台账持久化到 ~/.universal_scraper/action_budget.json
+只数最近 window 秒内的 events。台账持久化到 ~/.universal-scraper/action_budget.json
 （可用环境变量 UNIVERSAL_SCRAPER_ACTION_BUDGET 覆盖），跨运行生效。
 """
 from __future__ import annotations
@@ -25,10 +25,11 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .quota_ledger import QuotaLedger
+from .home import state_path
 
 DEFAULT_FILE = os.environ.get(
     "UNIVERSAL_SCRAPER_ACTION_BUDGET",
-    str(Path.home() / ".universal_scraper" / "action_budget.json")
+    str(state_path("action_budget.json"))
 )
 _LOCK = threading.Lock()
 # 审查八轮（H）：传入 limit/window 与持久化不一致时告警——进程内去重防刷屏

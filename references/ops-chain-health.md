@@ -38,7 +38,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli chain \
 3. **判死 = 扫日志内容特征计数**（默认 `TargetClosedError`、`ERR_INTERNET_DISCONNECTED`）——
    **不看退出码** ✓✓：本次尝试新增内容命中 ≥10 次即判死 → **配了探针则先自愈**、然后**重跑一次** ✓；
    只数**本次尝试新增的字节**（按日志水位），不把前序步骤/上次尝试的死亡文本算进来 ✓；
-4. **账本**：每次尝试一行 JSONL（`~/.universal_scraper/chain/<key>.journal.jsonl` ✓），
+4. **账本**：每次尝试一行 JSONL（`~/.universal-scraper/chain/<key>.journal.jsonl` ✓），
    跑挂后能回答"哪一步、因为什么、补了几次"。
 
 附带：**进程级单飞锁**（同 `--state-key` 拒绝双开 ✓ —— 双开浏览器会互相抢配额 ✗，

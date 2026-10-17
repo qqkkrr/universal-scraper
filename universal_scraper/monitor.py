@@ -4,7 +4,7 @@
 - push_webhook: 把 diff 结果 POST 到用户 webhook（复用 middleware.webhook 的口径）
 - watch: 供 webui 调度线程/cli monitor 调用的单轮监视（diff → 有变化才推送）
 
-快照按 <md5(url)>.json 存 ~/.universal_scraper/monitor/<name>.json，
+快照按 <md5(url)>.json 存 ~/.universal-scraper/monitor/<name>.json，
 跨运行持久；损坏按空快照处理并隔离。
 """
 from __future__ import annotations
@@ -13,8 +13,9 @@ import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from .home import state_path
 
-MONITOR_DIR = Path.home() / ".universal_scraper" / "monitor"
+MONITOR_DIR = state_path("monitor")
 
 
 def _snapshot_path(name: str) -> Path:

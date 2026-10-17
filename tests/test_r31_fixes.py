@@ -485,7 +485,7 @@ def test_chain_lock_open_failure_is_locked_not_crash(tmp_path, monkeypatch):
 
 def test_chain_does_not_write_real_home(tmp_path):
     """隔离回归：本套件任何用例都不得在真实家目录新增状态 ✓✗。"""
-    home_chain = Path.home() / ".universal_scraper" / "chain"
+    home_chain = Path.home() / ".universal-scraper" / "chain"
     before = set(home_chain.glob("*")) if home_chain.exists() else set()
     _chain(tmp_path, [C.Step("s1", ["/bin/echo", "x"])]).run()
     after = set(home_chain.glob("*")) if home_chain.exists() else set()

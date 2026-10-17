@@ -10,8 +10,8 @@ description: >
   【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
   获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
 metadata:
-  version: "1.32.0"
-  source_project: "universal-scraper (33 轮审计 + 实战反馈轮, 387 测试)"
+  version: "1.32.1"
+  source_project: "universal-scraper (33 轮审计 + 实战反馈轮, 389 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能
@@ -315,6 +315,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | 免费代理池 | `proxy --refresh --target-url <目标站重页面> --marker <站名>`（目标站校验+三态账本，R19） |
 | 下载/详情按 IP 限量 | R19 配额收割：代理池 + 切片分工（`quota_ledger`）+ 边际余量 0.75 |
 | 配额锁死/进得来拿不到 | playbook 第七章：四类配额判别 → 冷却账本 → 通道组合（R21） |
+| **想看配额战例完整复盘** | 读 **`references/case-kygl.md`**（《科研管理》1369 篇：官网→代理池→机构通道三段式、四道关卡、三次机制误判与「疫苗」，R19~R22 的出处战例） |
 | 学术文献（有机构身份） | R20：机构 VPN + 知网 `navi.cnki.net` 期刊导航 + CDP 下载捕获 |
 | 无人值守长跑 | R22 自检清单（电源/防睡眠/原子状态/看门狗/胜利退出）——**看门狗/自愈那部分现已有原语**：`chain`（按日志内容判死+自愈+重跑）+ `health`（空结果告警），见 **R49** |
 | 批量任务队列 | `batch --queue tasks.json next/claim/done/fail/nodata/retry/status`（优先级+断点续跑+多代理原子领取） |
@@ -350,7 +351,7 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | **代理提取 API** | `anti_bot.proxy_api: {"url": "https://厂商/提取接口", "format": "auto|text|json_list|json_data"}`（R116：住宅/商业代理 API adapter，启动时拉取并入代理池，300s 缓存；失败 WARN 走直连） |
 | **渲染等待策略** | detail/source 配 `"wait_until"`（如 `networkidle`，SPA 接口拖尾场景）/ `"dom_stable"`：**Playwright 后端（`browser_pw.py`）生效**；**node 桥（`browser_drive.py`）不生效**——桥内硬编码 `domcontentloaded`（审查更正：此前"所有执行器都不生效"的说法已过时）。走桥的任务需要等接口拖尾时，用 `scroll_count/scroll_wait_ms` 或 `actions` 里的 `wait` 步替代；并发渲染 `browser_backend: auto` + `concurrency>1` 时多实例分片并行（上限 3） |
 | **LLM pydantic 结构化抽取** | `LLMClient().extract_json_model(内容, MyPydanticModel)`（R101：jsonschema 注入+校验失败自动回喂重试） |
-| **sitemap 增量监控** | `monitor.watch_once(name, sitemap_url, webhook=...)`（R101：快照 diff 新增/消失 URL，有变化才 POST webhook；快照存 `~/.universal_scraper/monitor/`） |
+| **sitemap 增量监控** | `monitor.watch_once(name, sitemap_url, webhook=...)`（R101：快照 diff 新增/消失 URL，有变化才 POST webhook；快照存 `~/.universal-scraper/monitor/`） |
 | 新建任务配置骨架 | `scaffold --type {http_json,http_html,browser,browser_script,task} --name <任务名>`（产出的配置可直接 `run --config`） |
 | 一次跑多份任务清单 | `jobs --file jobs.json`（`[{"task": "tasks/a", "var": {"k": "v"}}]` 顺序执行） |
 | 先摸清全站有哪些页面 | `map <入口URL> [--sitemap] [--allow <正则>] [--deny <正则>] [--max-urls N]`（入口链接 + sitemap 并集，出规划清单） |

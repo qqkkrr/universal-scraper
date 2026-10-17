@@ -18,7 +18,7 @@
 （曾用字符串匹配判退出码 ✗ —— 源名里带"不可读"会误报，且完全没看源告警 ✗✗）；
 未来新增告警词默认落在"要人工看"一侧 ✓。
 
-存储：`~/.universal_scraper/health/{ledger.jsonl, state.json}`；**state.json 损坏按隔离重命名** ✓、
+存储：`~/.universal-scraper/health/{ledger.jsonl, state.json}`；**state.json 损坏按隔离重命名** ✓、
 **账本整体不可读 → 显式 `ledger_unreadable`** ✓（不假装"没有历史" ✗）、坏行跳过 ✓。
 
 用法（CLI，注意本仓库**没有** `us` 可执行文件，须走模块入口 ✓）：
@@ -36,8 +36,9 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+from .home import state_path
 
-STATE_DIR = Path.home() / ".universal_scraper" / "health"
+STATE_DIR = state_path("health")
 LEDGER_PATH = STATE_DIR / "ledger.jsonl"
 STATE_PATH = STATE_DIR / "state.json"
 

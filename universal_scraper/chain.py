@@ -46,8 +46,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from .home import state_path
 
-STATE_DIR = Path.home() / ".universal_scraper" / "chain"
+STATE_DIR = state_path("chain")
 DEFAULT_DEATH_PATTERNS: Tuple[str, ...] = (
     "TargetClosedError",              # Playwright：页面/上下文/浏览器没了（实测最常发生 ✗）
     "ERR_INTERNET_DISCONNECTED",      # 断网（实测 4,812 次 ✗）
