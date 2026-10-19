@@ -1,0 +1,35 @@
+{
+  "name": "demo_github_repos",
+  "vars": { "q": "scraper", "per_page": 5 },
+  "source": {
+    "type": "http_json",
+    "method": "GET",
+    "url": "https://api.github.com/search/repositories",
+    "query": { "q": "{{q}}", "per_page": "{{per_page}}" },
+    "headers": { "Accept": "application/vnd.github+json", "User-Agent": "universal-scraper-demo" }
+  },
+  "pagination": {
+    "strategy": "page_param",
+    "page_param": "page",
+    "start": 1,
+    "max_pages": 2,
+    "total_path": "total_count",
+    "records_path": "items"
+  },
+  "record": {
+    "fields": {
+      "repo": { "from": "full_name" },
+      "url": { "from": "html_url" },
+      "stars": { "from": "stargazers_count" },
+      "language": { "from": "language" },
+      "description": { "from": "description" }
+    }
+  },
+  "pipeline": [
+    { "type": "filter", "field": "language", "op": "eq", "value": "Python" },
+    { "type": "cast", "field": "stars", "to": "int" }
+  ],
+  "detail": { "enabled": false },
+  "output": { "dir": "outputs", "base_name": "demo_github_{{q}}", "formats": ["json", "csv", "xlsx"] },
+  "anti_bot": { "min_interval": 0.5, "max_retries": 2, "timeout": 15, "use_system_proxy": false }
+}

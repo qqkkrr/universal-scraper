@@ -1,0 +1,48 @@
+{
+  "name": "real_ggzy",
+  "vars": {
+    "keyword": "数据中心"
+  },
+  "source": {
+    "type": "bridge",
+    "bridge": "../scripts/ggzy_bridge.cjs",
+    "bridge_params": {
+      "keyword": "{{keyword}}",
+      "begin": "2025-01-01",
+      "end": "2025-01-31",
+      "stage": "0001"
+    }
+  },
+  "record": {
+    "fields": {
+      "title": {
+        "from": "title"
+      },
+      "url": {
+        "from": "url"
+      },
+      "date": {
+        "from": "date"
+      }
+    }
+  },
+  "pipelines": [
+    {
+      "type": "filter",
+      "field": "title",
+      "op": "non_empty"
+    }
+  ],
+  "storage": {
+    "type": "jsonl",
+    "name": "real_ggzy"
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "real_ggzy"
+  },
+  "anti_bot": {
+    "min_interval": 0.5,
+    "max_retries": 1
+  }
+}

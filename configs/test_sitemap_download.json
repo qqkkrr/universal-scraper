@@ -1,0 +1,23 @@
+{
+  "name": "test_sitemap_download",
+  "source": {
+    "type": "http_html",
+    "url": "http://127.0.0.1:8923/page1.html",
+    "sitemap": "http://127.0.0.1:8923/sitemap.xml",
+    "row_css": "tr.item",
+    "fields": {
+      "title": { "css": "td.t" },
+      "date": { "css": "td.d" },
+      "url": { "css": "a.dl", "attr": "href" }
+    },
+    "base_url": "http://127.0.0.1:8923"
+  },
+  "pagination": { "strategy": "none" },
+  "record": { "fields": { "title": {"from": "title"}, "date": {"from": "date"}, "url": {"from": "url"} } },
+  "pipeline": [],
+  "detail": { "enabled": false },
+  "download": { "enabled": true, "url_field": "url", "dir": "files", "interval": 0.1 },
+  "middleware": [ { "on": "data", "action": "log", "message": "产出记录" } ],
+  "output": { "dir": "outputs", "base_name": "test_sitemap_download" },
+  "anti_bot": { "min_interval": 0.2, "http_backend": "requests" }
+}

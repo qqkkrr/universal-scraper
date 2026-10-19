@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""第四十二轮回归（7 个）：万能化强化——
+选择器自愈、浏览器默认滚动、流水线丢弃/跳过统计、LLM 兜底用渲染页。
+用法: python3 tests/run_tests53.py
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+PASS, FAIL = [], []
+
+
+def check(name, cond, detail=""):
+    (PASS if cond else FAIL).append((name, detail))
+    print(f"  {'✅' if cond else '❌'} {name}" + (f"  {detail}" if detail and not cond else ""))
+
+
+def main():
+    print("== 选择器自愈（AI 猜错 class 也能出数据）==")
+    from universal_scraper.modules.parsers import ConfigParser
+    from universal_scraper.protocols import Response, Request
+    html = ("<html><body>" +
+            "".join(f'<li class="job-card-box"><a class="job-name" href="/job_detail/{i}.html">产品经理{i}</a>'
+                    f'<span class="salary">10-{i}K</span><a class="boss-info">公司{i}</a></li>' for i in range(5)) +
+            "</body></html>")
+    resp = Response(request=Request(url="https://x/list"), status=200, text=html, url="https://x/list")
+    p = ConfigParser({"type": "html", "row_css": ".wrong-selector",
+                      "fields": {"title": {"css": "a.job-name::text"}}}, {})
+    r = p.parse(resp, None)
+    check("错误选择器自愈出数据", len(r.items) >= 5, str(len(r.items)))
+    check("自愈字段有值", len(r.items) > 0 and r.items[0].get("title") == "产品经理0", str(r.items[0])[:80])
+
+    print("== 浏览器默认滚动 ==")
+    from universal_scraper.auto import _validate_and_fix
+    cfg = {"name": "t", "start_urls": ["http://x/"], "source": {"type": "browser"},
+           "storage": {"type": "jsonl"}, "output": {"dir": "outputs", "base_name": "t"}}
+    out = _validate_and_fix(dict(cfg))
+    check("browser 默认 scroll_count=4", out["source"].get("scroll_count") == 4, str(out["source"]))
+
+    print("== 流水线丢弃/跳过统计 ==")
+    from universal_scraper.modules.pipelines import Pipeline
+    pipe = Pipeline([{"type": "parse_date", "field": "pt", "out": "ts", "now": 1785945600},
+                     {"type": "filter", "field": "ts", "op": "between",
+                      "min": 1785945600, "max": 1786032000}], {})
+    keep = pipe.process({"pt": "2026-08-06"})
+    drop = pipe.process({"pt": "昨天"})
+    skip = pipe.process({"pt": ""})
+    check("8/6 保留", keep is not None and keep.get("ts") == 1785945600)
+    check("昨天丢弃", drop is None)
+    check("缺日期保留(不静默全丢)", skip is not None)
+    check("丢弃/跳过统计", pipe.dropped.get("filter:ts:区间外") == 1
+          and pipe.skipped.get("filter:ts:日期缺失") == 1, str(pipe.dropped) + str(pipe.skipped))
+
+    print("== LLM 兜底用渲染页 ==")
+    import universal_scraper.auto as auto_mod
+    rendered = "<html><body><h1>产品经理</h1>" + "".join(f"<p>岗位描述{i}：负责产品规划、需求分析、跨部门协作，薪资 10-{i}K，公司{i}，要求本科以上学历，工作地点北京，五险一金齐全，双休。</p>" for i in range(5)) + "</body></html>"
+    auto_mod._llm_chat = lambda messages, temperature=0.1: json.dumps([{"标题": "产品经理", "公司": "某公司"}], ensure_ascii=False)
+    fb = auto_mod._llm_fallback_extract("抓产品经理岗位", {"start_urls": ["http://x/"]}, lambda m: None,
+                                        rendered_html=rendered, rendered_url="http://x/")
+    check("渲染页兜底出条目", fb.get("total", 0) >= 1 and fb.get("items", [{}])[0].get("标题") == "产品经理",
+          str(fb.get("items"))[:80])
+
+    print("== 多链接行字段去噪（裸 a::text / a::attr 不再拼成脏值）==")
+    from universal_scraper.modules.parsers import ConfigParser as _CP
+    ss = _CP._smart_single
+    check("text 多链接取首个", ss("d\nf", "text") == "d", repr(ss("d\nf", "text")))
+    check("attr 多 URL 取首个", ss("/detail/1.html /file.bin", "attr") == "/detail/1.html",
+          repr(ss("/detail/1.html /file.bin", "attr")))
+    check("描述类多段落保留", ss("第一段\n第二段比较长，包含标点。", "text").startswith("第一段\n第二段"),
+          repr(ss("第一段\n第二段比较长，包含标点。", "text")))
+    html2 = ("<html><body>" +
+             "<div class='item'><span class='t'>dl-1</span><a class='u' href='/detail/1.html'>d</a>" +
+             "<a class='f' href='/file.bin'>f</a></div>" +
+             "<div class='item'><span class='t'>dl-2</span><a class='u' href='/detail/1.html'>d</a>" +
+             "<a class='f' href='/file.bin'>f</a></div></body></html>")
+    resp2 = Response(request=Request(url="https://x/list"), status=200, text=html2, url="https://x/list")
+    p2 = _CP({"type": "html", "row_css": ".item",
+              "fields": {"title": {"css": "a::text"}, "href": {"css": "a::attr(href)"}}}, {})
+    r2 = p2.parse(resp2, None)
+    ok2 = len(r2.items) == 2 and r2.items[0]["title"] == "d" and r2.items[0]["href"] == "/detail/1.html"
+    check("裸a解析端到端去噪", ok2, str(r2.items)[:120])
+    pm = _CP({"type": "html", "row_css": ".item",
+              "fields": {"hrefs": {"css": "a::attr(href)", "multiple": True}}}, {})
+    rm = pm.parse(resp2, None)
+    check("multiple 保留全部", rm.items and rm.items[0]["hrefs"] == "/detail/1.html /file.bin",
+          str(rm.items)[:120])
+
+    print("== 自愈字段猜测（row_css 猜错也能补全字段值）==")
+    html3 = ("<html><body>" +
+             "".join(f'<li class="job-card-box"><a class="job-name" href="/job_detail/{i}.html">产品经理{i}</a>'
+                     f'<span class="job-salary">10-{i}K</span><ul class="tag-list"><li>经验不限</li><li>本科</li></ul>'
+                     f'<span class="company-location"> 北京·朝阳区 </span>'
+                     f'<a class="boss-info"><span class="boss-name">公司{i}</span></a></li>' for i in range(3)) +
+             "</body></html>")
+    resp3 = Response(request=Request(url="https://x/list"), status=200, text=html3, url="https://x/list")
+    p3 = _CP({"type": "html", "row_css": ".wrong-row",
+              "fields": {"title": {"css": ".nope::text"}, "area": {"css": ".nope2::text"},
+                         "salary": {"css": ".nope3::text"}, "tags": {"css": ".nope4::text"},
+                         "company": {"css": ".nope5::text"},
+                         "link": {"css": ".nope6::attr(href)"}}}, {})
+    r3 = p3.parse(resp3, None)
+    ok3 = (len(r3.items) == 3 and r3.items[0]["title"] == "产品经理0"
+           and r3.items[0]["salary"] == "10-0K" and r3.items[0]["company"] == "公司0"
+           and r3.items[0]["area"] == "北京·朝阳区" and r3.items[0]["tags"] == "经验不限、本科"
+           and r3.items[0]["link"] == "/job_detail/0.html")
+    check("字段猜测补全", ok3, str(r3.items[0])[:160] if r3.items else "no items")
+    print("== 字体反爬检测 ==")
+    from universal_scraper.auto import _font_obfuscation_hint
+    h = _font_obfuscation_hint([{"salary": "\ue039\ue031K", "title": "pm"}])
+    check("PUA 字符提示", "salary" in h and "字体反爬" in h, h[:80])
+
+    print()
+    print(f"===== 结果: {len(PASS)}/{len(PASS)+len(FAIL)} 通过 =====")
+    if FAIL:
+        for n, d in FAIL:
+            print("  ❌", n, d)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

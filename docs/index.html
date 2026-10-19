@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>万能爬虫引擎 Universal Scraper · 最强开源爬虫工具</title>
+<meta name="description" content="配置驱动 + AI 全自动的万能爬虫引擎：HTTP/浏览器/桥取数，反爬四级方案，MCP 原生接入 AI 客户端，100+100+27 项实战挑战全通过。">
+<style>
+  :root{
+    --bg:#0b1120; --bg2:#0f172a; --card:#111c33; --card2:#16233f;
+    --line:#1e3a5f; --txt:#e2e8f0; --muted:#8ea6c0;
+    --acc:#38bdf8; --acc2:#818cf8; --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",sans-serif;background:var(--bg);color:var(--txt);line-height:1.7}
+  a{color:var(--acc);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 24px}
+  /* ---------- nav ---------- */
+  nav{position:sticky;top:0;z-index:50;background:rgba(11,17,32,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;gap:22px;height:58px;flex-wrap:wrap}
+  nav .logo{font-weight:800;font-size:17px;letter-spacing:.5px}
+  nav .logo span{color:var(--acc)}
+  nav .links{display:flex;gap:18px;margin-left:auto;font-size:14px}
+  nav .links a{color:var(--muted)}
+  nav .links a:hover{color:var(--txt)}
+  /* ---------- hero ---------- */
+  .hero{position:relative;overflow:hidden;padding:76px 0 66px;background:
+    radial-gradient(800px 300px at 15% -10%,rgba(56,189,248,.18),transparent 60%),
+    radial-gradient(700px 280px at 85% 10%,rgba(129,140,248,.16),transparent 60%),
+    linear-gradient(180deg,var(--bg2),var(--bg))}
+  .hero h1{font-size:clamp(30px,5vw,48px);line-height:1.25;font-weight:900;letter-spacing:.5px}
+  .hero h1 em{font-style:normal;background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p.sub{color:var(--muted);font-size:17px;max-width:760px;margin:18px 0 26px}
+  .badges{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:28px}
+  .badge{background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.35);color:var(--acc);padding:5px 13px;border-radius:999px;font-size:13px;font-weight:600}
+  .badge.green{background:rgba(74,222,128,.1);border-color:rgba(74,222,128,.35);color:var(--ok)}
+  .badge.purple{background:rgba(129,140,248,.12);border-color:rgba(129,140,248,.35);color:var(--acc2)}
+  .btns{display:flex;gap:14px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;border-radius:10px;font-weight:700;font-size:15px;transition:.15s}
+  .btn.primary{background:linear-gradient(90deg,var(--acc),var(--acc2));color:#081229}
+  .btn.primary:hover{filter:brightness(1.1);text-decoration:none}
+  .btn.ghost{border:1px solid var(--line);color:var(--txt)}
+  .btn.ghost:hover{border-color:var(--acc);text-decoration:none}
+  /* ---------- stats ---------- */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin:40px 0}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 16px;text-align:center}
+  .stat b{display:block;font-size:30px;font-weight:900;background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat span{color:var(--muted);font-size:13px}
+  /* ---------- section ---------- */
+  section{padding:56px 0;border-top:1px solid rgba(30,58,95,.5)}
+  section h2{font-size:28px;font-weight:900;margin-bottom:8px}
+  section h2 em{font-style:normal;color:var(--acc)}
+  section .lead{color:var(--muted);max-width:760px;margin-bottom:28px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .card h3{font-size:16px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+  .card p{color:var(--muted);font-size:14px}
+  .card .tag{font-size:12px;color:var(--acc);background:rgba(56,189,248,.1);padding:2px 8px;border-radius:6px;margin-left:auto}
+  /* ---------- architecture ---------- */
+  .flow{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin:26px 0}
+  .node{flex:1;min-width:150px;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center}
+  .node b{display:block;font-size:14px}
+  .node span{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+  .arrow{display:flex;align-items:center;color:var(--acc);font-size:20px;font-weight:900;padding:0 2px}
+  /* ---------- table ---------- */
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:20px 0}
+  th,td{border:1px solid var(--line);padding:10px 14px;text-align:left;vertical-align:top}
+  th{background:var(--card2);color:var(--acc);white-space:nowrap}
+  td:first-child{white-space:nowrap;font-weight:700}
+  .ok{color:var(--ok);font-weight:700}
+  /* ---------- code ---------- */
+  pre{background:#0a0f1e;border:1px solid var(--line);border-radius:10px;padding:16px;overflow:auto;font-size:13px;line-height:1.6;margin:14px 0}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace}
+  pre code{color:#b8d4f0}
+  .cm{color:var(--muted)}
+  /* ---------- result cards ---------- */
+  .battle{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+  .score{font-size:40px;font-weight:900;color:var(--ok)}
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line);padding:30px 0;color:var(--muted);font-size:13px;text-align:center}
+  @media(max-width:720px){nav .links{display:none}.flow{flex-direction:column}.arrow{transform:rotate(90deg);justify-content:center}}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <div class="logo">🕷️ 万能爬虫引擎 <span>Universal Scraper</span></div>
+  <div class="links">
+    <a href="#ability">能力</a>
+    <a href="#battle">战绩</a>
+    <a href="#quick">快速开始</a>
+    <a href="#mcp">MCP 接入</a>
+    <a href="#boundary">边界</a>
+  </div>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <h1>一个<em>什么都能爬</em>的<br>标准化 · 模块化 · 全自动爬虫引擎</h1>
+  <p class="sub">给 AI 一句话任务 → 自动生成配置 → 自动运行 → 失败自修复。覆盖 HTTP / 浏览器渲染 / 桥取数四类取数、反爬四级方案、断点续跑、增量去重、代理池、MCP 原生接入。不是"爬虫脚本"，而是一个<strong>爬虫操作系统</strong>。</p>
+  <div class="badges">
+    <span class="badge">✅ 一代 100/100 挑战</span>
+    <span class="badge green">✅ 二代 100/100 挑战</span>
+    <span class="badge purple">✅ LearnSpider 27/27</span>
+    <span class="badge">🤖 MCP Ready</span>
+    <span class="badge green">🖥️ 零代码 WebUI</span>
+    <span class="badge">🔧 四级反爬</span>
+  </div>
+  <div class="btns">
+    <a class="btn primary" href="https://github.com/qqkkrr/universal-scraper" target="_blank">⭐ GitHub 仓库</a>
+    <a class="btn ghost" href="#quick">🚀 5 分钟上手</a>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>200/200</b><span>自建攻防挑战全通过</span></div>
+    <div class="stat"><b>27/27</b><span>LearSpider 实战靶场</span></div>
+    <div class="stat"><b>4 类</b><span>取数方式</span></div>
+    <div class="stat"><b>4 级</b><span>反爬对抗方案</span></div>
+    <div class="stat"><b>5 个</b><span>MCP 工具</span></div>
+    <div class="stat"><b>0 代码</b><span>一句话全自动</span></div>
+  </div>
+</div></header>
+
+<section id="ability"><div class="wrap">
+  <h2>能力<em>矩阵</em></h2>
+  <p class="lead">一个任务 = 一个任务包（JSON 配置 + 可选插件模块）。改配置不改代码，任何爬虫场景都能套用。</p>
+
+  <div class="grid">
+    <div class="card"><h3>🌐 四类取数<span class="tag">对标 Scrapy/Crawlee</span></h3>
+      <p><b>http</b> 普通请求 · <b>browser</b> 浏览器渲染（JS 页面/登录态）· <b>bridge</b> Node 桥过 WAF · <b>json_paged</b> API 分页。</p></div>
+    <div class="card"><h3>🤖 AI 全自动<span class="tag">对标 ScrapeGraphAI</span></h3>
+      <p>一句话任务 → 大模型生成 v3 任务包 → 自动运行 → 失败后读取真实页面 Markdown 自修复配置，循环至成功。</p></div>
+    <div class="card"><h3>🛡️ 反爬四级<span class="tag">对标 botasaurus</span></h3>
+      <p>①限流重试 ②UA/指纹伪装 ③验证码（ddddocr 自动 / 2captcha / 人工确认）④浏览器 Stealth 免检测。</p></div>
+    <div class="card"><h3>🧩 MCP 原生接入<span class="tag">对标 silkworm-mcp</span></h3>
+      <p>Claude / Cursor / Codex 通过 stdio 直接调用 <code>scrape / auto / crawl / extract / check</code> 五个工具。</p></div>
+    <div class="card"><h3>🗜️ Token 优化<span class="tag">对标 cortex-scout</span></h3>
+      <p>HTML → 干净 Markdown / 正文 / 表格 / 链接清单，AI 上下文省 90% token，选择器更准。</p></div>
+    <div class="card"><h3>📦 工程化<span class="tag">对标 Scrapy 生态</span></h3>
+      <p>断点续跑 · 增量去重 · 代理池轮换 · 并发调度 · sitemap/robots 种子 · 中间件钩子 · JSON/CSV/XLSX 导出。</p></div>
+  </div>
+
+  <h2 style="margin-top:46px">架构<em>流程</em></h2>
+  <div class="flow">
+    <div class="node"><b>🗣️ 一句话任务</b><span>中文/英文自然语言</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>🤖 AI 配置生成器</b><span>先探测入口页结构</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>⚙️ v3 任务包</b><span>config.json + 插件</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>🚀 引擎调度</b><span>并发/断点/去重/代理</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>📥 四类取数</b><span>HTTP/浏览器/桥/API</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>📊 清洗导出</b><span>JSON/CSV/XLSX</span></div>
+  </div>
+</div></section>
+
+<section id="battle"><div class="wrap">
+  <h2>实战<em>战绩</em></h2>
+  <p class="lead">每一代都先设计 100 个"高难度 + 贴实际 + 低 token"的攻防挑战（验证码、WAF、JS 渲染、签名接口、登录态、增量、递归……），再逐题攻克，全部通过后才算一代。</p>
+  <div class="battle">
+    <div class="card"><h3>⚔️ 第一代挑战营</h3><div class="score">100 / 100</div><p>基础反爬矩阵：robots、限流、登录、签名、JS 渲染、分页、递归、代理、验证码等价模拟、断点续跑。</p></div>
+    <div class="card"><h3>⚔️ 第二代挑战营</h3><div class="score">100 / 100</div><p>现实场景升级：腾爱优 B 站、政府平台、电商、社交平台等 100 个真实难度场景，全部通过。</p></div>
+    <div class="card"><h3>🎯 LearnSpider 靶场</h3><div class="score">27 / 27</div><p>GitHub 开源反爬靶场 LearnSpider 的 27 道可离线复现题目全部通过（其余题依赖外部站点不可复现）。</p></div>
+  </div>
+</div></section>
+
+<section id="quick"><div class="wrap">
+  <h2>快速<em>开始</em></h2>
+  <p class="lead">零代码基础也能用：三种入口任选。</p>
+  <div class="grid">
+    <div class="card"><h3>🖥️ WebUI（推荐新手）</h3>
+      <p>一条命令启动可视化界面，浏览器打开 <code>http://127.0.0.1:8642</code>，输入一句话任务即可。</p>
+      <pre><code>python3 -m universal_scraper.cli webui</code></pre>
+    </div>
+    <div class="card"><h3>🤖 AI 一句话任务</h3>
+      <p>命令行直接说人话，AI 自动生成配置并运行。</p>
+      <pre><code>python3 -m universal_scraper.cli auto \
+  "抓取 https://quotes.toscrape.com/ 的\
+   名言、作者和标签，翻 2 页"</code></pre>
+    </div>
+    <div class="card"><h3>⚡ 一键抓取</h3>
+      <p>Firecrawl CLI 风格：URL 直接出干净 Markdown / 正文 / 表格。</p>
+      <pre><code>python3 -m universal_scraper.cli fetch \
+  https://example.com --article
+
+python3 -m universal_scraper.cli crawl \
+  https://docs.example.com/ --depth 2</code></pre>
+    </div>
+  </div>
+</div></section>
+
+<section id="mcp"><div class="wrap">
+  <h2>MCP <em>接入</em></h2>
+  <p class="lead">把爬虫引擎变成 AI 客户端的原生工具（对标 silkworm-mcp / scrape-mcp / cortex-scout 的 LLM 驱动爬虫方案）。启动后提供 5 个工具：</p>
+  <table>
+    <tr><th>工具</th><th>说明</th></tr>
+    <tr><td>scrape</td><td>一键抓取 URL → Markdown / 正文 / 表格 / 链接（Firecrawl fetch 风格）</td></tr>
+    <tr><td>auto</td><td>一句话任务 → AI 自动生成配置并运行 → 失败自修复（最强入口）</td></tr>
+    <tr><td>crawl</td><td>从 URL 递归爬站（Firecrawl crawl 风格）</td></tr>
+    <tr><td>extract</td><td>HTML → 干净 Markdown / 正文 / 表格，省 token</td></tr>
+    <tr><td>check</td><td>引擎体检：版本 / 战绩 / LLM 可用性 / 能力清单</td></tr>
+  </table>
+  <p class="lead" style="margin-top:18px">Claude Desktop / Cursor 配置示例：</p>
+  <pre><code>{
+  <span class="cm">// claude_desktop_config.json 或 Cursor MCP 配置</span>
+  "mcpServers": {
+    "universal-scraper": {
+      "command": "/Users/you/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+      "args": ["-m", "universal_scraper.mcp_server"],
+      "cwd": "/path/to/universal-scraper"
+    }
+  }
+}</code></pre>
+</div></section>
+
+<section id="boundary"><div class="wrap">
+  <h2>诚实<em>边界</em></h2>
+  <p class="lead">我们不吹"绝对什么都能爬"。引擎覆盖标准爬虫矩阵（公开网页 / API / JS 渲染 / WAF / 验证码四级 / 增量 / 并发 / 代理 / 下载）。仍存在物理边界：</p>
+  <div class="grid">
+    <div class="card"><h3>🔒 客户端强加密 App 协议</h3><p>需要真机抓包 + 逆向，属高级定制主题，非开箱即用。</p></div>
+    <div class="card"><h3>🧑‍💻 真人物理操作验证</h3><p>如银行级人脸 / 滑块轨迹真人验证，用机制等价模拟 + 人工介入兜底。</p></div>
+    <div class="card"><h3>⚠️ 法律与合规</h3><p>请仅抓取你有权访问的数据，遵守目标站 robots 与服务条款。本工具不用于攻击性用途。</p></div>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <p>🕷️ Universal Scraper · 配置驱动 + AI 全自动的开源爬虫引擎 · <a href="https://github.com/qqkkrr/universal-scraper" target="_blank">GitHub</a></p>
+</div></footer>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "test_browser_slider",
+  "source": {
+    "type": "browser",
+    "url": "file:///tmp/capmock/slider.html",
+    "wait": { "selector": "#slider-box", "timeout": 10000 },
+    "row_css": "#result",
+    "fields": { "status": { "css": "." } },
+    "pagination": { "type": "none" },
+    "slider": { "detect_selector": "#slider-box", "bg_selector": "#slider-box", "btn_selector": "#btn", "x_offset": 0 }
+  },
+  "pagination": { "strategy": "none", "max_pages": 2 },
+  "record": { "fields": { "status": { "from": "status" } } },
+  "pipeline": [],
+  "detail": { "enabled": false },
+  "output": { "dir": "outputs", "base_name": "test_browser_slider" },
+  "anti_bot": { "min_interval": 0.2, "captcha": { "strategy": "opencv_slider" } }
+}

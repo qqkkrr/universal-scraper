@@ -1,0 +1,52 @@
+{
+  "name": "real_xueqiu",
+  "start_urls": [
+    "https://xueqiu.com/"
+  ],
+  "queue": {
+    "max_depth": 1,
+    "max_requests": 5,
+    "max_concurrency": 1
+  },
+  "source": {
+    "type": "http"
+  },
+  "rules": [
+    {
+      "match": "contains",
+      "pattern": "/",
+      "parser": "js"
+    }
+  ],
+  "parsers": {
+    "js": {
+      "type": "html",
+      "row_css": ".item",
+      "fields": {
+        "title": {
+          "css": "a",
+          "limit": 200
+        }
+      }
+    }
+  },
+  "pipelines": [
+    {
+      "type": "filter",
+      "field": "title",
+      "op": "non_empty"
+    }
+  ],
+  "storage": {
+    "type": "jsonl",
+    "name": "real_xueqiu"
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "real_xueqiu"
+  },
+  "anti_bot": {
+    "min_interval": 0.5,
+    "max_retries": 1
+  }
+}

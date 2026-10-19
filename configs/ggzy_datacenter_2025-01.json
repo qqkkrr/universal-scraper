@@ -1,0 +1,82 @@
+{
+  "name": "ggzy_datacenter",
+  "vars": {
+    "keyword": "数据中心",
+    "begin": "2025-01-01",
+    "end": "2025-01-31"
+  },
+  "iterate": {
+    "var": "stage",
+    "values": ["0001", "0002"],
+    "labels": { "0001": "招标公告", "0002": "中标公告" }
+  },
+  "source": {
+    "type": "browser_script",
+    "base_url": "https://www.ggzy.gov.cn",
+    "bridge": "../scripts/ggzy_bridge.cjs",
+    "bridge_params": {
+      "keyword": "{{keyword}}",
+      "begin": "{{begin}}",
+      "end": "{{end}}",
+      "stage": "{{stage}}",
+      "maxpages": 200,
+      "settle": 1500
+    }
+  },
+  "pagination": { "strategy": "none" },
+  "record": {
+    "keep_raw": true,
+    "fields": {
+      "title": { "from": "title" },
+      "publish_time": { "from": "publishTime" },
+      "information_type": { "from": "informationType" },
+      "information_type_text": { "from": "informationTypeText" },
+      "business_type_text": { "from": "businessTypeText" },
+      "province": { "from": "provinceText" },
+      "city": { "from": "cityText" },
+      "industry_type_text": { "from": "industryTypeText" },
+      "tender_project_code": { "from": "tenderProjectCode" },
+      "id": { "from": "id" },
+      "url": { "from": "url" },
+      "data_source": { "from": "dataSources" },
+      "source_platform": { "from": "transactionSourcesPlatformText" },
+      "deadline": { "from": "deadline" }
+    }
+  },
+  "pipeline": [
+    { "type": "filter", "field": "title", "op": "contains", "value": "{{keyword}}" },
+    { "type": "dedup", "key": ["id", "stage"] }
+  ],
+  "detail": {
+    "enabled": true,
+    "url_field": "url",
+    "url_transform": [
+      { "replace": ["/html/a/", "/html/b/"] }
+    ],
+    "allow_html_404": true,
+    "extract": [
+      { "name": "detail_title", "type": "css_text", "selector": "title", "limit": 500 },
+      { "name": "detail_body", "type": "css_text", "selector": ".detail_content", "limit": 30000 },
+      { "name": "detail_original_link", "type": "regex", "pattern": "原文链接\\s*<a[^>]*href=\"([^\"]+)\"", "group": 1 }
+    ],
+    "concurrency": 4,
+    "interval": 0.5,
+    "checkpoint_every": 20
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "ggzy_{{keyword}}_{{begin}}_{{end}}",
+    "formats": ["json", "csv", "xlsx"]
+  },
+  "anti_bot": {
+    "min_interval": 1.0,
+    "max_retries": 3,
+    "timeout": 15,
+    "rotate_ua": true,
+    "use_system_proxy": false,
+    "captcha": {
+      "strategy": "auto",
+      "prompt": "ggzy 验证码（一般是 4 位字符）"
+    }
+  }
+}

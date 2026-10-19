@@ -1,0 +1,53 @@
+{
+  "name": "real_hn_item",
+  "start_urls": [
+    "https://hn.algolia.com/api/v1/items/1"
+  ],
+  "queue": {
+    "max_depth": 1,
+    "max_requests": 5,
+    "max_concurrency": 1
+  },
+  "source": {
+    "type": "http"
+  },
+  "rules": [
+    {
+      "match": "contains",
+      "pattern": "/",
+      "parser": "js"
+    }
+  ],
+  "parsers": {
+    "js": {
+      "type": "json",
+      "fields": {
+        "title": {
+          "from": "title"
+        },
+        "author": {
+          "from": "author"
+        }
+      }
+    }
+  },
+  "pipelines": [
+    {
+      "type": "filter",
+      "field": "title",
+      "op": "non_empty"
+    }
+  ],
+  "storage": {
+    "type": "jsonl",
+    "name": "real_hn_item"
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "real_hn_item"
+  },
+  "anti_bot": {
+    "min_interval": 0.3,
+    "max_retries": 2
+  }
+}

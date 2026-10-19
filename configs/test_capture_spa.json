@@ -1,0 +1,59 @@
+{
+  "name": "test_capture_spa",
+  "source": {
+    "type": "browser",
+    "url": "http://127.0.0.1:8924/note.html",
+    "login": {
+      "enabled": true,
+      "url": "http://127.0.0.1:8924/note.html",
+      "wait_selector": "#content",
+      "auto_js": "localStorage.setItem('logged','1')",
+      "timeout_ms": 30000
+    },
+    "scroll_count": 8,
+    "scroll_wait_ms": 1500,
+    "record_from": "capture",
+    "capture": [
+      {
+        "name": "comments",
+        "url_pattern": "/api/sns/web/v2/comment/page",
+        "records_path": "data.comments"
+      }
+    ]
+  },
+  "pagination": {
+    "strategy": "none",
+    "max_pages": 3
+  },
+  "record": {
+    "fields": {
+      "id": {
+        "from": "id"
+      },
+      "user": {
+        "from": "user"
+      },
+      "content": {
+        "from": "content"
+      },
+      "like_count": {
+        "from": "like_count"
+      }
+    }
+  },
+  "pipeline": [],
+  "detail": {
+    "enabled": false
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "test_capture_spa"
+  },
+  "anti_bot": {
+    "min_interval": 0.2,
+    "http_backend": "requests",
+    "captcha": {
+      "strategy": "auto"
+    }
+  }
+}

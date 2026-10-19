@@ -1,0 +1,42 @@
+{
+  "name": "xhs_login",
+  "source": {
+    "type": "browser",
+    "url": "https://www.xiaohongshu.com",
+    "headless": false,
+    "login": {
+      "enabled": true,
+      "url": "https://www.xiaohongshu.com",
+      "wait_selector": "a[href*='/user/profile']",
+      "timeout_ms": 600000,
+      "prompt": "请在打开的浏览器中扫码/手机号登录小红书，登录完成后自动保存会话并退出"
+    },
+    "scroll_count": 0
+  },
+  "pagination": {
+    "strategy": "none",
+    "max_pages": 1
+  },
+  "record": {
+    "fields": {
+      "login_ok": {
+        "constant": "yes"
+      }
+    }
+  },
+  "pipeline": [],
+  "detail": {
+    "enabled": false
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "xhs_login"
+  },
+  "anti_bot": {
+    "min_interval": 0.5,
+    "captcha": {
+      "strategy": "auto"
+    },
+    "session_name": "xhs_huai_an"
+  }
+}

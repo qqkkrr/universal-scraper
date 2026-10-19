@@ -1,0 +1,53 @@
+{
+  "name": "real_json_comments",
+  "start_urls": [
+    "https://jsonplaceholder.typicode.com/comments?postId=1"
+  ],
+  "queue": {
+    "max_depth": 1,
+    "max_requests": 5,
+    "max_concurrency": 2
+  },
+  "source": {
+    "type": "http"
+  },
+  "rules": [
+    {
+      "match": "contains",
+      "pattern": "/",
+      "parser": "js"
+    }
+  ],
+  "parsers": {
+    "js": {
+      "type": "json",
+      "fields": {
+        "title": {
+          "from": "name"
+        },
+        "email": {
+          "from": "email"
+        }
+      }
+    }
+  },
+  "pipelines": [
+    {
+      "type": "filter",
+      "field": "title",
+      "op": "non_empty"
+    }
+  ],
+  "storage": {
+    "type": "jsonl",
+    "name": "real_json_comments"
+  },
+  "output": {
+    "dir": "outputs",
+    "base_name": "real_json_comments"
+  },
+  "anti_bot": {
+    "min_interval": 0.3,
+    "max_retries": 2
+  }
+}
