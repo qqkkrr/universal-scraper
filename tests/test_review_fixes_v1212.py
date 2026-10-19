@@ -39,6 +39,12 @@ def test_jsrecon_gates_on_ok(monkeypatch):
         def get(self, url):
             return {"ok": False, "status": 403, "text": "HTTP 403: blocked by WAF", "body": b""}
     monkeypatch.setattr(core_mod, "make_http_client", lambda cfg: Blocked())
+    import universal_scraper.quick as quick_mod
+    # 测试必须与“本机是否开着 9222 调试 Chrome”解耦：挑战命中后的 CDP
+    # 降级在本机可用时会真的去抓页面，导致这条“HTTP 失败必须报错”的断言
+    # 变成环境依赖。这里显式让降级失败，专测 ok=False 门控。
+    monkeypatch.setattr(quick_mod, "_js_recon_via_cdp",
+                        lambda *a, **k: {"ok": False, "error": "test: no cdp"})
     from universal_scraper.quick import js_recon
     r = js_recon("https://example.com/list.html")
     assert "error" in r and "403" in r["error"]

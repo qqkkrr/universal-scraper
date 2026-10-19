@@ -83,6 +83,9 @@ def test_http_fetcher_seeds_archive_cookie(monkeypatch):
 def test_http_fetcher_no_archive_no_crash(monkeypatch):
     import universal_scraper.cookies as cookies_mod
     monkeypatch.setattr(cookies_mod, "cookie_header", lambda d: "")
+    # 本机可能真的存过 example.com 登录态；本用例测的是“没有存档时不崩”，
+    # 必须把磁盘存档也 mock 掉，否则结果随环境漂移。
+    monkeypatch.setattr(cookies_mod, "load_cookies", lambda d: [])
     f = HttpFetcher({"type": "http"}, {}, {"cookie_domain": "example.com"})
     assert f._archive_pairs == []
 
