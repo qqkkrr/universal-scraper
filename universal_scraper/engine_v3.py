@@ -754,6 +754,7 @@ class EngineV3:
                         self._seen_store.flush()
                     except Exception:
                         pass
+                self._save_pending()
                 self._save_state()
             except Exception as e:
                 # 审查修复（P1）：预算中断路径的保存失败曾静默——resume 会把
@@ -1064,7 +1065,8 @@ class EngineV3:
             self._notify(_pw)
         # NBS 考核战训：0 条必须留证据 + 标记（此前不落盘不报错，exit 0 假成功，
         # 排查只能靠 FileNotFoundError）
-        if self.stats["items"] == 0 and not getattr(self, "dry_run", False):
+        _final_total = int(getattr(self, "_final_total", self.stats["items"]) or 0)
+        if _final_total == 0 and not getattr(self, "dry_run", False):
             _nodata_written = False
             try:
                 from .core import request_budget as _rq
@@ -1105,10 +1107,10 @@ class EngineV3:
                 self.logger.error(f"nodata.json 写盘失败（{type(e).__name__}: {e}）——"
                                   f"0 条结论请直接引用本日志行作证据")
             self._nodata_written = _nodata_written
-        return {"name": self.task.name, "total": self.stats["items"],
+        return {"name": self.task.name, "total": _final_total,
                 "fetched": self.stats["fetched"], "errors": self.stats["errors"],
                 "skipped": self.stats.get("skipped", 0),
-                "nodata": self.stats["items"] == 0,
+                "nodata": _final_total == 0,
                 "budget": request_budget(),
                 "block_stats": blocks,
                 "pipeline_drops": _drops, "pipeline_skips": _skips}
@@ -1442,6 +1444,13 @@ class EngineV3:
                 # --task 路径退化成 exit 0/假 nodata。置停机旗标，主线程统一 re-raise
                 self._budget_tripped = True
                 self._stop = True
+                # v1.32.2：硬闸在"已 pop、未发请求"时抛出——该请求必须回队，
+                # 否则它既不在队列也不在 pending，--resume 永远补不回来。
+                if req is not None:
+                    try:
+                        self.queue.enqueue_retry(req)
+                    except Exception:
+                        pass
                 self.logger.error("🛑 请求预算硬闸触发（worker 线程），停止全部取数")
             except BlockDetectedError as _bde:
                 # 审查修复（P1）：BlockDetectedError 是终态契约——曾直接杀死 worker
@@ -1907,7 +1916,7 @@ class EngineV3:
             # 审查十二轮（H2）：stats/返回值（声明数）曾保持超发计数——文件 5 行
             # 而 total=10，verify 的"声明 vs 文件"对账必 fail。截断后同步
             self.stats["items"] = len(rows)
-        base = self.config.get("output", {}).get("base_name", safe_fname(self.task.name))
+        base = safe_fname(self.config.get("output", {}).get("base_name", safe_fname(self.task.name)))
         # resume：合并之前已导出的记录（按 _url 去重），保证输出完整
         prev_json = self.out_dir / f"{base}.json"
         if self.resume and prev_json.exists():
@@ -1926,6 +1935,9 @@ class EngineV3:
                 self.logger.warn(f"resume 合并失败：读 {prev_json.name} 异常（{e}），"
                                  f"本次导出改写为 {base}.new.*（不覆盖旧导出）")
                 base = f"{base}.new"
+        # v1.32.2：记录"最终实际导出行数"（含 resume 合并的历史行）——nodata 判定
+        # 必须看它，否则"任务已完成、--resume 无新数据"会被误报 0 条 + exit 3。
+        self._final_total = len(rows)
         if rows:
             paths = export_rows(rows, self.out_dir, base)
             self.logger.info("导出: " + ", ".join(f"{k}={v.name}" for k, v in paths.items()))

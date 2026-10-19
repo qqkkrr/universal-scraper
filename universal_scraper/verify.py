@@ -394,6 +394,36 @@ def semantic_check(data: Any, expect: str) -> Dict[str, Any]:
     return out
 
 
+def _dig_json(obj: Any, path: str) -> Any:
+    """点路径取值（"result.products"）；不存在返回 _MISSING 哨兵。"""
+    cur = obj
+    for part in str(path or "").split("."):
+        if not part:
+            continue
+        if not isinstance(cur, dict) or part not in cur:
+            return _MISSING
+        cur = cur[part]
+    return cur
+
+
+_MISSING = object()
+
+
+def _find_record_lists(obj: Any, prefix: str = "", depth: int = 0) -> Dict[str, List[Dict[str, Any]]]:
+    """递归找出 dict/json 里的"记录数组"（list[dict]）候选，返回 路径->数组。"""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    if depth > 4 or not isinstance(obj, (dict, list)):
+        return out
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            path = f"{prefix}.{k}" if prefix else str(k)
+            if isinstance(v, list) and v and all(isinstance(x, dict) for x in v[:20]):
+                out[path] = v
+            elif isinstance(v, (dict, list)):
+                out.update(_find_record_lists(v, path, depth + 1))
+    return out
+
+
 def verify_file(path: str, network: bool = False, data_key: str = "",
                 expect: str = "", require: str = "",
                 expected_count: Optional[int] = None,
@@ -434,18 +464,42 @@ def verify_file(path: str, network: bool = False, data_key: str = "",
             except json.JSONDecodeError as e2:
                 return {"ok": False, "error": f"JSON/JSONL 均解析失败（可能被截断）: {e2}"}
         # 智联战例：支持 dict 包装（{"data": [...]} 等）——data_key 显式指定或自动探测常用键
+        _detected_key = ""
         if isinstance(data, dict):
             if data_key:
-                data = data.get(data_key, data)
+                _val = _dig_json(data, data_key)
+                if _val is _MISSING:
+                    return {"ok": False,
+                            "error": f"data-key 不存在: {data_key!r}（可用: "
+                                     f"{', '.join(_find_record_lists(data)) or '无 list[dict] 候选'}）"}
+                if not isinstance(_val, list):
+                    return {"ok": False,
+                            "error": f"data-key {data_key!r} 不是数组（实际 {type(_val).__name__}）"}
+                data = _val
+                _detected_key = data_key
             else:
                 for k in ("data", "list", "rows", "items"):
                     if isinstance(data.get(k), list):
                         data = data[k]
+                        _detected_key = k
                         break
+                if isinstance(data, dict):
+                    # v1.33.0：任意 JSON 结构（如 {"products": [...], "sellers": [...]}）
+                    # —— 单候选自动采用；多候选必须显式 --data-key，避免静默选错表。
+                    _cands = _find_record_lists(data)
+                    if len(_cands) == 1:
+                        _detected_key, data = next(iter(_cands.items()))
+                    elif len(_cands) > 1:
+                        return {"ok": False,
+                                "error": "JSON 里检测到多个记录数组，请用 --data-key 指定: "
+                                         + ", ".join(sorted(_cands))}
     rows = data if isinstance(data, list) else [data]
     # 声明式空字段：从 CLI 串解析（中英文逗号均可），传给 verify_rows 豁免死列/缺口判定
     _ee = [w.strip() for w in (expect_empty or "").replace("，", ",").split(",") if w.strip()]
     rep = verify_rows(rows, None, sample_n=3, network=network, expect_empty=_ee)
+    if _detected_key:
+        rep["data_key"] = _detected_key
+        rep["rows"] = len(rows)
     # 对账型检查（实战反馈六#1，知乎 762 回复只采到 317 的教训）：字段完整率
     # 检测不出"源站声明 N 条、实采 M<N 条"的对账缺口。expected_count 由调用方
     # 传源站计数器（common_counts/total/child_comment_count）

@@ -76,6 +76,23 @@ def check_node() -> List[Dict[str, str]]:
         ok = p.exists() or local.exists()
         out.append({"item": f"npm 包 {pkg}", "ok": ok,
                     "hint": "" if ok else f"未找到: {p}（npm install 或配置 UNIVERSAL_SCRAPER_NODE_PATH）"})
+    # v1.33.0：任务目录里的自写脚本默认解析不到 skill 的 node_modules——
+    # 验证"任意 cwd + NODE_PATH"能否 require，避免用户复制脚本后才踩坑。
+    if node_ok and (Path(NODE_PATH) / "patchright").exists():
+        import tempfile
+        import os as _os
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                env = {**_os.environ, "NODE_PATH": str(NODE_PATH)}
+                rr = subprocess.run(
+                    [NODE, "-e", "process.stdout.write(require.resolve('patchright'))"],
+                    capture_output=True, text=True, timeout=15, cwd=td, env=env)
+            out.append({"item": "Node 模块解析（任务目录）", "ok": rr.returncode == 0,
+                        "hint": (rr.stdout.strip()[:80] if rr.returncode == 0
+                                 else "任务目录脚本需设 NODE_PATH=$SKILL_DIR/node_modules；"
+                                      f"当前解析失败: {(rr.stderr or '').strip()[:120]}")})
+        except Exception as e:
+            out.append({"item": "Node 模块解析（任务目录）", "ok": False, "hint": str(e)[:120]})
     return out
 
 

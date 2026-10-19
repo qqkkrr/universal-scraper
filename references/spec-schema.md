@@ -368,7 +368,12 @@ action 类 + 任务自带 `modules/middleware.py`），本配置式写法在 v3 
 ## output
 
 `dir` 给绝对路径（用户指定或默认 `~/Desktop/<任务名>/`）；
-`formats` 至少 `["json","csv","xlsx"]`。
+`formats` 至少 `["json","csv","xlsx"]`；也可写逗号分隔字符串（`"json,csv"`）。
+
+`cache: true` 开启 HTTP 响应缓存（写 `<dir>/.cache/`），用于 **R20 开发模式**：
+
+1. 先正常跑一次（生成缓存）；
+2. 改选择器/字段后加 `--replay` 再跑——只读缓存、**绝不发网络**，未命中即结构化失败。
 
 ## 验证与试跑
 

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 from .core import (log, die, smart_decode, update_cookie_jar, jar_cookie_header, safe_fname,
-                   _budget_auto_mark, _throttle_domain)
+                   _budget_auto_mark, _throttle_domain, MaxRequestsExceeded)
 from .antibot import solve_captcha_file, detect_block
 from .session import SessionPool
 from .selectors import jpath, css_text, xpath_text
@@ -133,13 +133,21 @@ def _apply_page_tokens_value(v: Any, page: int, offset: int) -> Any:
 class HttpFetcher(BaseFetcher):
     """HTTP 取数器：支持 JSON API（records_path/total_path）与 HTML 列表（row_css + 字段提取）。"""
 
-    def __init__(self, source: Dict[str, Any], anti: Dict[str, Any], vars: Dict[str, str], cache_dir: Optional[Path] = None):
+    def __init__(self, source: Dict[str, Any], anti: Dict[str, Any], vars: Dict[str, str],
+                 base_dir: Optional[Path] = None, cache_dir: Optional[Path] = None):
         self.source = _resolve_template(source, vars)
         self.anti = anti
+        self.base_dir = base_dir
         from .core import make_http_client
+        # v1.32.2：4th 参数曾按 cache_dir 解释而引擎传的是 base_dir——配置目录
+        # 被当成 HTTP 缓存目录。现在 4th 明确为 base_dir；缓存目录走 cache_dir
+        # 参数或 anti.cache_dir（引擎按 output.cache 注入）。
+        _cache = cache_dir if cache_dir is not None else anti.get("cache_dir")
         self.http = make_http_client(anti)
-        if cache_dir:
-            self.http.cache_dir = cache_dir
+        if _cache:
+            self.http.cache_dir = Path(_cache)
+        if anti.get("cache_enabled") or anti.get("cache"):
+            self.http.cache_enabled = True
         # 代理池轮换（anti._proxy_pool 由 engine 注入，或配置里 proxies 列表）
         self.proxy_pool = anti.get("_proxy_pool")
         if self.proxy_pool is None and anti.get("proxies"):
@@ -414,7 +422,16 @@ class HttpFetcher(BaseFetcher):
                         break
                 except Exception:
                     pass  # robots 检测本身失败不阻塞
-            resp = self._request(params)
+            try:
+                resp = self._request(params)
+            except MaxRequestsExceeded as _mre:
+                # v1.32.2：预算硬闸在分页中途抛出时，把已抓页带出去——引擎据此
+                # 落检查点/导出部分数据，而不是整轮丢弃（此前 CLI 谎称"已落盘"）。
+                try:
+                    _mre.partial_records = list(records)
+                except Exception:
+                    pass
+                raise
             if not resp.get("ok"):
                 log(f"  请求失败: {resp.get('text','')[:200]}", "ERROR")
                 # 审查修复：429/403/52x 走 ok=False 分支曾只 break——
@@ -651,15 +668,30 @@ class HttpFetcher(BaseFetcher):
                     row[name] = {sub: _ct(el_html, sub_sel, 0).strip()
                                  for sub, sub_sel in fspec["subs"].items()}
                     continue
+                _multi = bool(fspec.get("multiple") or fspec.get("join"))
                 if fspec.get("attr"):
-                    from .selectors import css_attr
-                    row[name] = css_attr(el_html, fspec.get("css") or "", fspec["attr"], fspec.get("limit", 0))
+                    from .selectors import css_attr, smart_single
+                    _v = css_attr(el_html, fspec.get("css") or "", fspec["attr"],
+                                  fspec.get("limit", 0))
+                    # v1.32.2：字段未声明 multiple/join 时，多匹配 attr 取第一个 URL
+                    # （此前拼成 "/a /b" 的非法 URL；与 v3 modules/parsers 同口径）
+                    row[name] = _v if _multi else smart_single(_v, "attr")
                 elif fspec.get("xpath"):
                     row[name] = xpath_text(el_html, fspec["xpath"], fspec.get("limit", 0))
                 elif fspec.get("css"):
                     row[name] = css_text(el_html, fspec["css"], fspec.get("limit", 0))
                 else:
-                    row[name] = el_html
+                    # v1.32.2：缺选择器的字段曾回退成"整行 HTML"（配置拼错 cs 时
+                    # 静默产出 30KB 垃圾且 exit 0）。改为空值 + 明确告警。
+                    _warned = getattr(self, "_bad_field_warned", None)
+                    if _warned is None:
+                        _warned = set()
+                        self._bad_field_warned = _warned
+                    if name not in _warned:
+                        _warned.add(name)
+                        log(f"  ⚠️ 字段 '{name}' 的 spec 缺少 css/xpath/attr/subs，"
+                            "已置空（不再回退整行 HTML）——请检查拼写", "WARN")
+                    row[name] = ""
             out.append(row)
         # R20 验证门：指纹找回的行若字段全空（字段选择器也随改版失效），不产出
         # "有行无值"的假成功——交回 0 结果诊断链（缺数据优于错数据）
@@ -1092,7 +1124,9 @@ class BrowserFetcher(BaseFetcher):
                     row[name] = xpath_text(el_html, fspec["xpath"], fspec.get("limit", 0))
                 elif fspec.get("css"):
                     if fspec.get("attr"):
-                        row[name] = css_attr(el_html, fspec["css"], fspec["attr"], fspec.get("limit", 0))
+                        from .selectors import smart_single
+                        _v = css_attr(el_html, fspec["css"], fspec["attr"], fspec.get("limit", 0))
+                        row[name] = _v if (fspec.get("multiple") or fspec.get("join"))                             else smart_single(_v, "attr")
                     else:
                         row[name] = css_text(el_html, fspec["css"], fspec.get("limit", 0))
                 else:

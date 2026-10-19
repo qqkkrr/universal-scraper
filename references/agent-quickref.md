@@ -8,6 +8,9 @@
 PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli <cmd> [args]
 ```
 
+`run` 默认走 v4 统一计划层（`--config` 与 `--task` 都先归一为 CrawlPlan）；
+排障回退用 `--engine legacy`，审阅计划用 `--plan-out plan.json`。
+
 ## 判型 → 命令速查
 
 | 目标页特征 | 命令 | 备注 |
@@ -26,6 +29,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli <cmd> [args]
 | 批量队列 | `batch --queue q.json next/claim/done/fail/nodata/retry/status` | |
 | 有 curl 要复现 | `curl2config --cmd "curl '…'"` | 只解析不执行；凭据/不支持项会提醒；产物先 `--dry-run` |
 | **调规则不重打站点** | `run --config x.json --replay` | R20：只读本地响应缓存、**绝不发网络**；未命中=结构化失败（先正常跑一次生成缓存） |
+| **保存页面离线解析** | `snapshot <url...> --out <目录>` | 每页 json/html/md；改正则零额外请求 |
+| **开工前合规预检** | `compliance --config x.json --purpose "..." --scale N` | red 停；amber 需最小必要/脱敏/留存 |
 | 站点改版选择器失效 | 自动（无需操作） | R20：行/字段级**元素指纹找回**（只在 0 行/空值时触发，找回值须过非空验证门；`source.adaptive:false` 可关） |
 | 长跑想按域自适应限速 | `anti_bot.autothrottle: {"cap": 30}` | 分域桶（A 站被封不拖慢 B 站）；`Retry-After` 计入惩罚；robots Crawl-delay 作下限 |
 | 反检测细粒度 | `anti_bot.stealth_opts: {...}` | `hide_canvas/block_webrtc/allow_webgl/dns_over_https/timezone/locale/block_ads/blocked_domains/extra_flags` |
@@ -44,14 +49,17 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli <cmd> [args]
 | 0 条 + 空数据 | nodata | → WebSearch 核验 → batch nodata |
 | 连续 3 次网络失败 | 出口变化 | → doctor.py 复查 |
 | 字段完整率 < 0.9 | 部分成功 | → verify --dir 看细节 |
+| 结果不是标准 records 数组 | 自定义 JSON | → `verify --file x.json --data-key products`（多列表必须指定） |
 
 ## fetch --json 输出契约
 
 ```json
-{"url": "...", "status": 200, "text": "<页面markdown，内嵌JSON则为转义字符串>"}
+{"url": "...", "status": 200, "text": "<页面原始文本/HTML；内嵌JSON则为转义字符串>"}
 ```
 
-text 内含 JSON 时先找到 JSON 起始位置再解析，不要把信封当数据。
+注意：`--json` 的 `text` 是**原始页面文本（HTML 源码）**，不是 markdown；
+需要 markdown 请用不带 `--json` 的 `fetch`。text 内含 JSON 时先找到 JSON
+起始位置再解析，不要把信封当数据。
 
 ## capture_all.json 输出契约
 
@@ -84,7 +92,7 @@ text 内含 JSON 时先找到 JSON 起始位置再解析，不要把信封当数
 ## 知识引用
 
 - 反爬升级阶梯 / 配额四分类 / 三分叉 → `references/anti-block-playbook.md`
-- 配方 R1~R42（R34=B站四通道战法；R35-R42：汽车之家/12306/双色球/统计局/存档替代/小红书/知乎/第三方每日存档仓库）→ `references/recipes.md`
+- 配方 R1~R49（R34=B站四通道战法；R35-R42：汽车之家/12306/双色球/统计局/存档替代/小红书/知乎/第三方每日存档仓库；R45-R49：评论骨架/猫眼/快手/GraphQL/运维原语）→ `references/recipes.md`
 - 配置字段 → `references/spec-schema.md`
 - 交易所索引 → `references/data-sources-exchanges.md`
 - 证据 schema → `references/evidence-schema.md`

@@ -11,6 +11,7 @@ import os
 import re
 import signal
 import sys
+import threading
 import time
 import json  # recon 路径写 recon_records.json 用（曾漏 import，跑到即 NameError）
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,6 +29,23 @@ from .proxy import ProxyPool
 from .storage import Checkpoint, SeenStore, record_key
 
 _REQ_THREAD_WARNED = False
+
+# v1.32.2：v2 与 v3 一致，同进程内串行化——请求预算/网络连击计数是进程级全局，
+# WebUI 多 job 并发时后启动的任务会清零前一个任务的计数与限额（v3 已有同款锁）。
+_RUN_CONFIG_LOCK = threading.Lock()
+
+
+def run_config(*args, **kwargs):
+    with _RUN_CONFIG_LOCK:
+        # v3 的引擎锁也一起拿：v2/v3 共用进程级请求预算，混合并发同样会互清零
+        try:
+            from .engine_v3 import _ENGINE_RUN_LOCK
+        except Exception:
+            _ENGINE_RUN_LOCK = None
+        if _ENGINE_RUN_LOCK is None:
+            return _run_config_impl(*args, **kwargs)
+        with _ENGINE_RUN_LOCK:
+            return _run_config_impl(*args, **kwargs)
 
 
 class _MwClient:
@@ -797,11 +815,18 @@ class GracefulExit:
 
 
 
-def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = None,
+def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = None,
                base_dir: Optional[Path] = None, resume: bool = False,
                limit: Optional[int] = None, log_file: Optional[Path] = None,
                dry_run: bool = False, max_requests: Optional[int] = None) -> Dict[str, Any]:
     config = validate_config(config)
+    # v1.32.2：运行前把语义告警打出来（此前只有 validate 子命令显示，run 静默）
+    try:
+        from .config import collect_warnings
+        for _w in collect_warnings(config):
+            print(f"⚠️  {_w}", file=sys.stderr)
+    except Exception:
+        pass
     name = config.get("name", "task")
     vars = dict(config.get("vars", {}))
     if overrides:
@@ -924,6 +949,11 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             # OCR R131（M）：恒真的 isinstance + 空 pass 死代码（HttpFetcher.__class__
             # 是 type，任何类都 isinstance 成立）——删除
         cache_dir = out_dir / ".cache" if output.get("cache") else None
+        if cache_dir:
+            # v1.32.2：output.cache 必须同时打开客户端 use_cache，否则正常跑
+            # 只建目录不写缓存，--replay 永远未命中（R20 文档工作流失效）。
+            anti_iter["cache_dir"] = str(cache_dir)
+            anti_iter["cache_enabled"] = True
         fetcher = fetcher_cls(source, anti_iter, ivars, base_dir)
         # 审查八轮（功能接线）：middleware 的 request/response/error 时机——包一层
         # 客户端即可覆盖列表/分页请求。两个 v2 取数器的客户端属性名不同
@@ -938,13 +968,53 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
                     fetcher.client = _mw_c
         if hasattr(fetcher, "http") and cache_dir:
             fetcher.http.cache_dir = cache_dir      # 适配器双向透明：写会落到被包客户端
+            fetcher.http.cache_enabled = True
 
         if dry_run:
             logger.info(f"[dry-run] 取数器 {ftype} 就绪: {source.get('url', source.get('bridge'))}")
             continue
 
+        # v1.32.2：断点续跑的"已完成迭代"判定 —— 只有列表阶段完整跑完过
+        # （complete=True）、配置签名一致、且检查点未被 MAX_ROWS 截断时才跳过；
+        # 中断在半路仍重抓，宁可多抓也不静默缺页。
+        _iter_sig = json.dumps({"url": source.get("url"),
+                                "sitemap_urls": source.get("sitemap_urls"),
+                                "pagination": pagination, "iter": it_name},
+                               sort_keys=True, ensure_ascii=False, default=str)
+        _skip_list = bool(
+            resume and prev_rows and checkpoint.data.get("complete")
+            and checkpoint.data.get("sig") == _iter_sig
+            and not checkpoint.data.get("rows_truncated"))
         try:
-            rows_raw = fetcher.fetch_list(pagination)
+            if _skip_list:
+                rows_raw = prev_rows
+                logger.info(f"断点续跑：跳过已完成列表阶段，沿用检查点 {len(prev_rows)} 条"
+                            "（不重抓分页）")
+            else:
+                try:
+                    rows_raw = fetcher.fetch_list(pagination)
+                except MaxRequestsExceeded as _mre:
+                    # 预算硬闸在分页中途触发：保存并导出已抓页，避免"谎称已落盘"
+                    _partial = getattr(_mre, "partial_records", None) or []
+                    if _partial:
+                        checkpoint.save(_partial, 0, len(_partial),
+                                        sig=_iter_sig, complete=False)
+                        _base_early = safe_fname(_resolve_template(
+                            output.get("base_name", safe_fname(name)), ivars))
+                        if len(iterations) > 1 and it:
+                            _lab = (iterate.get("labels", {}) or {}).get(str(it.get(var_name))) if iterate else None
+                            _base_early = f"{_base_early}_{_lab or it_name}"
+                        try:
+                            _paths = export_rows(_partial, out_dir, _base_early,
+                                                 formats=output.get("formats") or ["json", "csv", "xlsx"])
+                            logger.warn(f"预算中断：已抓 {len(_partial)} 条已保存 -> "
+                                        + ", ".join(f"{k}={v.name}" for k, v in _paths.items()))
+                            _mre.partial_exported = True
+                        except Exception as _ee:
+                            logger.error(f"预算中断的部分导出失败: {type(_ee).__name__}: {_ee}")
+                    raise
+                checkpoint.save(rows_raw, 0, len(rows_raw),
+                                sig=_iter_sig, complete=True)
         except (KeyboardInterrupt, MaxRequestsExceeded, BlockDetectedError):
             raise
         except Exception as e:
@@ -1092,8 +1162,30 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
                                     r[kk] = vv
                             merged += 1
                     logger.info(f"断点续跑：从检查点合并 {merged} 条详情")
-            rows = fetch_details(rows, detail, anti_iter, checkpoint=checkpoint, logger=logger,
-                                 source=source, middleware=middleware)
+            try:
+                rows = fetch_details(rows, detail, anti_iter, checkpoint=checkpoint,
+                                     logger=logger, source=source, middleware=middleware)
+            except MaxRequestsExceeded as _mre:
+                # v1.32.2：预算也可能在详情阶段触发——把已抓列表/已补详情导出，
+                # 而不是让 CLI 误报"首屏即触发、暂无数据"。
+                if rows:
+                    try:
+                        checkpoint.save(rows, 0, len(rows), sig=_iter_sig,
+                                        complete=checkpoint.data.get("complete"))
+                        _base_early = safe_fname(_resolve_template(
+                            output.get("base_name", safe_fname(name)), ivars))
+                        if len(iterations) > 1 and it:
+                            _lab = (iterate.get("labels", {}) or {}).get(str(it.get(var_name))) if iterate else None
+                            _base_early = f"{_base_early}_{_lab or it_name}"
+                        _paths = export_rows(rows, out_dir, _base_early,
+                                             formats=output.get("formats") or ["json", "csv", "xlsx"])
+                        logger.warn(f"预算中断（详情阶段）：已抓 {len(rows)} 条已保存 -> "
+                                    + ", ".join(f"{k}={v.name}" for k, v in _paths.items()))
+                        _mre.partial_exported = True
+                    except Exception as _ee:
+                        logger.error(f"预算中断（详情阶段）的部分导出失败: "
+                                     f"{type(_ee).__name__}: {_ee}")
+                raise
             # 收官十五轮（用户复盘）：v2 的 pipeline 跑在详情**之前**（见上方 993 行），
             # detail.extract 产出的字段完全够不到清洗——用户实测 regex_extract 派生列
             # 恒 None 且无报错。新增**详情后处理阶段**：detail.post_pipeline（跨引擎
@@ -1112,7 +1204,7 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
             all_rows.extend(prev_rows)
             logger.info("本次未抓到新记录，沿用检查点数据")
 
-        base = _resolve_template(output.get("base_name", safe_fname(name)), ivars)  # R93：净化防路径逃逸
+        base = safe_fname(_resolve_template(output.get("base_name", safe_fname(name)), ivars))  # R93/v1.32.2：净化防路径逃逸
         if len(iterations) > 1 and it:
             lab = iterate.get("labels", {}).get(str(it.get(var_name))) if iterate else None
             base = f"{base}_{lab or it_name}"
@@ -1137,7 +1229,7 @@ def run_config(config: Dict[str, Any], overrides: Optional[Dict[str, str]] = Non
 
     # 合并导出
     if all_rows and not dry_run:
-        base = _resolve_template(output.get("base_name", safe_fname(name)), vars)
+        base = safe_fname(_resolve_template(output.get("base_name", safe_fname(name)), vars))
         paths = export_rows(all_rows, out_dir, base + "_合并" if len(iterations) > 1 else base,
                             formats=output.get("formats") or ["json", "csv", "xlsx"])
         summary["_merged"] = len(all_rows)

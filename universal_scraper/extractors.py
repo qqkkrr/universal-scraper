@@ -111,6 +111,89 @@ def _merge_header_rows(trs) -> List[str]:
     return out
 
 
+def _cell_text(cell) -> str:
+    """单元格文本：剔除嵌套子表的文本（子表会单独作为一张表输出）。
+
+    lxml 的 text_content() 会把内层 <table> 的表头/数据一起拼进外层单元格，
+    产出 "X内Y" 这种污染值；deepcopy 后摘掉内层表（保留 tail 文本）再取文本。"""
+    try:
+        if not cell.xpath(".//table"):
+            txt = cell.text_content()
+        else:
+            import copy as _copy
+            clone = _copy.deepcopy(cell)
+            for nested in clone.xpath(".//table"):
+                parent = nested.getparent()
+                if parent is None:
+                    continue
+                if nested.tail:
+                    parent.text = (parent.text or "") + nested.tail
+                parent.remove(nested)
+            txt = clone.text_content()
+    except Exception:
+        txt = cell.text_content()
+    return re.sub(r"\s+", " ", txt or "").strip()
+
+
+def _span(cell, attr: str) -> int:
+    try:
+        return max(1, int(cell.get(attr) or 1))
+    except Exception:
+        return 1
+
+
+def _expand_table_rows(trs) -> List[List[str]]:
+    """按 rowspan/colspan 把 <tr> 展开成矩形行（数据行用）。
+
+    之前只对表头做网格合并，数据行的 rowspan/colspan 被忽略 → 合并单元格表格
+    整列错位（"省份 A 跨两行" 的第二行把城市写进省份列）。这里对所有数据行
+    统一建网格：rowspan 的值在后续行重复，colspan 的值只占首列、其余留空。
+    """
+    rows: List[List[str]] = []
+    carry: Dict[int, List[Any]] = {}      # col -> [text, remaining_rows]
+    for tr in trs:
+        cells = tr.xpath("./th | ./td")
+        if not cells:
+            rows.append([])
+            continue
+        row: Dict[int, str] = {}
+        nxt: Dict[int, List[Any]] = {}
+        ci = 0
+        for c in cells:
+            while ci in carry:
+                txt, rem = carry[ci]
+                row[ci] = txt
+                if rem - 1 > 0:
+                    nxt[ci] = [txt, rem - 1]
+                ci += 1
+            txt = _cell_text(c)
+            cs = _span(c, "colspan")
+            rs = _span(c, "rowspan")
+            for dc in range(cs):
+                row[ci + dc] = txt if dc == 0 else ""
+            if rs > 1:
+                for dc in range(cs):
+                    nxt[ci + dc] = [txt if dc == 0 else "", rs - 1]
+            ci += cs
+        while ci in carry:
+            txt, rem = carry[ci]
+            row[ci] = txt
+            if rem - 1 > 0:
+                nxt[ci] = [txt, rem - 1]
+            ci += 1
+        # 未被本行消费的 carry（行比上一行短）继续向下传递
+        for col, (txt, rem) in carry.items():
+            if col not in nxt and rem - 1 > 0:
+                nxt[col] = [txt, rem - 1]
+        if row:
+            width = max(row) + 1
+            rows.append([row.get(i, "") for i in range(width)])
+        else:
+            rows.append([])
+        carry = nxt
+    return rows
+
+
 def extract_tables(html_text: str) -> List[List[Dict[str, str]]]:
     """抽取所有表格为 [{表头: 单元格}, ...]。"""
     doc = _doc(html_text)
@@ -118,41 +201,39 @@ def extract_tables(html_text: str) -> List[List[Dict[str, str]]]:
         return []
     out = []
     for tbl in doc.xpath("//table"):
-        rows = []
-        header = []
+        header: List[str] = []
         _hdr_pending: List[Any] = []   # 数据行出现前的连续全 th 行（多行表头，存 tr 元素）
+        data_trs: List[Any] = []
         # OCR R131（H）：.//tr/.//th 曾取到嵌套子表（descendant 轴）——外层表的
         # 行被内层表污染、子表行被误判表头。child 轴只取直接属性行（tbody 两种布局）
         # OCR R131 二轮（H）：thead 布局（<table><thead><tr>）的表头行曾整组漏掉
         # 收官六轮（审查）：补 ./tfoot/tr——tfoot 合计行曾全丢；header 只认首个
         # 全 th 行（后续 th 汇总行曾覆盖表头使键名错位）
         for tr in tbl.xpath("./thead/tr | ./tbody/tr | ./tfoot/tr | ./tr"):
-            cells = [re.sub(r"\s+", " ", (c.text_content() or "")).strip() for c in tr.xpath("./th | ./td")]
+            cells = tr.xpath("./th | ./td")
             if not cells:
                 continue
             # 全 <th> 行才算表头：<th scope="row"> 数据行（每行首列 th）曾把
             # 表头反复覆盖、整表 0 数据行（审查七轮 N28）
-            # 收官六轮：not header 替代 header is None——初始值是 [] 不是 None
-            # 审查八轮：**首个数据行之前**的连续全 th 行都收作表头（多行表头合并）；
-            # 数据行之后的全 th 行（如 tfoot 合计行）仍按数据行处理。
-            if tr.xpath("./th") and not tr.xpath("./td") and not rows and not header:
+            if tr.xpath("./th") and not tr.xpath("./td") and not data_trs and not header:
                 _hdr_pending.append(tr)
                 continue
             if _hdr_pending and not header:
                 header = _merge_header_rows(_hdr_pending)
-            if header:
-                row = {header[i] if i < len(header) else f"col{i}": cells[i] if i < len(cells) else "" for i in range(max(len(header), len(cells)))}
-            else:
-                row = {f"col{i}": v for i, v in enumerate(cells)}
+            data_trs.append(tr)
+        # 无数据行时无法判定哪行是表头：全部按数据行输出（colN 键），不丢内容
+        if not data_trs and _hdr_pending:
+            out.append([{f"col{i}": v for i, v in enumerate(vals)}
+                        for vals in _expand_table_rows(_hdr_pending)])
+            continue
+        rows = []
+        for vals in _expand_table_rows(data_trs):
+            width = max(len(header), len(vals))
+            row = {}
+            for i in range(width):
+                key = header[i] if i < len(header) else f"col{i}"
+                row[key] = vals[i] if i < len(vals) else ""
             rows.append(row)
-        # 收官十二轮（审查 H，实测）：整表全 th（键值表 / 全列用 th 渲染的数据表）
-        # 曾永远产生不了数据行 → rows 为空 → 整表从结果里静默消失。无数据行时
-        # 无法判定哪行是表头，全部按数据行输出（colN 键）——不臆测表头也不丢内容
-        if not rows and _hdr_pending:
-            for tr in _hdr_pending:
-                cells = [re.sub(r"\s+", " ", (c.text_content() or "")).strip()
-                         for c in tr.xpath("./th | ./td")]
-                rows.append({f"col{i}": v for i, v in enumerate(cells)})
         if rows:
             out.append(rows)
     return out

@@ -108,8 +108,11 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if stype not in SOURCE_TYPES:
         raise ConfigError("source.type", f"未知取数类型 '{stype}'",
                           f"可选: {', '.join(sorted(SOURCE_TYPES))}")
-    if stype in ("http_json", "http_html", "browser") and "url" not in src:
-        raise ConfigError("source.url", "该 source.type 需要 url", "例如: \"https://api.example.com/list\"")
+    if stype in ("http_json", "http_html", "browser"):
+        _u = src.get("url")
+        if not isinstance(_u, str) or not _u.strip():
+            raise ConfigError("source.url", "该 source.type 需要非空 url 字符串",
+                              '例如: "https://api.example.com/list"')
     # 类型守卫（审查修复：字段存在但类型错曾甩 AttributeError 裸栈）
     for fname, ftype, example in (("pagination", dict, '{"strategy": "none"}'),
                                   ("anti_bot", dict, '{"min_interval": 1.0}'),
@@ -351,6 +354,107 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
         if it.get("labels") is not None and not isinstance(it.get("labels"), dict):
             raise ConfigError("iterate.labels", "iterate.labels 应为 dict（取值→标签名）",
                               '例如: {"labels": {"北京": "京城"}}')
+
+    # ── v1.32.2：嵌套键类型/字段 spec 校验（此前这些坏值 validate 放行，
+    # 运行期被 engine 的"迭代失败"降级成 0 条，用户误以为是反爬/空数据）──
+    _pag = cfg.get("pagination") or {}
+    for _k, _min in (("max_pages", 1), ("start", 0), ("limit", 1), ("page_size", 1)):
+        if _k in _pag and _pag[_k] is None:
+            raise ConfigError(f"pagination.{_k}",
+                              f"pagination.{_k} 不能为 null（运行期会 TypeError）",
+                              f'例如: "{_k}": {_min if _k != "start" else 1}')
+        if _k in _pag:
+            try:
+                _v = int(float(_pag[_k]))
+            except (TypeError, ValueError):
+                raise ConfigError(f"pagination.{_k}",
+                                  f"pagination.{_k} 应为整数，实际 {_pag[_k]!r}",
+                                  '例如: "max_pages": 10')
+            if _v < _min:
+                raise ConfigError(f"pagination.{_k}",
+                                  f"pagination.{_k} 应 >= {_min}，实际 {_v}")
+            _pag[_k] = _v
+
+    _anti = cfg.get("anti_bot") or {}
+    for _k in ("timeout", "min_interval", "backoff_base"):
+        if _k in _anti and _anti[_k] is not None:
+            try:
+                _v = float(_anti[_k])
+            except (TypeError, ValueError):
+                raise ConfigError(f"anti_bot.{_k}",
+                                  f"anti_bot.{_k} 应为数值，实际 {_anti[_k]!r}",
+                                  '例如: "timeout": 20')
+            if _k == "timeout" and _v <= 0:
+                raise ConfigError("anti_bot.timeout", "anti_bot.timeout 必须 > 0")
+            if _k == "min_interval" and _v < 0:
+                raise ConfigError("anti_bot.min_interval", "anti_bot.min_interval 不能为负")
+            if _k == "backoff_base" and _v <= 0:
+                raise ConfigError("anti_bot.backoff_base", "anti_bot.backoff_base 必须 > 0")
+            _anti[_k] = _v
+        elif _k in _anti and _anti[_k] is None:
+            raise ConfigError(f"anti_bot.{_k}",
+                              f"anti_bot.{_k} 不能为 null（会触发运行期 TypeError）",
+                              '例如: "timeout": 20；不限制请用较大的数值')
+    if "max_retries" in _anti and _anti["max_retries"] is not None:
+        try:
+            _anti["max_retries"] = max(1, int(_anti["max_retries"]))
+        except (TypeError, ValueError):
+            raise ConfigError("anti_bot.max_retries",
+                              f"anti_bot.max_retries 应为整数，实际 {_anti['max_retries']!r}",
+                              '例如: "max_retries": 3')
+
+    # source 字段结构：headers 必须 dict；row_css/row_xpath 必须字符串；
+    # fields 必须 dict 且每个 spec 至少有一个取值键（防 "cs" 拼错后回退整行 HTML）
+    if "headers" in src and src["headers"] is not None and not isinstance(src["headers"], dict):
+        raise ConfigError("source.headers",
+                          f"source.headers 应为 dict，实际 {type(src['headers']).__name__}",
+                          '例如: "headers": {"Referer": "https://example.com"}')
+    for _k in ("row_css", "row_xpath"):
+        if src.get(_k) is not None and not isinstance(src[_k], str):
+            raise ConfigError(f"source.{_k}",
+                              f"source.{_k} 应为字符串，实际 {type(src[_k]).__name__}",
+                              '例如: "row_css": "div.item"')
+    _fields = src.get("fields")
+    if _fields is not None:
+        if not isinstance(_fields, dict):
+            raise ConfigError("source.fields",
+                              f"source.fields 应为 dict，实际 {type(_fields).__name__}",
+                              '例如: "fields": {"标题": {"css": "h3"}}')
+        for _fn, _fs in _fields.items():
+            if isinstance(_fs, str):
+                continue
+            if not isinstance(_fs, dict):
+                raise ConfigError(f"source.fields.{_fn}",
+                                  "字段 spec 应为字符串选择器或 dict",
+                                  '例如: {"css": "h3 a"} 或 {"css": "a", "attr": "href"}')
+            if not any(_fs.get(_key) for _key in
+                       ("css", "xpath", "attr", "subs", "regex", "var", "path",
+                        "from", "selector")):
+                raise ConfigError(
+                    f"source.fields.{_fn}",
+                    "字段 spec 缺少 css/xpath/attr/subs 之一（拼写错误会让整列变空）",
+                    '例如: {"css": "span.price"}；取属性: {"css": "a", "attr": "href"}')
+
+    # output：formats 支持字符串简写；base_name/dir 必须字符串（防路径拼接 TypeError）
+    _out = cfg.get("output") or {}
+    if "formats" in _out and isinstance(_out["formats"], str):
+        _out["formats"] = [x.strip() for x in _out["formats"].split(",") if x.strip()]
+    if "formats" in _out and not isinstance(_out["formats"], list):
+        raise ConfigError("output.formats",
+                          "output.formats 应为数组或逗号分隔字符串",
+                          '例如: ["json", "csv"]')
+    if isinstance(_out.get("formats"), list) and not all(
+            isinstance(x, str) for x in _out["formats"]):
+        raise ConfigError("output.formats",
+                          "output.formats 数组元素必须都是字符串",
+                          '例如: ["json", "csv"]')
+    for _k in ("base_name", "dir"):
+        if _out.get(_k) is not None and not isinstance(_out[_k], str):
+            raise ConfigError(f"output.{_k}", f"output.{_k} 应为字符串",
+                              '例如: "base_name": "my_data"')
+        if _out.get(_k) is not None and not _out[_k].strip():
+            raise ConfigError(f"output.{_k}", f"output.{_k} 不能为空字符串",
+                              '例如: "base_name": "my_data" / "dir": "outputs"')
     return cfg
 
 
@@ -423,6 +527,24 @@ def collect_warnings(cfg: Dict[str, Any]) -> "List[str]":
             if isinstance(cap, dict) and not cap.get("records_path"):
                 warns.append(f"source.capture[{j}] 缺 records_path——会把整个响应体当一条记录"
                              "（导出全空）。请声明记录数组所在路径，如 \"data.list\"")
+    # v1.32.2：分页键拼写错误（stratgy/page_parm）曾静默退化成"只抓第 1 页"
+    _KNOWN_PAG = {"strategy", "page_param", "start", "max_pages", "limit",
+                  "offset_param", "limit_param", "records_path", "total_path",
+                  "next_selector", "next_xpath", "type", "selector", "wait_ms",
+                  "settle_ms", "extra_params", "page_size", "total_selector",
+                  "scroll_times", "page_step"}
+    for _k in (cfg.get("pagination") or {}):
+        if _k not in _KNOWN_PAG:
+            warns.append(f"未知分页键 '{_k}'（拼写错误？相近键: "
+                         f"{[x for x in _KNOWN_PAG if x[:1] == str(_k)[:1]][:3]}）——该键将被忽略")
+    # 字段 spec 用了 v2 不支持的键（regex/default 等）：不报错，但要明确告警
+    for _fn, _fs in ((src.get("fields") or {}) if isinstance(src.get("fields"), dict) else {}).items():
+        if isinstance(_fs, dict) and not any(_fs.get(_k) for _k in
+                                             ("css", "xpath", "attr", "subs")):
+            _alias = [k for k in ("regex", "var", "path", "from", "selector") if _fs.get(k)]
+            if _alias:
+                warns.append(f"source.fields.{_fn} 使用了 v2 不支持的键 {_alias}——"
+                             "该字段运行时将为空；v2 请用 css/xpath/attr/subs")
     return warns
 
 

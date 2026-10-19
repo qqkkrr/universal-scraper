@@ -125,9 +125,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="universal-scraper", description="配置驱动的万能爬虫引擎")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    runp = sub.add_parser("run", help="运行配置任务或任务包")
+    runp = sub.add_parser("run", help="运行配置任务或任务包（v4 统一入口）")
     runp.add_argument("--config", default=None, help="v2 配置 JSON 路径")
     runp.add_argument("--task", default=None, help="v3 任务包目录（tasks/<name>）")
+    runp.add_argument("--engine", choices=["v4", "legacy"], default="v4",
+                      help="执行入口：v4=统一计划层（默认）；legacy=直连旧执行器（排障回退）")
+    runp.add_argument("--plan-out", type=Path, default=None,
+                      help="把归一化后的 CrawlPlan 写入 JSON（供审阅/差分测试）")
     runp.add_argument("--var", action="append", default=[], help="覆盖变量 k=v")
     runp.add_argument("--resume", action="store_true", help="断点续跑")
     runp.add_argument("--limit", type=int, default=None, help="只处理前 N 条（冒烟测试；0=不限，留空=不限）")
@@ -219,6 +223,17 @@ def main() -> int:
     fp.add_argument("--capture", nargs="?", const="outputs/fetch_capture.json", default=None,
                     help="捕获页面全部 XHR/fetch JSON 响应并保存（自动启用浏览器模式；"
                          "裸用=outputs/fetch_capture.json，也可给保存路径）——SPA 接口侦察一步到位")
+
+    snp = sub.add_parser("snapshot", help="📸 页面快照：一次抓取落盘，离线反复解析（不改规则重打站点）")
+    snp.add_argument("urls", nargs="*", help="一个或多个 URL")
+    snp.add_argument("--urls-file", default=None, help="URL 清单文件（每行一个）")
+    snp.add_argument("--out", default=None, help="快照目录（默认 outputs/snapshots/<时间戳>）")
+    snp.add_argument("--browser", action="store_true", help="浏览器渲染（JS/SPA）")
+    snp.add_argument("--proxy", default=None, help="代理")
+    snp.add_argument("--interval", type=float, default=2.0, help="URL 间隔秒数（默认 2）")
+    snp.add_argument("--timeout", type=float, default=60, help="单页超时秒数")
+    snp.add_argument("--cookie", default=None, help="Cookie 串（登录态；仅用户本人提供）")
+    snp.add_argument("--resume", action="store_true", help="跳过已存在且 URL 相同的快照")
 
     cp = sub.add_parser("crawl", help="从 URL 递归爬站（Firecrawl crawl 风格）")
     cp.add_argument("url", help="入口 URL")
@@ -524,11 +539,25 @@ def main() -> int:
     a3.add_argument("--sources", required=True, help="doc_id=路径 的 JSON 映射")
     a3.add_argument("--no-unique", action="store_true")
 
+    cp = sub.add_parser("compliance", help="🛡️ 合规预检：个人信息/授权/绕过手段/规模/留存（不联网）")
+    cp.add_argument("--config", default="", help="v2 配置 JSON")
+    cp.add_argument("--task", default="", help="v3 任务包目录")
+    cp.add_argument("--purpose", default="", help="采集目的（越具体越好）")
+    cp.add_argument("--legal-basis", default="", help="合法性基础：同意/合同必要/法定义务/公共利益等")
+    cp.add_argument("--authorized", action="store_true", help="已获得平台/数据主体授权")
+    cp.add_argument("--non-public", action="store_true", help="目标包含非公开数据（会判红）")
+    cp.add_argument("--scale", type=int, default=0, help="预计记录数")
+    cp.add_argument("--retention-days", type=int, default=0, help="保存天数（0=未声明）")
+    cp.add_argument("--json", action="store_true", help="输出 JSON")
+    cp.add_argument("--strict", action="store_true", help="amber 也返回非 0（默认只有 red 非 0）")
+
     vp = sub.add_parser("verify", help="🧾 复核抓取结果：字段完整率/去重/抽样重抓对比；或通用目录审计")
     vp.add_argument("--file", default=None, help="结果 JSON 文件，如 outputs/xxx.json")
     vp.add_argument("--dir", default=None, help="任意任务目录审计（不要求由本工具产出）：记录数/字段完整率/证据存在性")
     vp.add_argument("--network", action="store_true", help="联网抽样重抓对比（默认只做本地检查）")
-    vp.add_argument("--data-key", default="", help="JSON 为 dict 包装时取数组的键；未指定则自动探测 data/list/rows/items")
+    vp.add_argument("--data-key", default="",
+                    help="JSON 为 dict 包装时取记录数组的键（支持点路径，如 products / result.products）；"
+                         "未指定则自动探测 data/list/rows/items，单候选自动采用，多候选会列出键名要求指定")
     vp.add_argument("--expect", default="",
                     help="语义校验（--file，JSON/CSV 自动识别）：'词'=任一命中(OR)，'+词'=必须含(AND)，'!词'=不得出现；"
                          "列级断言：'列名!词'/'列名+词'=该列内约束（精准，防全文误杀）；"
@@ -2338,6 +2367,32 @@ def main() -> int:
         print("✓ 审计全部通过")
         return 0
 
+    if args.cmd == "compliance":
+        from . import compliance_preflight as _comp
+        if bool(args.config) == bool(args.task):
+            print("用法：compliance 需要且只能给 --config <配置.json> 或 --task <任务包目录> 之一",
+                  file=sys.stderr)
+            return 1
+        src = args.config or args.task
+        try:
+            cfg = _comp.load_source(Path(src))
+            rep = _comp.assess(
+                cfg, purpose=args.purpose, legal_basis=args.legal_basis,
+                authorized=args.authorized, public_only=not args.non_public,
+                scale=args.scale, retention_days=args.retention_days)
+        except Exception as e:
+            print(f"❌ 合规预检失败: {type(e).__name__}: {e}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(rep, ensure_ascii=False, indent=2))
+        else:
+            print(_comp.render(rep))
+        if rep["level"] == "red":
+            return 2
+        if rep["level"] == "amber" and args.strict:
+            return 1
+        return 0
+
     if args.cmd == "verify":
         from .verify import verify_dir
         if args.dir:
@@ -2455,6 +2510,39 @@ def main() -> int:
         # R32 修复：nodata 曾无条件 exit 0——CI 门禁对全失败爬取亮绿灯
         if result.get("nodata"):
             return 3
+        return 0
+
+    if args.cmd == "snapshot":
+        from . import snapshot as _snap
+        urls = list(args.urls or [])
+        if args.urls_file:
+            try:
+                urls.extend(
+                    ln.strip() for ln in Path(args.urls_file).read_text(encoding="utf-8").splitlines()
+                    if ln.strip() and not ln.strip().startswith("#"))
+            except Exception as e:
+                print(f"❌ URL 清单读取失败: {type(e).__name__}: {e}", file=sys.stderr)
+                return 1
+        urls = [u for u in urls if u]
+        if not urls:
+            print("❌ 需要至少一个 URL（位置参数或 --urls-file）", file=sys.stderr)
+            return 1
+        out = Path(args.out or (Path("outputs") / "snapshots" /
+                                time.strftime("%Y%m%d_%H%M%S")))
+        try:
+            rep = _snap.capture(urls, out, browser=args.browser, proxy=args.proxy,
+                                 interval=args.interval, timeout=args.timeout,
+                                 resume=args.resume, cookies=args.cookie)
+        except Exception as e:
+            print(f"❌ 快照失败: {type(e).__name__}: {e}", file=sys.stderr)
+            return 1
+        print(json.dumps({"out": rep["out"], "captured": rep["captured"],
+                          "ok": rep.get("ok", rep["captured"]),
+                          "errors": len(rep["errors"])}, ensure_ascii=False))
+        for e in rep["errors"][:10]:
+            print(f"  ⚠️ {e['url']}: {e['error']}", file=sys.stderr)
+        if rep.get("ok", 0) == 0:
+            return 1
         return 0
 
     if args.cmd == "fetch":
@@ -2631,9 +2719,28 @@ def main() -> int:
                 k, val = v.split("=", 1)
                 overrides[k] = val
         try:
-            result = run_task(tp, overrides=overrides, limit=args.limit, resume=args.resume,
-                              dry_run=args.dry_run, log_file=args.log_file, start_url=args.url,
-                              max_requests=getattr(args, "max_requests", None))
+            if getattr(args, "engine", "v4") == "v4":
+                from . import v4 as _v4, plan as _plan
+                try:
+                    _plan_obj = _plan.from_task(tp)
+                except Exception as _pe:
+                    print(f"❌ 任务包计划加载失败: {type(_pe).__name__}: {_pe}", file=sys.stderr)
+                    return 1
+                if getattr(args, "plan_out", None):
+                    try:
+                        _plan.dump(_plan_obj, args.plan_out)
+                        print(f"🧭 计划已写入: {args.plan_out}", file=sys.stderr)
+                    except Exception as _de:
+                        print(f"❌ 计划写入失败: {type(_de).__name__}: {_de}", file=sys.stderr)
+                        return 1
+                result = _v4.run_plan(
+                    _plan_obj, overrides=overrides, limit=args.limit, resume=args.resume,
+                    dry_run=args.dry_run, log_file=args.log_file, start_url=args.url,
+                    max_requests=getattr(args, "max_requests", None))
+            else:
+                result = run_task(tp, overrides=overrides, limit=args.limit, resume=args.resume,
+                                  dry_run=args.dry_run, log_file=args.log_file, start_url=args.url,
+                                  max_requests=getattr(args, "max_requests", None))
         except KeyboardInterrupt:
             print("\n已中断", file=sys.stderr)
             return 130
@@ -2663,8 +2770,8 @@ def main() -> int:
             return 5
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if result.get("stopped") == "max_requests":
-            print("🛑 请求预算硬闸触发（--max-requests / anti_bot.max_requests），已按检查点停",
-                  file=sys.stderr)
+            print("🛑 请求预算硬闸触发（--max-requests / anti_bot.max_requests）；"
+                  "未完成队列已写入检查点，调大预算后 --resume 可继续", file=sys.stderr)
             return 4
         if result.get("nodata"):
             print("⚠️ 0 条记录：nodata.json 已写入输出目录（0 结果不假成功，请先诊断再重试）",
@@ -2690,16 +2797,36 @@ def main() -> int:
             k, val = v.split("=", 1)
             overrides[k] = val
     try:
-        result = run_config(config, overrides=overrides, base_dir=cfg_path.resolve().parent,
-                            resume=args.resume, limit=args.limit, dry_run=args.dry_run,
-                            log_file=args.log_file, max_requests=getattr(args, "max_requests", None))
+        if getattr(args, "engine", "v4") == "v4":
+            from . import v4 as _v4, plan as _plan
+            _plan_obj = _plan.from_config(config, base_dir=cfg_path.resolve().parent)
+            if getattr(args, "plan_out", None):
+                try:
+                    _plan.dump(_plan_obj, args.plan_out)
+                    print(f"🧭 计划已写入: {args.plan_out}", file=sys.stderr)
+                except Exception as _de:
+                    print(f"❌ 计划写入失败: {type(_de).__name__}: {_de}", file=sys.stderr)
+                    return 1
+            result = _v4.run_plan(
+                _plan_obj, overrides=overrides, base_dir=cfg_path.resolve().parent,
+                resume=args.resume, limit=args.limit, dry_run=args.dry_run,
+                log_file=args.log_file, max_requests=getattr(args, "max_requests", None))
+        else:
+            result = run_config(config, overrides=overrides, base_dir=cfg_path.resolve().parent,
+                                resume=args.resume, limit=args.limit, dry_run=args.dry_run,
+                                log_file=args.log_file, max_requests=getattr(args, "max_requests", None))
     except KeyboardInterrupt:
         print("\n已中断，检查点已保存，可用 --resume 续跑", file=sys.stderr)
         return 130
     except MaxRequestsExceeded as e:
         # 注意必须显式捕获：它继承 BaseException（穿透客户端重试网），except Exception 接不住
         print(f"🛑 请求预算硬闸：{e}", file=sys.stderr)
-        print("   已抓数据已按迭代落盘；如需继续请调大 --max-requests", file=sys.stderr)
+        if getattr(e, "partial_exported", False):
+            print("   本轮已抓数据已保存到输出目录；调大 --max-requests 后用 --resume 继续"
+                  "（中断所在阶段会续跑/重抓，已验证的列表与详情不会丢）", file=sys.stderr)
+        else:
+            print("   预算在首个请求前/首屏即触发，本轮暂无新数据；"
+                  "调大 --max-requests 后重试", file=sys.stderr)
         return 4
     except BlockDetectedError as e:
         # 裁判文书网战训：封禁页命中必须硬停机 + 落证据（exit 5）

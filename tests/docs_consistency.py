@@ -123,6 +123,9 @@ def main():
     bad_top = {}
     for name, text in docs.items():
         for block in re.findall(r"```json\n(.*?)```", text, re.S):
+            # v1.33.0：v4 CrawlPlan 也含 name/source，但不是 v2 配置——跳过
+            if '"schema_version"' in block and '"profile"' in block:
+                continue
             if '"name"' not in block or '"source"' not in block:
                 continue
             try:

@@ -7,11 +7,11 @@ description: >
   （HTTP → 浏览器指纹 → 无头浏览器 → 用户登录浏览器直连）、
   样本先行确认、0 结果强制诊断。当用户想抓取/采集/爬取/下载网页数据、
   提到爬虫/scraper/crawler/spider/数据采集，或点名 universal-scraper 时使用。
-  【AI Agent】Skill 工具已自动加载本文件——请同时打开 references/agent-quickref.md
-  获取精简命令模板与判型速查表（本文件是详细教程，quickref 是开工速查，两者互补）。
+  【AI Agent】先读 references/agent-router.md（≤1 页路由 + 合规预检）；命令模板看
+  references/agent-quickref.md；本文件是详细教程，三者互补。
 metadata:
-  version: "1.32.1"
-  source_project: "universal-scraper (33 轮审计 + 实战反馈轮, 389 测试)"
+  version: "1.33.0"
+  source_project: "universal-scraper (多轮审计 + 实战反馈轮, 420 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能
@@ -258,7 +258,12 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 - 开跑前播报："🚀 预计约 N 条、X 分钟，我会随时报告进度。"
 - 长任务用后台执行并周期性播报"已完成 80/200 ✅"。
 - 中途被阻断 → 按手册升级 ladder，每升一级告诉用户一句"换了更强的方式，再试试"。
-- 断了可续：`run --resume`，不重头再来。
+- 断了可续：v3 任务包 `run --task ... --resume` 跳过已完成 URL；v2 配置
+  `run --config ... --resume` 跳过**已完整跑完**的迭代/详情。若上次是在分页中途
+  被预算/中断打断，该迭代会重抓（已抓页会先落盘，不会整轮丢）。
+- v4 统一入口：`run --config` / `run --task` 默认先归一为 CrawlPlan 再执行；
+  排障可加 `--engine legacy` 直连旧执行器，`--plan-out plan.json` 可审阅计划
+  （详见 `references/v4-architecture.md`）。
 - 已知会限速的站主动降速（配置里加间隔），礼貌抓取。
 
 ## 第五幕 · 交付验收
@@ -335,6 +340,8 @@ PYTHONPATH="${SKILL_DIR}" python3 -m universal_scraper.cli run --config "<任务
 | **多步采集跑挂了自己爬起来** | `chain --step "名称=命令" --probe-http <探活URL> --heal-cmd <自愈命令> --deadline "YYYY-MM-DD HH:MM"`——**按日志内容判死**（退出码 0 但日志满屏 `TargetClosedError` 也判死 ✓，配了探针则先自愈再重跑）、进程级单飞锁防双开、每次尝试一行 JSONL 账本；**没真正成功绝不报 done** ✓。配方 **R49**（`references/ops-chain-health.md`） |
 | **判断采集是不是"静默失败"** | `health register/record/check/cred/report`——**空结果 ≠ 正常**（count=0 默认可疑 ✓）、量级突变（0.5×/2× 中位）、凭据到期日历（VIP/Token 到期前提醒 ✓）；`check` **只有 ok/no_baseline 退 0**，其余判定（含掉量/陈旧）一律退 1 = 需人工看。配方 **R49** |
 | 结果复核/报表 | `verify --file` / `verify --dir <任务目录>`（通用审计：任意来源） / `report` |
+| 保存页面离线解析 | `snapshot <url...> --out <目录>`（每页 json/html/md；改正则零额外请求） |
+| 开工前合规预检 | `compliance --config x.json --purpose "..." --scale N`（red 停；amber 最小必要/脱敏/留存） |
 | 环境/出口 IP | `doctor.py`（含网络链路体检）/ `ip`（出口+系统代理+电源） |
 | **被 412/403 拦，不知道撞的什么防护** | `diagnose <url>`（实测一次机器判型：瑞数/Cloudflare/WAF/JS壳/SPA + 处方 + 退出码 2 可脚本分支） |
 | **接口看不懂形态（乱码/帧流/白名单报错）** | **先读 playbook 第九章**（GraphQL / protobuf-gRPC / WebSocket 三形态的 30 秒识别指纹与打法）——protobuf 是明文二进制不是加密；WS 型站用 `browser_agent` 抓帧；GraphQL 见 R48 |

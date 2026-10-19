@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class Checkpoint:
@@ -26,12 +26,21 @@ class Checkpoint:
 
     MAX_ROWS = 2000
 
-    def save(self, rows: List[Dict[str, Any]], done: int, total: int) -> None:
-        """断点保存：只保留最近 MAX_ROWS 条（大任务不再每 20 条全量序列化 O(n²)）。"""
+    def save(self, rows: List[Dict[str, Any]], done: int, total: int,
+             complete: Optional[bool] = None, sig: Optional[str] = None) -> None:
+        """断点保存：只保留最近 MAX_ROWS 条（大任务不再每 20 条全量序列化 O(n²)）。
+
+        complete=True 表示"列表阶段已完整跑完"——resume 可整段跳过，不再重抓
+        全部分页（此前 v2 --resume 对列表页永远从第 1 页重来）。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         kept = rows[-self.MAX_ROWS:] if len(rows) > self.MAX_ROWS else rows
         self.data.update({"done": done, "total": total, "rows": kept,
                           "rows_truncated": len(rows) > self.MAX_ROWS})
+        # complete 为 None 的旧调用（详情阶段每 N 行保存）不得把已置的 True 冲掉
+        if complete is not None:
+            self.data["complete"] = bool(complete)
+        if sig is not None:
+            self.data["sig"] = sig
         # 原子写：断电/崩溃不损坏检查点（损坏后 resume 静默丢全部历史行）
         _tmp = self.path.with_suffix(".json.tmp")
         # R129 修复（P1）：并发详情路径中 worker 线程仍会向 row dict 补键，

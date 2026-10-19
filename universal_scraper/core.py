@@ -530,6 +530,32 @@ def parse_relative_time(text: str, now: Optional[datetime] = None) -> str:
         except ValueError:
             return ""
 
+    # 审查修复（v1.32.2）：中文绝对日期曾被下方便利正则当成"2024 年前"——
+    # "2024年1月2日" 输出 0004-02-22。绝对日期必须先于相对时间解析。
+    m = _re.match(r"^(\d{4})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?"
+                  r"(?:\s*(\d{1,2}):(\d{2}))?$", s)
+    if m:
+        y, mo = int(m.group(1)), int(m.group(2))
+        d = int(m.group(3) or 1)
+        h, mi = int(m.group(4) or 0), int(m.group(5) or 0)
+        try:
+            r = datetime(y, mo, d, h, mi)
+            if m.group(3) is None:
+                return r.strftime("%Y-%m")
+            return r.strftime("%Y-%m-%d %H:%M") if (h or mi) else r.strftime("%Y-%m-%d")
+        except ValueError:
+            return ""
+    # 2024/1/2（斜杠绝对日期）
+    m = _re.match(r"^(\d{4})/(\d{1,2})/(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$", s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        h, mi = int(m.group(4) or 0), int(m.group(5) or 0)
+        try:
+            r = datetime(y, mo, d, h, mi)
+            return r.strftime("%Y-%m-%d %H:%M") if (h or mi) else r.strftime("%Y-%m-%d")
+        except ValueError:
+            return ""
+
     # 收官十五轮（core 深审 L4，实测）：原为 `[日]?$` 锚定——"07-16 10:23"（无年份
     # 日期+时间，论坛/BBS 常见）匹配不上，日期字段静默为空。允许可选时间后缀
     m = _re.match(r"^(\d{1,2})[-月/](\d{1,2})[日]?(?:\s+(\d{1,2}):(\d{2}))?$", s)
@@ -544,7 +570,8 @@ def parse_relative_time(text: str, now: Optional[datetime] = None) -> str:
         except ValueError:
             return ""
 
-    m = _re.match(r"^(?:刚刚|(\d+)\s*(秒|分钟|小时|天|周|个月|月|年)前?)", s)
+    # 审查修复（v1.32.2）："前?" 让"2024年"被当成"2024 年前"；相对时间必须带"前"
+    m = _re.match(r"^(?:刚刚|(\d+)\s*(秒|分钟|小时|天|周|个月|月|年)前)", s)
     if m:
         n = int(m.group(1) or 0)
         unit = m.group(2) or ""
@@ -632,38 +659,56 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
         if m2:
             enc = m2.group(1); explicit = True
 
+    # 常用汉字表（charset_normalizer 自带 100 字高频表；取不到时用内置短表兜底）：
+    # gb18030 与 Big5 都能"零替换字符"解出对方字节——仅看替换字符无法区分。
+    # 正确解码会落在高频汉字上，错误解码则落在生僻字/私用区，用高频字命中数做平局裁决。
+    try:
+        from charset_normalizer.constant import FREQUENCIES as _FREQ
+        _zh_common = set(_FREQ.get("Chinese") or ())
+    except Exception:
+        _zh_common = set("的一是不了在人有我他这个们中来上大为和国地到以说时要就出会可也你对生能而子那得于着下自之年过发后作里")
+    if not _zh_common:
+        _zh_common = set("的一是不了在人有我他这个们中来上大为和国地到以说时要就出会可也你对生能而子那得于着下自之年过发后作里")
+
     def _score(e):
         try:
             # OCR R131（M）回退注记：曾试改 64KB 采样打分——采样边界把多字节
             # UTF-8 字符截成半截，utf-8 伪增错误数、gb18030 反超胜出（实测
             # 中文页全量乱码）。编码探测必须全量解码，保持原实现。
             s2 = raw.decode(e, "replace")
-            return s2.count("\ufffd"), s2
+            bad = s2.count("\ufffd")
+            if bad == 0:
+                # 审查修复（v1.32.2）：gb18030 能用"零替换字符"解出 Big5/Shift-JIS
+                # 字节，但结果落在 Unicode 私用区（PUA）——人眼是乱码，机器计数却是 0。
+                bad = sum(1 for ch in s2 if "\ue000" <= ch <= "\uf8ff")
+            # 高频汉字 + 日文假名命中数：越多越像正确解码（用于零错误平局裁决）。
+            # 反向信号：非日文编码却解出假名，几乎一定是错解（Big5 字节被 gb18030
+            # 解成"羉砰いゅ代刚"就是这类），按假名数加罚。
+            _kana = sum(1 for ch in s2 if "\u3040" <= ch <= "\u30ff")
+            if _kana and e.lower() not in ("shift_jis", "cp932", "sjis"):
+                bad += _kana
+            _common = sum(1 for ch in s2 if ch in _zh_common)
+            return (bad, -(_common + _kana)), s2
         except LookupError:
-            return 10 ** 9, None
+            return (10 ** 9, 0), None
 
-    # 候选打分：替换字符最少者胜（顺序决定同分时优先：utf-8 → gb18030 → gbk …）
-    best_err, best_s = 10 ** 9, None
+    # 候选打分：先比错误字符（替换符 + PUA），再比高频字命中（越多越优先）；
+    # 完全同分时按候选顺序（utf-8 → gb18030 → gbk → big5 …）。
+    best_key, best_s = (10 ** 9, 0), None
     for cand in ("utf-8", "gb18030", "gbk", "big5", "shift_jis", "latin-1"):
-        e, s2 = _score(cand)
-        if s2 is not None and e < best_err:
-            best_err, best_s = e, s2
-    # charset_normalizer 仅作为"额外候选"参与打分（不作为权威，防误判）
+        key, s2 = _score(cand)
+        if s2 is not None and key < best_key:
+            best_key, best_s = key, s2
+    # charset_normalizer 仅作为"额外候选"参与打分（不作为权威，防误判）。
+    # 不再对零错误平局做特殊偏爱：高频字计分已能区分 Big5/GBK，额外的"非 GB 优先"
+    # 规则反而会把短 GBK 页判成 Big5（实测 "中文测试" → "笢恅聆彸"）。
     try:
         from charset_normalizer import from_bytes
         _c = from_bytes(raw[:65536]).best() if raw else None  # 只采样探测，控制 CPU 开销
         if _c is not None and _c.encoding:
-            e, s2 = _score(_c.encoding)
-            _ce = str(_c.encoding).lower()
-            # 收官十五轮（core 深审 M3，实测）：gb18030 能"零错误"解出几乎任何双字节
-            # 组合，而严格 `<` 判据让它在平局时不败——Big5/Shift-JIS 页（未声明编码）
-            # 被解成 PUA 乱码且替换字符为 0（静默乱码，人眼才看得出）。零错误平局时，
-            # 若探测器给出的是**更具体的非 UTF-8/非 GB 系**编码，采信它
-            if s2 is not None and (e < best_err or (
-                    e == best_err == 0
-                    and _ce not in ("utf-8", "utf8")
-                    and not _ce.startswith(("gb", "cp9", "cp1")))):
-                best_err, best_s = e, s2
+            key, s2 = _score(_c.encoding)
+            if s2 is not None and key < best_key:
+                best_key, best_s = key, s2
     except Exception as _e:
         log(f"  charset_normalizer 探测失败: {_e}", "DEBUG")
 
@@ -680,15 +725,15 @@ def _decode_body(raw: bytes, headers: Optional[Dict[str, str]] = None) -> str:
         return _fin(best_s if best_s is not None else raw.decode("utf-8", "replace"))
     if single_byte:
         # latin-1 等"万能解码"：若候选能零错误解出（如实际是 UTF-8/GBK），优先用候选
-        if best_err == 0 and best_s is not None:
+        if best_key[0] == 0 and best_s is not None:
             return _fin(best_s)
         return _fin(raw.decode(enc, "replace"))
     try:
         return _fin(raw.decode(enc, "strict"))
     except (UnicodeDecodeError, LookupError):
         pass
-    decl_err, _ = _score(enc)
-    if best_s is not None and best_err < max(1, decl_err // 2):
+    decl_key, _ = _score(enc)
+    if best_s is not None and best_key[0] < max(1, decl_key[0] // 2):
         return _fin(best_s)
     return _fin(raw.decode(enc, "replace"))
 
@@ -1271,6 +1316,7 @@ class HttpClient:
         self._tl = threading.local()          # 每线程当前请求域（R20 分域节流归属）
         self._at = AdaptiveThrottle(self.min_interval)
         self.replay_mode = False              # R20 开发模式：只读缓存、不发网络
+        self.cache_enabled = False            # 配置开启缓存时由工厂/引擎置 True
         # R20 附带修复：cache_dir 为字符串（配置里写 "…/cache"）时 .mkdir 裸崩
         # AttributeError——另两后端都做 Path() 归一，本后端漏了
         if self.cache_dir:
@@ -1358,13 +1404,15 @@ class HttpClient:
         data: Optional[Dict[str, Any]] = None,
         json_data: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
-        use_cache: bool = False,
+        use_cache: Optional[bool] = None,
         allow_html_404: bool = False,
         proxy: Optional[str] = None,
         max_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         """返回 {'ok':bool, 'status':int, 'body':bytes, 'json':dict|None, 'text':str, 'headers':dict}。
         proxy 传入时本请求走该代理（覆盖实例级 proxy，None 表示用实例配置）。"""
+        if use_cache is None:
+            use_cache = bool(getattr(self, "cache_enabled", False))
         _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
         if _blk is not None:
             return _blk
@@ -1615,6 +1663,8 @@ class HttpClient:
                                   "json": None, "url": url, "headers": last_headers,
                                   "retry_after": parse_retry_after(last_headers)}
                         break
+                    if attempt >= self.max_retries:
+                        break       # 最后一次失败不再空睡一个 backoff 窗口
                     wait = self.backoff_base ** attempt + random.uniform(0, 1)
                     log(f"  请求失败 {status}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
                     time.sleep(wait)
@@ -1627,9 +1677,10 @@ class HttpClient:
                 break
             except Exception as e:  # 网络/超时
                 last_err = str(e)
-                wait = self.backoff_base ** attempt
-                log(f"  网络异常: {e}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
-                time.sleep(wait)
+                if attempt < self.max_retries:
+                    wait = self.backoff_base ** attempt
+                    log(f"  网络异常: {e}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
+                    time.sleep(wait)
 
         if result is None:
             # batch1800 战训（P3）：连续网络失败常因出口/系统代理变化（用户退 Clash/切 VPN）——
@@ -1725,9 +1776,12 @@ def export_rows(rows: List[Dict[str, Any]], out_dir: Path, base_name: str,
 
     base_name = _base()
 
-    # JSON（永远写：机器可读主格式）
+    # JSON（永远写：机器可读主格式）——tmp+replace 原子写，导出中崩溃不会
+    # 留下半截 JSON 覆盖上一份好数据（v1.32.2）
     jp = out_dir / f"{base_name}.json"
-    jp.write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    _jtmp = jp.with_suffix(".json.tmp")
+    _jtmp.write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    os.replace(_jtmp, jp)
     paths["json"] = jp
 
     if "csv" in want:
@@ -1738,7 +1792,8 @@ def export_rows(rows: List[Dict[str, Any]], out_dir: Path, base_name: str,
                     if k not in all_keys:
                         all_keys.append(k)
             cp = out_dir / f"{base_name}.csv"
-            with open(cp, "w", newline="", encoding="utf-8-sig") as f:
+            _ctmp = cp.with_suffix(".csv.tmp")
+            with open(_ctmp, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
                 w.writeheader()
 
@@ -1756,6 +1811,7 @@ def export_rows(rows: List[Dict[str, Any]], out_dir: Path, base_name: str,
 
                 for r in rows:
                     w.writerow({k: _csv_cell(v) for k, v in r.items()})
+            os.replace(_ctmp, cp)
             paths["csv"] = cp
         except Exception as e:
             log(f"CSV 导出失败（跳过）: {e}", "WARN")
@@ -1792,7 +1848,9 @@ def export_rows(rows: List[Dict[str, Any]], out_dir: Path, base_name: str,
             for col in ws.columns:
                 letter = col[0].column_letter
                 ws.column_dimensions[letter].width = min(max(len(str(c.value or "")) for c in col[:100]) + 2, 60)
-            wb.save(xp)
+            _xtmp = xp.with_suffix(".xlsx.tmp")
+            wb.save(_xtmp)
+            os.replace(_xtmp, xp)
             paths["xlsx"] = xp
         except ImportError:
             log("openpyxl 未安装，跳过 Excel 导出", "WARN")
@@ -1814,7 +1872,9 @@ def export_rows(rows: List[Dict[str, Any]], out_dir: Path, base_name: str,
                 [[("" if r.get(k) is None else str(_safe(r.get(k)))) for k in all_keys_p]
                  for r in rows],
                 columns=all_keys_p)
-            _df.to_parquet(pp, index=False)
+            _ptmp = pp.with_suffix(".parquet.tmp")
+            _df.to_parquet(_ptmp, index=False)
+            os.replace(_ptmp, pp)
             paths["parquet"] = pp
         except ImportError:
             log("pandas/pyarrow 未安装，跳过 parquet 导出", "WARN")
@@ -1889,6 +1949,7 @@ class RequestsClient:
         self.session.mount("http://", adapter)
         self._at = AdaptiveThrottle(min_interval)
         self.replay_mode = False              # R20 开发模式：只读缓存、不发网络
+        self.cache_enabled = False            # 配置开启缓存时由工厂/引擎置 True
 
     def _throttle(self, url: str = "") -> None:
         # 多 worker 并发调用：必须加锁，否则限速形同虚设（可 2 倍突发）
@@ -1903,19 +1964,15 @@ class RequestsClient:
         _bump_request_count()
 
     def request(self, url: str, method: str = "GET", params=None, data=None,
-                json_data=None, headers=None, use_cache: bool = False,
+                json_data=None, headers=None, use_cache: Optional[bool] = None,
                 allow_html_404: bool = False, proxy: Optional[str] = None,
                 max_size: Optional[int] = None) -> Dict[str, Any]:
-        # 收官十五轮（core 深审 L1）：本后端不实现缓存，use_cache 曾静默 no-op
-        # （curl_cffi/urllib 两后端都实现了）——调用方以为有缓存。显式告警一次，
-        # 并如实声明（不改变行为，避免"为了对齐而引入半成品缓存"）
-        if use_cache:
-            _warn_once("requests 后端暂不支持 use_cache（本次请求照常发出，未读写缓存）"
-                       "——需要缓存请用默认 curl_cffi 后端或 urllib 后端")
-        # R20 回放模式：requests 后端无缓存实现——结构化失败且不发网络
-        # （工厂层在 replay 开启时会优先改选可缓存后端，正常不会走到这里）
+        # v1.32.2：补齐 requests 后端缓存（此前 use_cache 是静默 no-op，导致
+        # output.cache/--replay 在默认 requests 后端上永远无法工作）
+        if use_cache is None:
+            use_cache = bool(getattr(self, "cache_enabled", False))
         if getattr(self, "replay_mode", False):
-            return _replay_miss(url, "requests 后端不支持缓存，请用 curl_cffi/urllib 后端")
+            use_cache = True
         _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
         if _blk is not None:
             return _blk
@@ -1943,6 +2000,47 @@ class RequestsClient:
                     _k, _v = pair.split("=", 1)
                     _jar[_k.strip()] = _v.strip()
             h["Cookie"] = "; ".join(f"{k}={v}" for k, v in _jar.items() if k)
+
+        # ── HTTP 缓存查找（与 curl_cffi/urllib 同键：method|url+params|body）──
+        _cache_url = url
+        _body_key = b""
+        if data is not None:
+            if isinstance(data, str):
+                _body_key = data.encode()
+            elif isinstance(data, (bytes, bytearray)):
+                _body_key = bytes(data)
+            else:
+                _body_key = urllib.parse.urlencode(data).encode()
+        elif json_data is not None:
+            _body_key = json.dumps(json_data, ensure_ascii=False).encode()
+        if params:
+            _cache_url = url + ("&" if "?" in url else "?") + urllib.parse.urlencode(params, doseq=True)
+        _revalidating = False
+        _cached: Optional[Dict[str, Any]] = None
+        _cf = None
+        if use_cache and self.cache_dir and method.upper() == "GET" and not _body_key:
+            _cf = self.cache_dir / _cache_key(_cache_url, b"", "GET")
+            if _cf.exists():
+                try:
+                    _cached = _cache_decode(json.loads(_cf.read_text(encoding="utf-8")))
+                except Exception:
+                    _cached = None
+                if _cached is not None:
+                    if getattr(self, "replay_mode", False):
+                        return _cached
+                    if _cache_valid(_cf):
+                        return _cached
+                    _ch = _cached.get("headers") or {}
+                    _cond = {}
+                    if _ch.get("etag"):
+                        _cond["If-None-Match"] = _ch["etag"]
+                    if _ch.get("last-modified"):
+                        _cond["If-Modified-Since"] = _ch["last-modified"]
+                    if _cond:
+                        h.update(_cond)
+                        _revalidating = True
+        if getattr(self, "replay_mode", False):
+            return _replay_miss(url, "requests 后端缓存未命中")
 
         last_err = "requests 请求失败"
         last_status = 0
@@ -1991,6 +2089,8 @@ class RequestsClient:
                         last_status = resp.status_code
                         last_err = f"HTTP {resp.status_code}"
                         _thr_note_block(self, f"http{resp.status_code}")
+                        if attempt >= self.max_retries:
+                            break       # 最后一次失败不再空睡一个 backoff 窗口
                         wait = self.backoff_base ** attempt + random.uniform(0, 1)
                         log(f"  请求失败 {resp.status_code}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
                         time.sleep(wait)
@@ -2021,11 +2121,33 @@ class RequestsClient:
                     _note_net_result(True)
                     _thr_note_latency(self, time.time() - _t0)
                     _thr_note_ok(self)
-                    return {"ok": True, "status": resp.status_code, "body": raw,
+                    if _revalidating and resp.status_code == 304 and _cf is not None:
+                        # 条件 GET 命中：内容未变，刷新 TTL 后复用旧缓存
+                        try:
+                            _cached2 = _cache_decode(json.loads(_cf.read_text(encoding="utf-8")))
+                            try:
+                                os.utime(_cf, None)
+                            except OSError:
+                                pass
+                            return _cached2
+                        except Exception:
+                            return {"ok": False, "status": 304, "body": b"", "text": "",
+                                    "json": None, "url": url, "headers": {},
+                                    "error": "304 续期但缓存已不可读——请重试"}
+                    _res = {"ok": True, "status": resp.status_code, "body": raw,
                             "text": _text, "json": parsed, "url": resp.url,
                             "headers": {k.lower(): v for k, v in resp.headers.items()},
                             "raw_headers": getattr(resp, "raw", None) and getattr(resp.raw, "headers", None),
                             "truncated": _trunc2}
+                    if use_cache and _cf is not None and not _trunc2:
+                        try:
+                            _tmp = _cf.with_suffix(".json.tmp")
+                            _tmp.write_text(json.dumps(_cache_encode(_res), ensure_ascii=False),
+                                            encoding="utf-8")
+                            os.replace(_tmp, _cf)
+                        except OSError as _ce:
+                            log(f"HTTP 缓存写入失败（不影响本次结果）: {_ce}", "DEBUG")
+                    return _res
                 finally:
                     # R130：stream 模式下半读/重试丢弃的响应必须显式关闭，归还连接
                     try:
@@ -2040,9 +2162,10 @@ class RequestsClient:
                         "hint": "出站守卫：重定向目标指向私网/保留地址，已拒绝跟随"}
             except Exception as e:
                 last_err = f"{type(e).__name__}: {e}"
-                wait = self.backoff_base ** attempt
-                log(f"  网络异常: {e}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
-                time.sleep(wait)
+                if attempt < self.max_retries:
+                    wait = self.backoff_base ** attempt
+                    log(f"  网络异常: {e}，{wait:.1f}s 后重试（{attempt}/{self.max_retries}）", "WARN")
+                    time.sleep(wait)
         _note_net_result(False)
         return {"ok": False, "status": last_status, "body": b"", "text": last_err, "json": None, "url": url,
                 "headers": {},
@@ -2109,6 +2232,7 @@ class CurlCffiClient:
         self._last_ts: Dict[str, float] = {}    # 域 → 上次请求时刻（R20 分域节流）
         self._at = AdaptiveThrottle(min_interval)
         self.replay_mode = False              # R20 开发模式：只读缓存、不发网络
+        self.cache_enabled = False            # 配置开启缓存时由工厂/引擎置 True
 
     def _throttle(self, url: str = "") -> None:
         # 多 worker 并发调用：必须加锁，否则限速形同虚设（可 2 倍突发）
@@ -2123,9 +2247,11 @@ class CurlCffiClient:
         _bump_request_count()
 
     def request(self, url: str, method: str = "GET", params=None, data=None,
-                json_data=None, headers=None, use_cache: bool = False,
+                json_data=None, headers=None, use_cache: Optional[bool] = None,
                 allow_html_404: bool = False, proxy: Optional[str] = None,
                 max_size: Optional[int] = None) -> Dict[str, Any]:
+        if use_cache is None:
+            use_cache = bool(getattr(self, "cache_enabled", False))
         _blk = _entry_guard_error(url)          # 审查八轮：入口出站守卫（统一出口）
         if _blk is not None:
             return _blk
@@ -2290,6 +2416,8 @@ class CurlCffiClient:
                         last_err = f"HTTP {resp.status_code}"
                         last_status = resp.status_code
                         _thr_note_block(self, f"http{resp.status_code}")
+                        if attempt >= self.max_retries:
+                            break       # 最后一次失败不再空睡一个 backoff 窗口
                         wait = self.backoff_base ** attempt + random.uniform(0, 1)
                         log(f"  curl_cffi 请求失败 {resp.status_code}，{wait:.1f}s 后重试", "WARN")
                         time.sleep(wait)
@@ -2390,9 +2518,10 @@ class CurlCffiClient:
                         "hint": "出站守卫：重定向目标指向私网/保留地址，已拒绝跟随"}
             except Exception as e:
                 last_err = str(e)
-                wait = self.backoff_base ** attempt
-                log(f"  curl_cffi 网络异常: {e}，{wait:.1f}s 后重试", "WARN")
-                time.sleep(wait)
+                if attempt < self.max_retries:
+                    wait = self.backoff_base ** attempt
+                    log(f"  curl_cffi 网络异常: {e}，{wait:.1f}s 后重试", "WARN")
+                    time.sleep(wait)
         _note_net_result(False)
         return {"ok": False, "status": last_status, "body": b"", "text": last_err,
                 "json": None, "url": url, "headers": {},
@@ -2488,6 +2617,7 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
     _at_enabled = _apply_autothrottle_opts_early(anti)
     # R20 回放模式：requests 后端无缓存 → 改选 urllib（有缓存实现），保证"不动网"承诺
     _replay = bool(anti.get("replay"))
+    _cache_on = bool(anti.get("cache_enabled") or anti.get("cache") or _replay)
     if _replay and backend == "requests":
         log("  ⚠️ replay 模式与 requests 后端不兼容（无缓存实现）——本次改用 urllib 后端", "WARN")
         backend = "urllib"
@@ -2497,6 +2627,7 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
             client._backend_name = "curl_cffi"
             _apply_autothrottle_opts(client, anti, _at_enabled)
             client.replay_mode = _replay
+            client.cache_enabled = _cache_on
             return client
         except Exception as _e:
             # 降级必须可诊断（TLS 指纹伪装静默失效曾导致被反爬拦截却查不到原因）
@@ -2508,6 +2639,7 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
             client._backend_name = "requests"
             _apply_autothrottle_opts(client, anti, _at_enabled)
             client.replay_mode = _replay
+            client.cache_enabled = _cache_on
             return client
         except Exception as _e:
             log(f"⚠️ HTTP 后端降级: requests 不可用({_e})，改用 urllib", "WARN")
@@ -2522,6 +2654,7 @@ def make_http_client(anti: Dict[str, Any], **kw) -> Any:
     client._backend_name = "urllib"
     _apply_autothrottle_opts(client, anti, _at_enabled)
     client.replay_mode = _replay
+    client.cache_enabled = _cache_on
     return client
 
 

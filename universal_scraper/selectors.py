@@ -206,6 +206,30 @@ def css_attr(html: str, selector: str, attr: str = "href", limit: int = 0) -> st
     return text[:limit] if limit and len(text) > limit else text
 
 
+def smart_single(value: str, kind: str = "text") -> str:
+    """多元素拼接结果去噪（仅字段未声明 multiple/join 时启用）：
+    - attr：多个 URL/路径拼成 '/a /b' → 取第一个像 URL 的
+    - text：多个短链接文本拼成 'd\nf' → 取第一个；描述类多段落（长/含标点）保留全文
+
+    与 modules/parsers.py 的 _smart_single 同口径（v2/v3 行为一致）。"""
+    if not value:
+        return value
+    if kind == "attr" and " " in value:
+        toks = [t for t in value.split() if t]
+        url_like = [t for t in toks
+                    if re.match(r"^(https?://|/|#|mailto:|tel:|\./|\.\./)", t)]
+        if len(url_like) >= 2 or (len(toks) > 1 and len(url_like) == len(toks)):
+            return url_like[0]
+        return value
+    if kind == "text" and "\n" in value:
+        parts = [re.sub(r"\s+", " ", x).strip() for x in value.split("\n") if x.strip()]
+        if len(parts) >= 2 and all(len(x) <= 80 and not re.search(r"[。！？；;，]", x)
+                                   and " " not in x for x in parts):
+            return parts[0]
+        return value
+    return value
+
+
 def css_html(html: str, selector: str, limit: int = 0) -> str:
     out = []
     for el in css_elements(html, selector):
@@ -501,9 +525,9 @@ def regex_is_dangerous(pattern: str, flags: int = 0) -> bool:
     零宽断言体内的同类形态。flags 必须与实际匹配一致（R47 F3：IGNORECASE
     会让字面首集相交，parse 不折叠，lint 必须自己感知）。"""
     try:
+        import re._parser as _sre_parse          # 3.11+ 正式路径（sre_parse 已弃用）
+    except ImportError:  # 老版本兜底
         import sre_parse as _sre_parse
-    except ImportError:  # 3.13+ 弃用迁移兜底
-        import re._parser as _sre_parse
     global _MAXREP
     _MAXREP = _sre_parse.MAXREPEAT
     try:

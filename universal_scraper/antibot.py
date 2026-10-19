@@ -319,14 +319,16 @@ BLOCK_PATTERNS = [
     # 淘宝系会话标记（盒马战例）：RGV587 页 / mtop ret=TIMEOUT::——冷却+换路线，不是重试。
     # 这组是 JSON 业务令牌（有意不门控）
     ("session_flagged", re.compile(r"RGV587_ERROR|RGV587|ERRCODE_NOT_LOGIN|WAIT_DIRECT|punish|TIMEOUT::|接口超时", re.I)),
-    # captcha：中文动作短语保留长页判定；英文泛词下沉短页表
-    ("captcha", re.compile(r"图形验证|输入验证码|请输入验证码|verify_code", re.I)),
+    # captcha：中文动作短语同样下沉短页表（v1.32.2）——正常长页里的评论/反馈/
+    # 登录表单常带"请输入验证码"，曾导致 72KB 正常页被判 captcha、整轮 0 条。
+    # 真正的验证码挑战页几乎都是短页/空壳，与其他泛词同口径（<10KB）足够。
 ]
 
 # 通用词家族（rate_limit/verify/anti_bot）：会出现在正常文章/页脚里
 # （"429 Too Many Requests"教程、"您的IP"页脚、"403 Forbidden"文档）——
 # 只对 <10KB 页面作数（审查 P1：曾全尺寸匹配，硬停了正常内容任务）
 BLOCK_PATTERNS_GATED = [
+    ("captcha", re.compile(r"图形验证|输入验证码|请输入验证码|verify_code", re.I)),
     ("verify", re.compile(r"验证中心|安全验证|滑动验证|点选验证|人机验证|拼图验证|spiderindefence|访问过于频繁|异常访问|请求过于频繁|操作频繁|安全检测", re.I)),
     ("rate_limit", re.compile(r"too many requests|rate limit|频率限制|访问太快|限流", re.I)),
     ("anti_bot", re.compile(r"该ip|您的ip|403 forbidden|forbidden by", re.I)),
