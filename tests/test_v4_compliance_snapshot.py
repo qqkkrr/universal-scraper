@@ -50,6 +50,13 @@ def test_compliance_sensitive_amber_when_fully_controlled():
     assert rep["level"] == "amber" and rep["personal_data"]
 
 
+def test_verify_csv_does_not_crash(tmp_path):
+    p = tmp_path / "r.csv"
+    p.write_text("id,name\n1,A\n2,B\n", encoding="utf-8")
+    rep = verify_file(str(p))
+    assert rep.get("total") == 2, rep
+
+
 def test_verify_arbitrary_json_lists(tmp_path):
     p = tmp_path / "r.json"
     p.write_text(json.dumps({"products": [{"id": 1}, {"id": 2}],

@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import itertools
 import os
 import re
 import signal
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .core import export_rows, log, die, safe_fname, MaxRequestsExceeded
-from .protocols import BlockDetectedError
+from .protocols import BlockDetectedError, RateLimitedError
 from .selectors import jpath, apply_extractor, regex_extract_all
 from .fetchers import HttpFetcher, BrowserScriptFetcher, BrowserFetcher, _resolve_template
 from .log import Logger
@@ -422,6 +423,21 @@ def fetch_detail_row(http, row: Dict[str, Any], detail: Dict[str, Any]) -> Dict[
     html = resp.get("text", "")
     row[detail.get("url_field", "url") + "_final"] = url
     row["detail_status"] = str(resp.get("status"))
+    # v1.33.1：站点用 HTTP 200 + {"code":800} 表示限流/风控（ggzy 实测）。
+    # 配 detail.block_codes 后按限流处理，交 fetch_details 做退避/熔断。
+    _block_codes = detail.get("block_codes") or []
+    if _block_codes:
+        _obj = resp.get("json")
+        if not isinstance(_obj, dict) and str(html).lstrip().startswith("{"):
+            try:
+                _obj = json.loads(html)
+            except Exception:
+                _obj = None
+        _code = _obj.get("code") if isinstance(_obj, dict) else None
+        if _code is not None and str(_code) in {str(c) for c in _block_codes}:
+            row["detail_status"] = f"blocked:code{_code}"
+            row["detail_block_detail"] = str(html)[:120]
+            return row
     # 裁判文书网战训（审查 P0 残留）：详情页的 200 封禁页曾按正常页抽取入库
     # （detail_status="200"、exit 0）——命中即跳过抽取，绝不把封禁页写进数据
     try:
@@ -613,8 +629,35 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
     if middleware is not None:
         http = _MwClient(http, middleware, logger)   # request/response/error 时机接线
 
+    # v1.33.1：详情通道的站点级限流码（HTTP 200 + {"code":800}）退避/熔断。
+    # concurrency>1 时用共享计数，连续 N 次 block code 直接停机，不再硬跑。
+    _block_streak = {"n": 0}
+    _block_lock = threading.Lock()
+    _tripped = {"v": False}
+    _block_codes = detail.get("block_codes") or []
+    _max_blocks = int(detail.get("max_consecutive_blocks") or 8) if _block_codes else 0
+    _block_backoff = float(detail.get("block_backoff") or max(float(interval), 1.0))
+
+    def _trip_error(url: str = "") -> RateLimitedError:
+        return RateLimitedError(
+            url=url, retry_after=_block_backoff, status=800,
+            detail=f"详情连续 {_max_blocks} 次命中限流码 {_block_codes}——已熔断，"
+                   f"请冷却/换出口/降并发后重跑")
+
     def _work(r):
         fetch_detail_row(http, r, detail)
+        st = str(r.get("detail_status") or "")
+        if st.startswith("blocked:code"):
+            with _block_lock:
+                _block_streak["n"] += 1
+                _n = _block_streak["n"]
+                if _max_blocks and _n >= _max_blocks:
+                    _tripped["v"] = True
+            if not _tripped["v"]:
+                time.sleep(_block_backoff)
+        elif st and not st.startswith(("ERR:", "blocked:")):
+            with _block_lock:
+                _block_streak["n"] = 0
         return r
 
     if concurrency <= 1:
@@ -623,6 +666,8 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
                 _work(r)
             except Exception as e:
                 r["detail_status"] = f"ERR:{type(e).__name__}"
+            if _tripped["v"]:
+                raise _trip_error(r.get(detail.get("url_field", "url"), ""))
             if checkpoint and _ck_every > 0 and i % _ck_every == 0:
                 checkpoint.save(rows, done + i, len(rows))
             time.sleep(interval)
@@ -638,6 +683,8 @@ def fetch_details(rows, detail, anti, checkpoint: Optional[Checkpoint] = None, l
                     fut.result()
                 except Exception as e:
                     r["detail_status"] = f"ERR:{type(e).__name__}"
+                if _tripped["v"]:
+                    raise _trip_error(r.get(detail.get("url_field", "url"), ""))
                 if checkpoint and _ck_every > 0 and i % _ck_every == 0:
                     checkpoint.save(rows, done + i, len(rows))
                 time.sleep(interval / concurrency)
@@ -892,18 +939,51 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
 
     iterate = config.get("iterate")
     iterations: List[Dict[str, Any]] = [{}]
+    iterate_vars: List[str] = []
+    var_name = ""
     if iterate:
-        var_name = iterate["var"]
-        iterations = [{var_name: v} for v in iterate["values"]]
-        logger.info(f"迭代 {var_name}: {iterate['values']}")
+        # v1.33.1：支持笛卡尔积（关键词 × 年份），也兼容旧的单变量 var/values
+        _dims = iterate.get("vars")
+        if isinstance(_dims, dict) and _dims:
+            iterate_vars = [str(k) for k, v in _dims.items()
+                            if isinstance(v, (list, tuple)) and v]
+            if len(iterate_vars) != len(_dims):
+                raise ConfigError("iterate.vars", "iterate.vars 的每个维度都必须是非空数组")
+            _lists = [_dims[k] for k in iterate_vars]
+            iterations = [dict(zip(iterate_vars, combo))
+                          for combo in itertools.product(*_lists)]
+            logger.info("迭代 " + " × ".join(f"{k}={_dims[k]}" for k in iterate_vars))
+        else:
+            var_name = iterate["var"]
+            iterate_vars = [var_name]
+            iterations = [{var_name: v} for v in iterate["values"]]
+            logger.info(f"迭代 {var_name}: {iterate['values']}")
+
+    def _iter_name(x: Dict[str, Any]) -> str:
+        vals = [str(x.get(v, "")) for v in iterate_vars if str(x.get(v, ""))]
+        return "_".join(vals) or "default"
+
+    def _iter_label(x: Dict[str, Any]) -> str:
+        labels = (iterate or {}).get("labels") or {}
+        if not labels:
+            return ""
+        parts = []
+        for v in iterate_vars:
+            val = x.get(v)
+            if val is None:
+                continue
+            parts.append(str(labels.get(str(val), val)))
+        return "_".join(parts)
 
     all_rows: List[Dict[str, Any]] = []
     summary: Dict[str, Any] = {}
+    _done_iters: List[str] = []
+    _failed_iters: List[str] = []
     graceful = GracefulExit(None)
 
     for it in iterations:
         ivars = {**vars, **it}
-        it_name = it.get("stage") or (list(it.values())[0] if it else "default")
+        it_name = _iter_name(it)
         # 迭代名用于文件名/检查点：URL 等特殊字符做安全化
         it_name = re.sub(r"[^\w\u4e00-\u9fff-]", "_", str(it_name))
         logger.info(f"===== 迭代: {it or '(默认)'} =====")
@@ -1002,7 +1082,7 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
                         _base_early = safe_fname(_resolve_template(
                             output.get("base_name", safe_fname(name)), ivars))
                         if len(iterations) > 1 and it:
-                            _lab = (iterate.get("labels", {}) or {}).get(str(it.get(var_name))) if iterate else None
+                            _lab = _iter_label(it)
                             _base_early = f"{_base_early}_{_lab or it_name}"
                         try:
                             _paths = export_rows(_partial, out_dir, _base_early,
@@ -1015,7 +1095,7 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
                     raise
                 checkpoint.save(rows_raw, 0, len(rows_raw),
                                 sig=_iter_sig, complete=True)
-        except (KeyboardInterrupt, MaxRequestsExceeded, BlockDetectedError):
+        except (KeyboardInterrupt, MaxRequestsExceeded, BlockDetectedError, RateLimitedError):
             raise
         except Exception as e:
             # 审查修复（P1，R5）：单迭代失败曾中止全部剩余迭代——多阶段配置里
@@ -1025,6 +1105,7 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
             if resume and prev_rows:
                 all_rows.extend(prev_rows)
                 logger.warn(f"迭代 {it_name} 抓取失败——沿用检查点 {len(prev_rows)} 条参与合并导出")
+            _failed_iters.append(it_name)
             logger.error(f"迭代 {it_name} 抓取失败（跳过该迭代，继续其余）: "
                          f"{type(e).__name__}: {str(e)[:140]}")
             continue
@@ -1067,10 +1148,9 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
         for r in rows:
             for k, v in it.items():
                 r[f"iter_{k}"] = v
-            if iterate and iterate.get("labels"):
-                lab = iterate["labels"].get(str(it.get("stage", it.get(var_name))))
-                if lab:
-                    r["iter_label"] = lab
+            _lab = _iter_label(it)
+            if _lab:
+                r["iter_label"] = _lab
             # OCR R131（实战反馈）：行内无 url 字段时曾无条件写 r["url"]=""——
             # 恒空列被 verify 判"死列：抽取链路断裂"。仅在有值时补全绝对地址
             _u = _merge_url(r.get("url") or "", source.get("base_url", ""))
@@ -1175,7 +1255,7 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
                         _base_early = safe_fname(_resolve_template(
                             output.get("base_name", safe_fname(name)), ivars))
                         if len(iterations) > 1 and it:
-                            _lab = (iterate.get("labels", {}) or {}).get(str(it.get(var_name))) if iterate else None
+                            _lab = _iter_label(it)
                             _base_early = f"{_base_early}_{_lab or it_name}"
                         _paths = export_rows(rows, out_dir, _base_early,
                                              formats=output.get("formats") or ["json", "csv", "xlsx"])
@@ -1206,8 +1286,8 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
 
         base = safe_fname(_resolve_template(output.get("base_name", safe_fname(name)), ivars))  # R93/v1.32.2：净化防路径逃逸
         if len(iterations) > 1 and it:
-            lab = iterate.get("labels", {}).get(str(it.get(var_name))) if iterate else None
-            base = f"{base}_{lab or it_name}"
+            _lab = _iter_label(it)
+            base = f"{base}_{_lab or it_name}"
         if rows and not dry_run:
             paths = export_rows(rows, out_dir, base,
                                 formats=output.get("formats") or ["json", "csv", "xlsx"])
@@ -1219,6 +1299,7 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
                 for _k in _pending_keys:
                     seen.mark(_k)
 
+        _done_iters.append(it_name)
         if graceful.stop:
             break
 
@@ -1257,6 +1338,13 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
     if proxy_pool.size:
         logger.info(f"代理池: {proxy_pool.summary()}")
     # NBS 考核战训：0 条必须留证据（此前不落盘不报错、exit 0 假成功）
+    _incomplete: List[str] = []
+    if graceful.stop:
+        _finished = set(_done_iters) | set(_failed_iters)
+        for _it in iterations:
+            _n = re.sub(r"[^\w\u4e00-\u9fff-]", "_", _iter_name(_it))
+            if _n not in _finished:
+                _incomplete.append(_n)
     _nodata = (len(all_rows) == 0 and not dry_run)
     _nodata_written = False
     if _nodata:
@@ -1283,4 +1371,9 @@ def _run_config_impl(config: Dict[str, Any], overrides: Optional[Dict[str, str]]
         pass
     return {"name": name, "total": len(all_rows), "summary": summary,
             "nodata": _nodata, "nodata_evidence_written": _nodata_written,
-            "budget": _rq}
+            "budget": _rq,
+            "iterations_total": len(iterations),
+            "iterations_done": _done_iters,
+            "iterations_failed": _failed_iters,
+            "iterations_incomplete": _incomplete,
+            "stopped": "interrupted" if graceful.stop else ""}

@@ -2872,6 +2872,15 @@ def main() -> int:
                   "——请以 stderr 为封禁证据", file=sys.stderr)
         return 5
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result.get("stopped") == "interrupted":
+        _inc = result.get("iterations_incomplete") or []
+        print("⏸ 采集被中断，未完成迭代: " + (", ".join(_inc) if _inc else "（无）")
+              + "；已完成数据已保存，可用 --resume 续跑", file=sys.stderr)
+        return 130
+    if result.get("iterations_failed"):
+        print("⚠️ 有迭代失败，结果不完整: " + ", ".join(result["iterations_failed"])
+              + "；已完成数据已保存，请修复后重跑该迭代", file=sys.stderr)
+        return 1
     if result.get("nodata"):
         print("⚠️ 0 条记录：nodata.json 已写入输出目录（0 结果不假成功，请先诊断再重试）", file=sys.stderr)
         return 3

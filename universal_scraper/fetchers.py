@@ -299,7 +299,9 @@ class HttpFetcher(BaseFetcher):
         # 模板（sitemap 多种子即触发），翻页 token 永久失效
         _orig = {k: self.source.get(k) for k in ("url", "body", "json_body")}
         try:
-            return self._fetch_list_impl(pagination)
+            _rows = self._fetch_list_impl(pagination)
+            _log_record_dedup(_rows)
+            return _rows
         finally:
             for _k, _v in _orig.items():
                 if _v is not None or _k in self.source:
@@ -720,6 +722,24 @@ class HttpFetcher(BaseFetcher):
         return url or None
 
 
+def _log_record_dedup(records: List[Dict[str, Any]]) -> None:
+    """接口原始行 -> 去重后行数（只记日志，不改数据）。
+
+    实战反馈：ggzy 接口每条公告返回两遍，日志"命中 212 条 / 11 页"与最终
+    "总计 105 条"对不上，像丢数据。把原始/去重口径直接打出来，避免误判。
+    """
+    if not records:
+        return
+    try:
+        uniq = len({json.dumps(r, sort_keys=True, ensure_ascii=False, default=str)
+                    for r in records if isinstance(r, dict)})
+    except Exception:
+        return
+    if uniq < len(records):
+        log(f"  ⚠️ 接口返回 {len(records)} 行 → 去重后 {uniq} 条"
+            f"（重复 {len(records) - uniq}；total/页数可能按原始行计）", "WARN")
+
+
 class BrowserScriptFetcher(BaseFetcher):
     """浏览器桥取数：config 里 source.bridge 指向一个 Node 脚本，按 JSONL 协议输出记录。"""
 
@@ -748,6 +768,18 @@ class BrowserScriptFetcher(BaseFetcher):
                 die(f"触发验证码: {obj.get('message')}（图片: {obj.get('imageFile')}）")
             elif t == "error":
                 die(f"桥错误: {obj.get('message')}")
+        try:
+            _total = int(meta.get("total") or 0)
+        except (TypeError, ValueError):
+            _total = 0
+        _cap = int(self.source.get("total_warn_at", 1000) or 0)
+        if _cap and _total >= _cap:
+            log(f"  ⚠️ 接口 total={_total} 已达/超过 {_cap}：疑似接口硬上限（如 1000 行）"
+                "——若源站实际更多，请缩小时间窗/拆分关键词后重跑", "WARN")
+        if _total and len(records) < _total:
+            log(f"  ⚠️ 实收 {len(records)} 行 < 接口 total={_total}：翻页可能被截断/提前结束"
+                "（对照 max_pages 与站点上限）", "WARN")
+        _log_record_dedup(records)
         return records
 
     def _run(self, bridge: Path, params: Dict[str, Any]) -> Iterator[Dict[str, Any]]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -345,12 +346,26 @@ def validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(it, dict):
             raise ConfigError("iterate", f"iterate 应为 dict（{{var, values}}），实际 {type(it).__name__}",
                               '例如: {"var": "城市", "values": ["北京", "上海"]}')
-        if not isinstance(it.get("var"), str) or not it.get("var"):
-            raise ConfigError("iterate.var", "iterate.var 应为非空字符串（迭代变量名）",
-                              '例如: {"var": "城市", "values": ["北京"]}')
-        if not isinstance(it.get("values"), list) or not it.get("values"):
-            raise ConfigError("iterate.values", "iterate.values 应为非空数组",
-                              '例如: {"var": "城市", "values": ["北京", "上海"]}')
+        _dims = it.get("vars")
+        if _dims is not None:
+            # v1.33.1：笛卡尔积维度（关键词 × 年份）——每个维度都必须是非空数组
+            if not isinstance(_dims, dict) or not _dims:
+                raise ConfigError("iterate.vars", "iterate.vars 应为非空 dict（维度名→取值数组）",
+                                  '例如: {"vars": {"关键词": ["智算中心"], "年份": [2024, 2025]}}')
+            for _vk, _vv in _dims.items():
+                if not str(_vk).strip():
+                    raise ConfigError("iterate.vars", "iterate.vars 的维度名不能为空")
+                if not isinstance(_vv, list) or not _vv:
+                    raise ConfigError(f"iterate.vars.{_vk}",
+                                      "每个迭代维度都必须是非空数组",
+                                      '例如: "年份": [2024, 2025]')
+        else:
+            if not isinstance(it.get("var"), str) or not it.get("var"):
+                raise ConfigError("iterate.var", "iterate.var 应为非空字符串（迭代变量名）",
+                                  '例如: {"var": "城市", "values": ["北京"]}')
+            if not isinstance(it.get("values"), list) or not it.get("values"):
+                raise ConfigError("iterate.values", "iterate.values 应为非空数组",
+                                  '例如: {"var": "城市", "values": ["北京", "上海"]}')
         if it.get("labels") is not None and not isinstance(it.get("labels"), dict):
             raise ConfigError("iterate.labels", "iterate.labels 应为 dict（取值→标签名）",
                               '例如: {"labels": {"北京": "京城"}}')
@@ -537,6 +552,23 @@ def collect_warnings(cfg: Dict[str, Any]) -> "List[str]":
         if _k not in _KNOWN_PAG:
             warns.append(f"未知分页键 '{_k}'（拼写错误？相近键: "
                          f"{[x for x in _KNOWN_PAG if x[:1] == str(_k)[:1]][:3]}）——该键将被忽略")
+    # v1.33.1：日期窗口预检（ggzy 战训：结束日期晚于平台当日会返回 0 条/报错）
+    _vars = cfg.get("vars") or {}
+    if isinstance(_vars, dict):
+        _b, _e = str(_vars.get("begin") or "").strip(), str(_vars.get("end") or "").strip()
+        def _d(s: str):
+            try:
+                _y, _m, _dd = s.split("-")
+                return date(int(_y), int(_m), int(_dd))
+            except Exception:
+                return None
+        _bd, _ed = _d(_b), _d(_e)
+        if _bd and _ed:
+            if _bd > _ed:
+                warns.append(f"日期窗口倒置：begin={_b} 晚于 end={_e}——请检查 vars.begin/end")
+            if _ed > date.today():
+                warns.append(f"结束日期 {_e} 晚于今天 {date.today().isoformat()}——"
+                             "平台通常不返回未来数据，可能 0 条；请把 end 调到今天或更早")
     # 字段 spec 用了 v2 不支持的键（regex/default 等）：不报错，但要明确告警
     for _fn, _fs in ((src.get("fields") or {}) if isinstance(src.get("fields"), dict) else {}).items():
         if isinstance(_fs, dict) and not any(_fs.get(_k) for _k in

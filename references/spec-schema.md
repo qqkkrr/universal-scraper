@@ -93,6 +93,16 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 `vars.省份` 是默认值；iterate 会逐个覆盖它，source 的 url/body/json_body 用
 `{{省份}}` 引用。`labels` 可选（`{"北京": "beijing"}` 映射成英文参数值）。
 
+**多变量笛卡尔积（关键词 × 年份）**：
+
+~~~json
+{"iterate": {"vars": {"关键词": ["智算中心", "算力"], "年份": [2024, 2025]}},
+ "vars": {"关键词": "智算中心", "年份": 2024}}
+~~~
+
+生成 2×2=4 轮；行内自动带 `iter_关键词` / `iter_年份`，导出按组合分文件并合并。
+旧写法 `{"var": "...", "values": [...]}` 仍兼容。
+
 **browser** — JS 渲染/交互（L2/L3）：
 
 ```json
@@ -157,8 +167,11 @@ json_body 里的 `{{page}}`/`{{offset}}` 每页自动替换（dict/list 同样�
 {
   "type": "browser_script",
   "bridge": "${SKILL_DIR}/scripts/ggzy_bridge.cjs",
-  "bridge_params": {"keyword": "{{keyword}}"}
+  "bridge_params": {"keyword": "{{keyword}}"},
+  "total_warn_at": 1000
 }
+
+`total_warn_at`：接口 total 达到该值时告警“疑似硬上限（如 1000 行）”，提示缩小时间窗。
 ```
 
 ## pagination（外层，http 类）
@@ -272,6 +285,14 @@ browser 型 `source.fields` 支持**字符串简写**：`{"标题": "h2.title"}`
 ```
 
 相对链接用 `url_transform` 补前缀；`max_pages: 0` 表示全部。
+
+**200 伪装限流码**（ggzy 战训：`{"code":800}` 仍返回 HTTP 200）：配
+`block_codes` 后按限流处理，`block_backoff` 退避，连续 `max_consecutive_blocks`
+次即熔断（默认 8）：
+
+~~~json
+{"block_codes": [800], "block_backoff": 10, "max_consecutive_blocks": 6}
+~~~
 
 **详情支持 POST + JSON 网关**（小米有品战例：评分/规格在 POST 接口里）：
 `method: "POST"` + `json_body`（`{列表行字段}` 插值）+ `type: "http_json"`

@@ -135,7 +135,7 @@ def verify_rows(rows: List[Dict[str, Any]], cfg: Optional[Dict[str, Any]] = None
             if declared_empty:
                 note += "（已声明源站为空，不判死列）"
             elif dead_col:
-                note += "（死列：抽取链路断裂）"
+                note += "（死列：可能抽取链路断裂，也可能源站本就不提供——确认后用 --expect-empty 豁免）"
             elif not is_key:
                 note += "（非关键字段，仅提示）"
             report["checks"].append({
@@ -432,6 +432,7 @@ def verify_file(path: str, network: bool = False, data_key: str = "",
     fp = Path(path)
     if not fp.exists():
         return {"ok": False, "error": f"文件不存在: {path}"}
+    _detected_key = ""
     if fp.suffix.lower() == ".csv":
         # 审查修复 P2：JSON 存成 .csv 后缀的文件曾假通过（逗号少的 JSON 解析成
         # 垃圾表头 100% 填充）——首字符嗅探直接拦下
@@ -464,7 +465,6 @@ def verify_file(path: str, network: bool = False, data_key: str = "",
             except json.JSONDecodeError as e2:
                 return {"ok": False, "error": f"JSON/JSONL 均解析失败（可能被截断）: {e2}"}
         # 智联战例：支持 dict 包装（{"data": [...]} 等）——data_key 显式指定或自动探测常用键
-        _detected_key = ""
         if isinstance(data, dict):
             if data_key:
                 _val = _dig_json(data, data_key)

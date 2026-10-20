@@ -258,6 +258,96 @@ def test_v3_budget_requeues_unfinished_url(tmp_path, monkeypatch):
         _stop(srv)
 
 
+# ---------------------------------------------------------------- 日期窗口预检
+
+def test_config_date_window_warnings():
+    from universal_scraper.config import collect_warnings
+    cfg = {"name": "d", "source": {"type": "http_html", "url": "https://e/"},
+           "vars": {"begin": "2099-01-01", "end": "2099-12-31"}}
+    warns = collect_warnings(cfg)
+    assert any("晚于今天" in w for w in warns), warns
+    cfg["vars"] = {"begin": "2024-12-31", "end": "2024-01-01"}
+    warns = collect_warnings(cfg)
+    assert any("倒置" in w for w in warns), warns
+
+
+# ---------------------------------------------------------------- 详情限流码
+
+def test_detail_block_code_marks_status(monkeypatch):
+    from universal_scraper.engine import fetch_detail_row
+
+    class FakeHTTP:
+        def get(self, url, **kw):
+            return {"status": 200, "text": '{"code":800,"msg":"busy"}',
+                    "json": {"code": 800, "msg": "busy"}, "headers": {}}
+
+    row = {"url": "https://example.com/d/1"}
+    fetch_detail_row(FakeHTTP(), row, {"block_codes": [800]})
+    assert row["detail_status"] == "blocked:code800"
+
+
+def test_detail_block_code_circuit_breaker(monkeypatch):
+    monkeypatch.setenv("US_ALLOW_PRIVATE", "1")
+    from universal_scraper import core as _core
+    from universal_scraper import engine as _engine
+
+    class FakeHTTP:
+        def get(self, url, **kw):
+            return {"status": 200, "text": '{"code":800}',
+                    "json": {"code": 800}, "headers": {}}
+
+    monkeypatch.setattr(_core, "make_http_client", lambda cfg: FakeHTTP())
+    rows = [{"url": f"https://example.com/d/{i}"} for i in range(5)]
+    with pytest.raises(_engine.RateLimitedError):
+        _engine.fetch_details(rows, {"enabled": True, "block_codes": [800],
+                                     "max_consecutive_blocks": 3,
+                                     "concurrency": 1, "interval": 0,
+                                     "extract": []}, {})
+    assert any(str(r.get("detail_status", "")).startswith("blocked:code800") for r in rows)
+
+
+# ---------------------------------------------------------------- iterate 笛卡尔积
+
+def test_iterate_cartesian_product(tmp_path, monkeypatch):
+    monkeypatch.setenv("US_ALLOW_PRIVATE", "1")
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = (f"<html><body><div class='i'><span class='t'>{self.path}</span></div>"
+                    "</body></html>").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv, port = _serve(H)
+    cfg = {
+        "name": "cart",
+        "iterate": {"vars": {"kw": ["a", "b"], "year": [2024, 2025]}},
+        "source": {"type": "http_html", "url": f"http://127.0.0.1:{port}/{{{{kw}}}}/{{{{year}}}}",
+                   "row_css": "div.i", "fields": {"t": {"css": "span.t"}}},
+        "pagination": {"strategy": "none"},
+        "record": {"fields": {"t": {"from": "t"}}},
+        "output": {"dir": str(tmp_path / "out"), "base_name": "q", "formats": ["json"]},
+        "anti_bot": {"min_interval": 0, "max_retries": 1, "http_backend": "curl_cffi"},
+    }
+    from universal_scraper.engine import run_config
+    try:
+        res = run_config(cfg)
+        assert res["total"] == 4 and not res["iterations_failed"]
+        assert len(res["iterations_done"]) == 4 and res["iterations_total"] == 4
+        rows = json.loads((tmp_path / "out" / "q_合并.json").read_text(encoding="utf-8"))
+        assert len(rows) == 4
+        assert {r["iter_kw"] for r in rows} == {"a", "b"}
+        assert {r["iter_year"] for r in rows} == {2024, 2025}
+    finally:
+        _stop(srv)
+
+
 # ---------------------------------------------------------------- 导出原子性
 
 def test_export_rows_atomic_and_valid(tmp_path):

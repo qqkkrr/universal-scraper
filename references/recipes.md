@@ -1435,3 +1435,18 @@ HTTP 200 **不代表成功**。快手 `/rest/v/search/*` 限流时 `{"result":2,
 
 **组合动线**：`chain` 包住多步采集 → 每步跑完 `health record` → 收尾 `health check` 当人工复核闸门。
 
+
+## R50 · 全国公共资源交易平台（ggzy）搜索 + 正文（2026-10 实战，85 查询 / 570 页）
+
+入口不是旧 searchtj.jsp，而是 history/dealList.html；站点 WAF 对非浏览器 UA 直接 404。
+现成资产：configs/ggzy_datacenter_2025-01.json + scripts/ggzy_bridge.cjs（Vue 实例设
+myFindTxt/timeBegin/timeEnd 后调 getTradList 分页）。要点：
+
+1. **结束日期不能晚于平台当日**：否则 0 条或报错；validate 现在会对 vars.end 晚于今天告警。
+2. **接口硬上限约 1000 行**：total 触顶时拆月/拆关键词；source.total_warn_at 会告警。
+3. **每条公告可能重复返回两次**：日志看“接口返回 R 行 → 去重后 U 条”，不要拿 total 当去重后条数。
+4. **code:800 是 200 伪装的限流**：detail 配 block_codes/block_backoff/max_consecutive_blocks，
+   连续命中即熔断，不要硬跑。
+5. **多关键词 × 多年份**：iterate.vars 支持笛卡尔积，避免外层反复起浏览器会话。
+6. **正文补采后 verify --file 复核**：CSV 路径已修；源站本就不提供的城市/行业/截止时间列，
+   用 --expect-empty 声明，不要当抽取断裂。
