@@ -2573,6 +2573,13 @@ def main() -> int:
         if result.get("error"):
             print(f"❌ {result['error']}", file=sys.stderr)
             return 1
+        if args.screenshot:
+            if result.get("screenshot"):
+                print(f"🖼️ 截图已保存: {result['screenshot']}", file=sys.stderr)
+            else:
+                print(f"⚠️ {result.get('screenshot_error') or '截图未生成'}"
+                      "——截图是本次请求的显式产物，按失败处理", file=sys.stderr)
+                return 1
         if args.capture:
             if result.get("capture_file"):
                 # 实战反馈六#3（知乎）：捕获文件存在曾即报成功——实际可能只有

@@ -10,8 +10,8 @@ description: >
   【AI Agent】先读 references/agent-router.md（≤1 页路由 + 合规预检）；命令模板看
   references/agent-quickref.md；本文件是详细教程，三者互补。
 metadata:
-  version: "1.33.2"
-  source_project: "universal-scraper (多轮审计 + 10 个复杂场景回归, 734 测试)"
+  version: "1.33.3"
+  source_project: "universal-scraper (多轮审计 + amap 判型/取证修复, 738 测试)"
 ---
 
 # 万能爬虫 · 引导式采集技能

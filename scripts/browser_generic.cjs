@@ -457,7 +457,7 @@ function centerCaptcha(page) {
         const m = t.match(/^\s*[\w$]+\(([\s\S]*)\)\s*;?\s*$/);
         if (m) { try { return { json: JSON.parse(m[1]) }; } catch (e2) {} }
         try { return { json: JSON.parse(t) }; } catch (e2) {}
-        return { raw: t.slice(0, 4000) };
+        return { raw: t.slice(0, 12000) };
       } catch (e) { return {}; }
     }
     // 上下文级捕获：附加 CDP 时同一 Chrome 的既有标签页 XHR 也会录到（智联战例——
@@ -522,8 +522,20 @@ function centerCaptcha(page) {
       // 保留 application/javascript：JSONP 接口用这个 content-type
       const _isStaticNoise = /\.(js|css|png|jpe?g|gif|svg|woff2?|ttf|ico|map)(\?|$)/i.test(u)
         || ctAll.includes("text/css") || ctAll.includes("image/");
+      // 高德实战：XHR 返回 84KB text/html punish 壳时，只按 JSON content-type
+      // 过滤会把"唯一能证明风控壳"的响应体丢掉。XHR/fetch 即使非 JSON 也落 raw。
+      let _rtype = "";
+      try { _rtype = res.request().resourceType(); } catch (e) {}
+      const _isXhr = _rtype === "xhr" || _rtype === "fetch";
+      // 只读可结束的文本体：SSE/二进制/超大响应读 text() 会挂住或吃内存。
+      const _ctBodyOK = /json|javascript|text\/|xml/i.test(ctAll)
+        && !/event-stream|octet-stream|protobuf|grpc/i.test(ctAll);
+      const _clen = parseInt(res.headers()["content-length"] || "0", 10) || 0;
+      const _sizeOK = !_clen || _clen <= 2_000_000;
       if (captureAll && res.status() < 400 && !u.endsWith(".js") && !u.includes("/static/")
-          && !u.includes("/assets/") && (ctAll.includes("json") || ctAll.includes("javascript"))
+          && !u.includes("/assets/")
+          && (ctAll.includes("json") || ctAll.includes("javascript")
+              || (_isXhr && _ctBodyOK && _sizeOK))
           && !_isStaticNoise) {
         if (capturedAll.length < 2000) {
           try {
@@ -542,7 +554,9 @@ function centerCaptcha(page) {
               req_ct = hh["content-type"] || "";
               if (hh && Object.keys(hh).length) req_headers = hh;
             } catch (e) {}
-            const rec = { url: u, method, post_data: post_data || undefined,
+            const rec = { url: u, method, status: res.status(),
+                          content_type: ctAll || undefined,
+                          post_data: post_data || undefined,
                           request_content_type: req_ct || undefined };
             if (req_headers) rec.request_headers = req_headers;
             capturedAll.push(r2.json !== undefined

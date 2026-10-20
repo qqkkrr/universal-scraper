@@ -1450,3 +1450,32 @@ myFindTxt/timeBegin/timeEnd 后调 getTradList 分页）。要点：
 5. **多关键词 × 多年份**：iterate.vars 支持笛卡尔积，避免外层反复起浏览器会话。
 6. **正文补采后 verify --file 复核**：CSV 路径已修；源站本就不提供的城市/行业/截止时间列，
    用 --expect-empty 声明，不要当抽取断裂。
+
+## R51 · 高德地图 POI（amap.com）批量采集：阿里 punish 风控 + 600/800 条上限（2026-10 上海充电站实战，7156 条）
+
+**站点指纹**：`/service/poiInfo` 裸请求返回 84KB 的阿里 punish 壳（`punish-component`、
+`AWS C/CAPTCHA/awsc.js`、`bsop-static/sufei-punish/.../htmltocanvas.min.js`），状态码仍是
+200——`diagnose` 会误判"正常响应"。随后请求转 419 空体，或串起
+`/service/poiInfo/_____tmd_____/punish|slide|report`（x5sec 滑块）。
+
+**打法（合规版：不逆向 WASM/JSVMP/设备指纹，不自动解滑块）**
+
+1. `open-debug-chrome.sh` 弹有头真 Chrome（持久 profile）→ 打开
+   `https://www.amap.com/search?query=<词>&city=<adcode>`。首屏常直接出数据。
+2. **关键：出数据后不要再 reload、不要换 tab**。在页内用 `page.evaluate` 同源 fetch
+   （带 `credentials:'include'`，不造任何签名）才是正路；裸 curl / 裸 XHR 必 419。
+   tab 停在 `poi_detail` 这类重 SSR 页时 fetch 会慢到 15s——先 `goto` 回 search 页。
+3. 列表接口：`/service/poiInfo?query_type=TQUERY&pagesize=30&pagenum=N&qii=true&cluster_state=5
+   &need_utd=true&utd_sceneid=1000&div=PC1000&addr_poi_merge=true&is_classify=true&zoom=12
+   &city=<adcode>&keywords=<词>`；详情用 `query_type=IDQ&id=<poiid>`（是 `id` 不是 `poiid`，
+   给 `poiid` 返回 `参数错误`）。
+4. **上限**：市级检索 total 触 **600**（品牌词可达 800）；`pagesize` 最大 30（给 100/200 也只回
+   30 条）；`geoobj` 参数**不生效**（不按 bbox 过滤），别用网格切分浪费时间；
+   `custom=brand_charge:xx` 也无效。**有效切分 = 按 adcode 逐区检索**；区内再深要靠
+   `keywords=<品牌>+充电站` 关键词切分（实测浦东「充电站 特来电」= 223 条）。
+5. **网页端没有实时数据**：桩数量分项、空闲数、电价/服务费/峰谷、停车费、雨棚/卫生间等
+   一律不返回（只在 APP 端加密通道）。别把"源站没有"误报成"抽取链路断裂"——
+   `verify --expect-empty` 声明后即算合格交付。
+6. 电话/营业时间只在详情页（`/ssr/search/poi_detail?...&id=<poiid>`）的渲染文本里，必须
+   `goto` 真实导航（页内 fetch 拿到的是 SPA 壳），约 4s/条，全量 7000 条约 8 小时。
+7. 采样记录：16 区 261 页 ≈ 7,156 条唯一 POI，请求间隔 1.0–1.9s、全程串行、零封禁。

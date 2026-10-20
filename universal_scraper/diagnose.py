@@ -69,6 +69,26 @@ BLOCK_SIGNATURES: List[Dict[str, Any]] = [
         "prescription": "L1 curl_cffi(impersonate=chrome) 换指纹重试 → 不通降速/换出口",
         "burns_budget": True,
     },
+    {
+        "type": "aliyun_punish",
+        "name": "阿里系 punish / x5sec 行为风控",
+        "status": (200, 403, 412, 419),
+        # 高德 amap 实战（2026-10）：/service/poiInfo 裸请求返回 84KB punish 壳，
+        # 状态仍是 200；只按体积/关键词判会落到“正常响应”。这些指纹来自真实响应。
+        "patterns": [
+            r"punish-component",
+            r"suifei-punish",
+            r"htmltocanvas\.min\.js",
+            r"awsc\.js",
+            r"/_____tmd_____/",
+        ],
+        "require_any": 1,
+        "evidence_hint": "阿里 punish/x5sec 壳（可能 200 大体积；随后接口 419 空体或滑块）",
+        "prescription": ("有头真 Chrome + 持久 profile；滑块只由用户本人完成，"
+                         "不自动解、不伪造指纹；出数据后少 reload、降速串行；"
+                         "若接口 419，回页面重建会话后重试"),
+        "burns_budget": False,
+    },
 ]
 
 # 通用 JS 壳特征（200 状态 + 极短 body 时才参与判定，避免误伤正常页）。
@@ -141,6 +161,19 @@ def classify_block(status: int, body_text: str, headers: Optional[Dict[str, str]
                 "prescription": sig["prescription"],
                 "burns_budget": bool(sig["burns_budget"]),
             }
+
+    # 419：会话/风控令牌失效（高德 amap 实测：200→419 空体）。重试无意义，
+    # 必须回页面重建会话；不能归为“正常响应”。
+    if status == 419:
+        return {
+            "is_block": True,
+            "type": "session_expired",
+            "name": "419 会话/风控令牌失效",
+            "evidence": f"HTTP 419（body {len(body)}B）",
+            "prescription": ("不要盲目重试；回页面重建会话（用户本人过滑块/登录），"
+                             "确认同源请求恢复正常后再降速继续"),
+            "burns_budget": False,
+        }
 
     # 强挑战特征不受 <4096 门槛限制（R27 实战：data.stats.gov.cn 限流挑战壳
     # 是 38KB 的混淆 JS 页）。审查修复 P1：先剥离 <noscript>/<script> 再匹配——

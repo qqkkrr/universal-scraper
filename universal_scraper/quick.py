@@ -35,6 +35,10 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
     - browser=True : 走浏览器桥（JS 渲染 / SPA / 需要动作链的页面）
     """
     result: Dict[str, Any] = {"url": url, "status": 0, "text": "", "error": ""}
+    if screenshot:
+        # 浏览器桥以 skill 目录为 cwd 执行；相对路径会落到 skill 目录而不是调用方
+        # cwd（高德实战：--screenshot recon.png 提示成功但当前目录没有文件）。
+        screenshot = str(Path(screenshot).expanduser().resolve())
     if screenshot and not browser:
         browser = True  # 截图需要浏览器渲染
     if capture and not browser:
@@ -179,6 +183,11 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
                         _dst = Path(capture)
                         _dst.parent.mkdir(parents=True, exist_ok=True)
                         _sh.copy2(_cap_src, _dst)
+                        try:
+                            import os as _os2
+                            _os2.chmod(_dst, 0o600)
+                        except OSError:
+                            pass
                         result["capture_file"] = str(_dst)
                         # 审查十五轮（实战反馈猫眼）：同成功路径——显式打印绝对路径
                         print(f"📁 capture 已保存到: {_dst}")
@@ -198,6 +207,11 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
                     _dst = Path(capture)
                     _dst.parent.mkdir(parents=True, exist_ok=True)
                     _sh.copy2(_cap_src, _dst)
+                    try:
+                        import os as _os2
+                        _os2.chmod(_dst, 0o600)
+                    except OSError:
+                        pass
                     result["capture_file"] = str(_dst)
                     # 审查十五轮（实战反馈猫眼，用户实测复现）：保存路径曾只在
                     # 移动端链路的日志出现、PC 端静默——复制点统一 stdout 显式
@@ -251,7 +265,10 @@ def fetch_url(url: str, browser: bool = False, selector: Optional[str] = None,
         from .queue import extract_links
         result["links"] = extract_links(text, url, links_allow, links_deny)
     if screenshot:
-        result["screenshot"] = screenshot if Path(screenshot).exists() else None
+        _sp = Path(screenshot)
+        result["screenshot"] = str(_sp) if _sp.exists() else None
+        if not _sp.exists():
+            result["screenshot_error"] = f"截图未生成: {_sp}"
     return result
 
 
