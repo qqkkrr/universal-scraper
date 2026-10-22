@@ -8,7 +8,7 @@
 
 方式二：整包拷贝（推荐）
   1. 把整个 universal-scraper 文件夹压缩发给对方
-  2. 对方先双击「安装依赖.command」，再双击「启动工具.command」
+  2. 对方先双击「scripts/launchers/安装依赖.command」，再双击「scripts/launchers/启动工具.command」
   3. 浏览器自动打开 http://127.0.0.1:8642
 
 方式三：托管到云端（需要账号）

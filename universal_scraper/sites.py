@@ -1159,7 +1159,7 @@ def match_taobao(url: str) -> bool:
 def _taobao_run(url: str, cookie: str = "", proxy: Optional[str] = None,
                 limit: int = 20) -> List[Dict[str, Any]]:
     """淘宝/天猫精配：优先走快引擎（店铺移动端接口 / MTOP 搜索 / CDP 并行详情），
-    失败时兜底旧桥。前提：先双击「启动淘宝调试Chrome.command」并登录淘宝一次。"""
+    失败时兜底旧桥。前提：先双击「scripts/launchers/启动淘宝调试Chrome.command」并登录淘宝一次。"""
     from pathlib import Path as _P
     from urllib.parse import urlparse as _up, parse_qs as _pq
     import subprocess, os, sys

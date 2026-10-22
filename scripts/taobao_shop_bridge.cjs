@@ -133,7 +133,7 @@ async function main() {
   try {
     browser = await chromium.connectOverCDP(cdp);
   } catch (e) {
-    out({ type: "error", message: "无法连接 CDP " + cdp + "：" + (e.message||e) + "（请先双击「启动淘宝调试Chrome.command」）" });
+    out({ type: "error", message: "无法连接 CDP " + cdp + "：" + (e.message||e) + "（请先双击「scripts/launchers/启动淘宝调试Chrome.command」）" });
     process.exit(1);
   }
   const ctx = browser.contexts()[0] || await browser.newContext();

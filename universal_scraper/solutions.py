@@ -84,7 +84,7 @@ SOLUTIONS: Dict[str, Dict[str, Any]] = {
         "title": "🔐 需要登录才能抓取",
         "reason": "目标网站要求登录（登录墙 / 会话过期）。",
         "steps": [
-            "双击工具目录里的「启动淘宝调试Chrome.command」，打开调试 Chrome",
+            "双击工具目录里的「scripts/launchers/启动淘宝调试Chrome.command」，打开调试 Chrome",
             "在调试 Chrome 里手动登录目标网站（用小号，别用主账号）",
             "回到 WebUI，用「浏览器模式」重跑任务（会自动复用登录会话）",
             "如果是大众点评这类站：普通浏览器登录 → F12 → 网络 → 复制 Cookie → 粘贴到 WebUI 的 Cookie 框",
@@ -123,7 +123,7 @@ SOLUTIONS: Dict[str, Dict[str, Any]] = {
             "若提示『请求被阻断』：按 IP 风控方案处理（手机热点测试 → 住宅代理）",
             "大众点评/淘宝类：Cookie 直抓或调试 Chrome 登录（见手册第三章）",
         ],
-        "resources": "见《使用者解决方案手册》第三、四、五章",
+        "resources": "见docs/zh/docs/zh/使用者解决方案手册.md第三、四、五章",
     },
     "attachment_failed": {
         "title": "📎 附件（PDF/Excel/Word）解析失败",
@@ -184,7 +184,7 @@ SOLUTIONS: Dict[str, Dict[str, Any]] = {
         "steps": [
             "把上面红色错误信息完整复制发给我（Codex），我帮你定位",
             "同时告诉我：目标网址、是否登录过、用的什么网络",
-            "常见兜底：先按《使用者解决方案手册》第七节自查表逐条排查",
+            "常见兜底：先按docs/zh/docs/zh/使用者解决方案手册.md第七节自查表逐条排查",
         ],
         "resources": "无需付费",
     },

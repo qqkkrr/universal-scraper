@@ -62,7 +62,7 @@ def dump_cookies(cdp: str) -> list:
                        env=env, timeout=60)
     if p.returncode != 0 or not p.stdout.strip():
         raise RuntimeError("从 CDP 导出 cookie 失败：" + (p.stderr or p.stdout or "无输出")[-200:]
-                           + "（请先双击「启动淘宝调试Chrome.command」并登录淘宝一次）")
+                           + "（请先双击「scripts/launchers/启动淘宝调试Chrome.command」并登录淘宝一次）")
     try:
         return json.loads(p.stdout.strip().splitlines()[-1])
     except Exception as e:
